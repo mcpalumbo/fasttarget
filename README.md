@@ -2,33 +2,30 @@
 
 ## Configuration Setup
 
-
 ### Getting Started
 
-To begin, ensure that you have the latest version of the repository. You can do this by either downloading the repository or running a `git pull` if you've already cloned it. Then, navigate into the repository folder:
+To begin, make sure you have the latest version of the repository. You can do this by either downloading the repository or running a `git pull` if you have already cloned it. Then, navigate to the repository folder:
 
 ```bash
 git clone git@github.com:mcpalumbo/fasttarget.git
 cd fasttarget
 ```
 
-### Conda Environment Setup and Docker images
+### Conda Environment Setup and Docker Images
 
-To set up the conda environment for this project, follow the steps below.
-
-Use the provided environment.yml file to create an environment with all the required dependencies:
+To set up the conda environment for this project, follow these steps:
 
 1. **Create the conda environment:**
-    ```bash
-    conda env create -f requirements.yml
-    ```
+   ```bash
+   conda env create -f requirements.yml
+   ```
 
-After the environment is successfully created, activate it:
+After successfully creating the environment, activate it:
 
 2. **Activate the conda environment:**
-    ```bash
-    conda activate fasttarget
-    ```
+   ```bash
+   conda activate fasttarget
+   ```
 
 This project requires the use of Docker images to run specific bioinformatics tools. To download these images, execute the following command:
 
@@ -42,41 +39,45 @@ To set up Docker so that `sudo` is not required, follow these steps:
 
 1. **Create the Docker group** (if it doesn't already exist):
 
-    ```bash
-    sudo groupadd docker
-    ```
+   ```bash
+   sudo groupadd docker
+   ```
 
 2. **Add your user to the Docker group**:
    
-    Replace `your-username` with your actual username:
+   Replace `your-username` with your actual username:
 
-    ```bash
-    sudo usermod -aG docker your-username
-    ```
+   ```bash
+   sudo usermod -aG docker your-username
+   ```
 
 3. **Log out and log back in** for the changes to take effect.
 
-After completing these steps, you'll be able to run Docker commands without needing to prepend `sudo`.
+After completing these steps, you will be able to run Docker commands without needing to prepend `sudo`.
 
-### Test case
+### Test Case
 
 To test the pipeline, we provide the small genome of *Mycoplasma pneumoniae*.
 This dataset includes the GenBank (GBK) file, the proteome ID for structural data, and the SBML file for metabolism analysis. 
 You can find the test dataset in the `organism/test` folder.
 
-1. **To run the pipeline with the test dataset**
-    ```bash
-    python tests.py
-    ```
+1. **Run the pipeline with the test dataset:**
+   ```bash
+      python tests.py
+      ```
+
+      #### Example Files
+
+      In the `organism/test` folder, you can find example files that are used in this pipeline. These files include the GenBank (GBK) file, the SBML file for metabolism analysis, and others. These examples can serve as a reference for setting up your own dataset.
 
 
 ### Editing the `config.yml` File
 
-The `config.yml` file is the central configuration file for this repository. It allows you to specify various settings related to your organism, CPU usage, structural data, metabolism, core genome analysis, offtarget analysis, DEG (Database of Essential Genes) analysis, localization, and metadata. Below are the steps to correctly fill out this file:
+The `config.yml` file is the central configuration file for this repository. It allows you to specify various settings related to your organism, CPU usage, structural data, metabolism, core genome analysis, offtarget analysis, DEG (Database of Essential Genes) analysis, localization, and metadata. Follow these steps to correctly fill out this file:
 
 1. **Organism Information:**
    - `organism.name`: Enter a short alias/name for your genome without spaces. Example: `PAO`.
-   - `organism.tax_id`: Fill with the number of NCBI Taxonomy ID of the specie of your organism. Example: 287 for Pseudomonas aeruginosa. It is used to obtain the genomes to calculate the core genome.
+   - `organism.tax_id`: Fill in the NCBI Taxonomy ID of your organism's species. Example: 287 for Pseudomonas aeruginosa. This is used to obtain the genomes for calculating the core genome.
    - `organism.gbk_file`: Provide the path to the GenBank (GBK) file of your genome.
 
 2. **CPU Usage Preferences:**
@@ -94,6 +95,8 @@ The `config.yml` file is the central configuration file for this repository. It 
 5. **Metabolism:**
    - `metabolism`: Set to `True` if metabolic data is to be analyzed; otherwise, set to `False`.
    - Provide paths to your SBML file, chokepoint file, and smarttable file if metabolism is enabled.
+
+   **Note:** To get help on how to generate these files, please read the tutorials in the `tutorial` folder.
 
 6. **Offtarget Analysis:**
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
@@ -118,7 +121,7 @@ After editing the `config.yml` file, you can use the `configuration.py` script t
 #### Steps:
 
 1. **Run the Configuration Script:**
-   - In your terminal, in the repo directory you can find the file `configuration.py`. Run with the following command:
+   - In your terminal, navigate to the repository directory and run the following command:
      ```bash
      python configuration.py
      ```
@@ -129,7 +132,6 @@ After editing the `config.yml` file, you can use the `configuration.py` script t
 3. **View the Loaded Configuration:**
    - After validation, the script will print the loaded configuration details, allowing you to verify that everything is set up correctly.
 
-
 ### Running the FastTarget Pipeline
 
 Once you have set up the configuration file, you can run the FastTarget pipeline using the `fasttarget.py` script.
@@ -137,8 +139,27 @@ Once you have set up the configuration file, you can run the FastTarget pipeline
 #### Steps:
 
 1. **Run the FastTarget Script:**
-   - In your terminal, run the main script with following command:
+   - In your terminal, navigate to the repository directory and run the following command:
      ```bash
      python fasttarget.py
      ```
 
+The results are stored in a file called `results_table.tsv` in the folder of your organism. This file contains the following columns:
+
+- `protein_id`: Protein ID.
+- `protein_name`: Protein name.
+- `localization`: Localization of the protein.
+- `essential`: Essentiality of the protein.
+- `offtarget_human`: Human offtarget score.
+- `offtarget_microbiome`: Microbiome offtarget score.
+- `metabolism`: Metabolism score.
+- `structure`: Structure score.
+- `core`: Core genome score.
+- `metadata`: Each metadata table should have its own column.
+
+
+### Visualization on Target Pathogen
+
+For visualization, prioritization, and scoring of proteins upload the data to Target Pathogen.
+
+   - Visit the Target Pathogen website at [http://target.sbg.qb.fcen.uba.ar/patho/](http://target.sbg.qb.fcen.uba.ar/patho/).
