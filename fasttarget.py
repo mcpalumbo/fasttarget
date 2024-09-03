@@ -1,0 +1,320 @@
+#import sys
+#sys.path.append('/home/miranda/anaconda3/envs/fasttarget2/lib/python3.10/site-packages')
+import os
+import configuration
+import pandas as pd
+import argparse
+import multiprocessing
+from ftscripts import files, structures, pathways, offtargets, genome, databases
+from datetime import datetime
+import logging
+import sys
+from ftscripts.logger import logger 
+
+
+def print_stylized(title, width=80):
+    """
+    Print a stylized title to the console.
+    """
+    dash_line = '-' * width
+    asterisk_line = '*' * width
+    print(dash_line)
+    print(f'{title.center(width)}')
+    print(asterisk_line)
+
+def main(config, base_path):
+    """
+    Main function to run FastTarget.
+    
+    :param config: Configuration object.
+    :param base_path: Base path of the FastTarget repository folder.
+
+    :return: DataFrame with the results.
+    """
+    
+    #Obtaining the databases: DEG, HUMAN and MICROBIOME
+    print_stylized('DATABASES')
+    databases.main(base_path)
+
+    # Organism data
+    print_stylized('GENOME')
+
+    organism_name = config.organism['name']
+    tax_id = config.organism['tax_id']
+    gbk_file = config.organism['gbk_file']
+    
+    print(f'Organism name: {organism_name}')
+    print(f'Tax ID: {tax_id}')
+    print(f'Genome file: {gbk_file}')
+
+    # Create organism subfolders
+    files.create_organism_subfolders(base_path, organism_name)
+    logging.info(f'Organism subfolders created in {base_path}/organism/{organism_name}')
+
+    # Create organism genome files (gbk, gff3 and fasta)
+    genome.ref_genome_files(gbk_file, base_path, organism_name)
+    logging.info(f'Genome files created in {base_path}/organism/{organism_name}')
+
+    # Number of CPUS
+    if config.cpus:
+        cpus = config.cpus
+    else:
+        cpus = multiprocessing.cpu_count()
+
+    logging.info(f'CPUS: {cpus}')
+
+    tables = []
+
+    # Run METABOLIC ANALYSIS
+    if config.metabolism:
+        try:
+            print_stylized('METABOLIC ANALYSIS')
+
+            logging.info('Starting metabolic analysis')
+
+            sbml_file =  config.metabolism['sbml_file']
+            chokepoint_file = config.metabolism['chokepoint_file']
+            smarttable_file = config.metabolism['smarttable_file']
+
+            logging.info(f'SBML file: {sbml_file}')
+            logging.info(f'Chokepoint file: {chokepoint_file}')
+            logging.info(f'Smarttable file: {smarttable_file}')
+
+            # Parse metabolic files, make network and calculate centrality
+            df_centrality, df_edges, df_chokepoints = pathways.run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
+            tables.append(df_centrality)
+            tables.append(df_edges)
+            tables.append(df_chokepoints)
+
+            logging.info('Metabolic analysis finished')
+
+        except Exception as e:
+            logging.error(f'Error in metabolic analysis: {e}')        
+    else:
+        logging.info('Metabolic analysis not enabled')
+
+    # Run STRUCTURES
+    if config.structures:
+        try:
+            print_stylized('STRUCTURES')
+            logging.info('Starting structures analysis')
+
+            proteome_uniprot = config.structures['proteome_uniprot']
+            logging.info(f'Proteome Uniprot: {proteome_uniprot}')
+            
+            # Get annotation information from UniProt proteome and links IDs with the genome locus_tags of the organism
+            uniprot_proteome_annotations, id_equivalences = structures.uniprot_proteome(base_path, organism_name, proteome_uniprot, cpus=8)
+            logging.info('Uniprot proteome annotations and ID equivalences obtained')
+            # Download PDB and AlphaFold structures
+            structures.structures (base_path, organism_name, proteome_uniprot, cpus=8)
+            logging.info('Structures downloaded')
+            # Find pockets using Fpocket. Keep the pockets with higher Druggability Score  
+            df_structures = structures.pockets (base_path, organism_name, id_equivalences, uniprot_proteome_annotations, cpus=8)
+            logging.info('Pockets searched and filtered')
+            tables.append(df_structures)
+
+            logging.info('Structures analysis finished')
+
+        except Exception as e:
+            logging.error(f'Error in structures analysis: {e}')
+    else:
+        logging.info('Structures analysis not enabled')
+
+    # Run CORE ANALYSIS
+    if config.core:
+        try:
+            print_stylized('CORE ANALYSIS')
+            
+            logging.info('Starting core analysis')
+
+            # Download complete NCBI genomes from organism tax id
+            print('----- 1. Downloading tax_id genomes from NCBI -----')   
+            genome.core_download_genomes_ncbi(base_path, organism_name, tax_id)
+            genome.core_download_missing_accessions(base_path, organism_name, tax_id)
+            logging.info('Genomes downloaded')
+
+            # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
+            print('----- 1. Selecting genomes -----')
+            core_files = genome.core_files(base_path, organism_name)
+            genome.core_check_files(base_path, organism_name)
+            logging.info('Genomes filtered')
+            print('----- 1. Finished -----')
+
+            if config.core['roary']:
+                try:
+                    #Run roary
+                    print('----- 2. Running Roary -----')
+                    logging.info('Starting Roary analysis')
+                    genome.core_genome_programs(base_path, organism_name, cpus, program_list=['roary'])
+                    # Parse output
+                    print('----- 2. Parsing Roary results -----')
+                    core_roary, df_roary = genome.roary_output(base_path, organism_name)
+                    tables.append(df_roary)
+                    logging.info(f'Core genome:{len(core_roary)}')
+                    logging.info('Roary analysis finished')
+                    print('----- 2. Finished -----')
+                except Exception as e:
+                    logging.error(f'Error in Roary analysis: {e}')
+            else:
+                logging.info('Roary not enabled')
+
+            if config.core['corecruncher']:
+                try:
+                    corecruncher_script = config.core['corecruncher_script']
+                    logging.info(f'CoreCruncher script: {corecruncher_script}')
+                    # Run CoreCruncher
+                    print('----- 2. Running CoreCruncher -----')
+                    logging.info('Starting CoreCruncher analysis')
+                    genome.core_genome_programs(base_path, organism_name, cpus, corecruncher_bin=corecruncher_script, program_list=['corecruncher'])
+                    # Parse output
+                    print('----- 2. Parsing CoreCruncher results -----')
+                    core_cc, df_cc = genome.corecruncher_output(base_path, organism_name)
+                    tables.append(df_cc)
+                    logging.info(f'Core genome:{len(core_cc)}')
+                    logging.info('CoreCruncher analysis finished')
+                    print('----- 2. Finished -----')
+                except Exception as e:
+                    logging.error(f'Error in CoreCruncher analysis: {e}')
+            else:
+                logging.info('CoreCruncher not enabled')
+        except Exception as e:
+            logging.error(f'Error in core analysis: {e}')
+    else:
+        logging.info('Core analysis not enabled')
+
+    # Run OFFTARGETS
+    if config.offtarget:
+        try:
+            if config.offtarget['human']:
+                try:
+                    print_stylized('HUMAN OFFTARGET')
+
+                    # Run blastp search
+                    print('-----  Blastp search -----')
+                    offtargets.human_offtarget_blast(base_path, organism_name, cpus)
+                    logging.info('Human offtarget blast search finished')
+                    # Parse results
+                    highest_human_hits, df_human = offtargets.human_offtarget_parse(base_path, organism_name)
+                    tables.append(df_human)
+                    logging.info('Human offtarget analysis finished')
+                    print('----- Finished -----')                  
+                except Exception as e:
+                    logging.error(f'Error in human offtarget analysis: {e}')
+            else:
+                logging.info('Human offtarget analysis not enabled')
+
+            if config.offtarget['microbiome']:
+                try:
+                    print_stylized('MICROBIOME OFFTARGET')
+
+                    microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
+                    microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
+                    logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
+                    logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
+
+                    # Run blastp search
+                    print('----- Blastp search -----')
+                    offtargets.microbiome_offtarget_blast(base_path, organism_name, cpus)
+                    logging.info('Microbiome offtarget blast search finished')
+                    # Parse results
+                    norm_microbiome_hits, df_microbiome = offtargets.microbiome_offtarget_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
+                    tables.append(df_microbiome)
+                    logging.info('Microbiome offtarget analysis finished')
+                    print('----- Finished -----')
+                except Exception as e:
+                    logging.error(f'Error in microbiome offtarget analysis: {e}')
+            else:
+                logging.info('Microbiome offtarget analysis not enabled')
+
+        except Exception as e:
+            logging.error(f'Error in offtarget analysis: {e}')
+    else:
+        logging.info('Offtarget analysis not enabled')
+
+    # Run ESSENTIALITY
+    if config.deg:
+        try:
+            print_stylized('ESSENTIALITY')
+
+            deg_identity_filter = config.deg['deg_identity_filter']
+            deg_coverage_filter = config.deg['deg_coverage_filter']
+            logging.info(f'DEG identity filter: {deg_identity_filter}')
+            logging.info(f'DEG coverage filter: {deg_coverage_filter}')
+
+            # Run blastp search
+            print('----- Blastp search -----')
+            offtargets.essential_deg_blast(base_path, organism_name, cpus)
+            logging.info('DEG blast search finished')
+            # Parse results
+            deg_hits, df_deg = offtargets.deg_parse(base_path, organism_name, deg_identity_filter, deg_coverage_filter)
+            tables.append(df_deg)
+            logging.info('DEG analysis finished')
+            print('----- Finished -----')
+        except Exception as e:
+            logging.error(f'Error in essentiality analysis: {e}')
+    else:
+        logging.info('Essentiality analysis not enabled')
+
+    # Run LOCALIZATION
+    if config.psortb:
+        try:
+            print_stylized('LOCALIZATION')
+
+            gram_type = config.psortb['gram_type']
+            logging.info(f'Gram type: {gram_type}')
+            
+            #Run psortb
+            print('----- Running psort -----')
+            psort_dict, df_psort = genome.localization_prediction(base_path, organism_name, gram_type)
+            tables.append(df_psort)
+            logging.info('Psortb analysis finished')
+            print('----- Finished -----')
+        except Exception as e:
+            logging.error(f'Error in localization analysis: {e}')
+    else:
+        logging.info('Localization analysis not enabled')
+
+    # Load METADATA
+    if config.metadata:
+        try:
+            print_stylized('METADATA')
+            for table in config.metadata['meta_tables']:
+                print(f'----- Loading metadata table: {table} -----')
+                df_meta = pd.read_csv(table, header=0) #sep='\t'
+                tables.append(df_meta)
+                logging.info(f'Metadata table {table} loaded')
+                print('----- Finished -----')
+        except Exception as e:
+            logging.error(f'Error in metadata analysis: {e}')
+    else:
+        logging.info('Metadata analysis not enabled')
+
+    # Merge dfs
+    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
+    if len[tables] > 1:
+        combined_df = tables[0]
+        for df in tables[1:]:
+            combined_df = pd.merge(combined_df, df, on='gene')
+            combined_df.to_csv(results_path, sep='\t', index=False)
+            print(f'Final FastTarget results saved in {results_path}.')
+            logging.info(f'Final FastTarget results saved.')
+        return combined_df
+    elif len(tables) == 1:
+        tables[0].to_csv(results_path, sep='\t', index=False)
+        print(f'Final FastTarget results saved in {results_path}.')
+        logging.info(f'Final FastTarget results saved.')
+        return tables[0]
+    else:
+        logging.error('----- Error: No final DataFrame data. -----')
+
+    print('------------------------------------- FINISHED ----------------------------------------')
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='FastTarget script')
+    parser.add_argument('--config_file', type=str, default='config.yml', help='Path to the configuration file')
+    args = parser.parse_args()
+
+    config = configuration.get_config(args.config_file)
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+    main(config, base_path)

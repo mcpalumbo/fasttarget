@@ -1,0 +1,194 @@
+Chokepoint reaction report for Mycoplasmoides pneumoniae M129; ATCC 29342 (GCF_000027345) on 2024-09-02_01-18-28
+
+Parameters: (EXCLUDE-HUMAN-RXNS-P NIL EXCLUDE-ISOZYMES-P NIL
+             ONLY-IN-MULTIPLE-PWYS-P NIL)
+
+Definition: A chokepoint reaction is a reaction that is either the unique consumer of a given metabolite
+(the only reaction consuming that metabolite), or is the unique producer of a metabolite. That metabolite
+must have at least one reaction that consumes it and at least one reaction that produces it (in other
+words, the metabolite must not be a dead-end). In theory, chokepoint reactions make good drug targets
+because disabling that reaction disrupts the only path to or from a metabolite.
+The definition of a chokepoint used here was derived from: Genome Research 14:917 (2004) "Computational
+analysis of Plasmodium falciparum metabolism: Organizing genomic information to facilitate drug discovery".
+
+
+Reactions that are chokepoints on the producing side (80):
+GALACTOKIN-RXN                                              a-D-galactopyranose + ATP  ->  a-D-galactose 1-phosphate + ADP + H+
+ALDOSE1EPIM-RXN                                             b-D-galactopyranose  ->  a-D-galactopyranose
+NICONUCADENYLYLTRAN-RXN                                     b-nicotinate D-ribonucleotide + ATP + H+  ->  nicotinate adenine dinucleotide + diphosphate
+H2PTEROATESYNTH-RXN                                         (7,8-dihydropterin-6-yl)methyl diphosphate + 4-aminobenzoate  ->  7,8-dihydropteroate + diphosphate
+RXN-22914                                                   (R)-4'-phosphopantothenate + CTP + H+  ->  (R)-4'-phosphopantothenoyl-cytidylate + diphosphate
+RXN-15121                                                   (Z)-2-aminobutenoate  ->  2-iminobutanoate
+P-PANTOCYSDECARB-RXN                                        (R)-4'-phosphopantothenoyl-L-cysteine + H+  ->  4'-phosphopantetheine + CO2
+CYTIDEAM-RXN                                                2'-deoxycytidine + H+ + H2O  ->  2'-deoxyuridine + ammonium
+RXN-12508                                                   2-(a-hydroxyethyl)thiamine diphosphate + a [pyruvate dehydrogenase E2 protein] N6-lipoyl-L-lysine  ->  a [pyruvate dehydrogenase E2 protein] N6-S-acetyldihydrolipoyl-L-lysine + thiamine diphosphate
+RXN-5721                                                    2-amino-3-carboxymuconate-6-semialdehyde  ->  quinolinate + H2O + H+
+RXN-15123                                                   2-iminobutanoate + H2O  ->  2-oxobutanoate + ammonium
+KETOBUTFORMLY-RXN                                           2-oxobutanoate + coenzyme A  ->  propanoyl-CoA + formate
+RXN0-704                                                    3-dehydro-L-gulonate + ATP  ->  3-dehydro-L-gulonate 6-phosphate + ADP + H+
+RXN0-703                                                    3-dehydro-L-gulonate + NAD+  <-  2,3-didehydro-L-gulonate + NADH + H+
+RXN0-705                                                    3-dehydro-L-gulonate 6-phosphate + H+  ->  L-xylulose 5-phosphate + CO2
+PANTEPADENYLYLTRAN-RXN                                      4'-phosphopantetheine + ATP + H+  ->  3'-dephospho-CoA + diphosphate
+RXN-21562                                                   bis-MGD cofactor chaperone + bis(guanylyl molybdopterin) cofactor  ->  [bis-MGD cofactor chaperone]-bis-MGD
+RXN-10035                                                   S-methyl-5'-thioadenosine + H+ + H2O  ->  S-methyl-5'-thioinosine + ammonium
+RXN-18710                                                   a 2-thiouridine34 in tRNA + GTP + a 5,10-methylenetetrahydrofolate + glycine + an oxidized electron carrier + H2O  ->  a 5-carboxymethylaminomethyl-2-thiouridine34 in tRNA + GDP + a 7,8-dihydrofolate + a reduced two electron carrier + phosphate + 2 H+
+THYMIDYLATESYN-RXN                                          a 5,10-methylenetetrahydrofolate + dUMP  ->  dTMP + a 7,8-dihydrofolate
+RXN0-5144                                                   a 5-(aminomethyl)-2-thiouridine34 in tRNA + S-adenosyl-L-methionine  ->  S-adenosyl-L-homocysteine + a 5-[(methylamino)methyl]-2-thiouridine34 in tRNA + H+
+RXN-22438                                                   a 5-methyltetrahydrofolate + NAD+  <-  a 5,10-methylenetetrahydrofolate + NADH + H+
+3.1.26.8-RXN                                                a 5S rRNA precursor + 2 H2O  ->  a mature 5S-rRNA + 2 a double-stranded oligonucleotide
+3.4.11.5-RXN                                                a peptide with an N-terminal L-proline + H2O  ->  L-proline + a peptide
+RXN0-6478                                                   a polycistronic tRNA precursor + H2O  ->  a tRNA precursor with a 5' extension and a long 3' trailer + a partially processed polycistronic tRNA precursor
+3.1.26.5-RXN                                                a tRNA precursor with a 5' extension and a short 3' extension + H2O  ->  a tRNA precursor with a short 3' extension + a tRNA fragment
+RXN-9386                                                    a tRNAGln + L-glutamate + ATP  ->  an L-glutamyl-[tRNAGln] + AMP + diphosphate
+RXN0-2023                                                   a uridine34 in tRNA + a [tRNA-uridine 2-sulfurtransferase]-S-sulfanyl-L-cysteine + ATP + a reduced two electron carrier  ->  a 2-thiouridine34 in tRNA + a [tRNA-uridine 2-sulfurtransferase]-L-cysteine + AMP + an oxidized electron carrier + diphosphate + H+
+RXN-14391                                                   a [chaperone-ADP]-[disordered-form scaffold protein] complex + ATP  ->  an [Fe-S cluster biosynthesis chaperone]-ATP + a [disordered-form [Fe-S] cluster scaffold protein] + ADP
+RXN-14390                                                   a [chaperone-ATP]-[co-chaperone]-[scaffold protein-(2Fe-2S)] complex + an apo-iron-sulfur protein  ->  a [chaperone-ADP]-[disordered-form scaffold protein] complex + an [Fe-S cluster biosynthesis co-chaperone] + an [2Fe-2S] cluster protein + phosphate
+RXN-14389                                                   a [co-chaperone]-[scaffold protein-(2Fe-2S)] complex + an [Fe-S cluster biosynthesis chaperone]-ATP  ->  a [chaperone-ATP]-[co-chaperone]-[scaffold protein-(2Fe-2S)] complex
+RXN-14387                                                   a [cysteine desulfurase]-(S-sulfanyl)2-[disordered-form scaffold protein] complex + 2 Fe3+  ->  a [cysteine desulfurase]-[scaffold protein-(2Fe-2S)] complex
+RXN-14388                                                   a [cysteine desulfurase]-[scaffold protein-(2Fe-2S)] complex + an [Fe-S cluster biosynthesis co-chaperone]  ->  a [co-chaperone]-[scaffold protein-(2Fe-2S)] complex + L-cysteine desulfurase
+RXN-17918                                                   a [DNA ligase]-N6-(5'-adenylyl)-L-lysine + a 5'-phospho-[DNA] + 2 H+  ->  an adenosine-5'-diphospho-5'-[DNA] + a [DNA ligase]-L-lysine
+RXN-17920                                                   a [DNA ligase]-L-lysine + NAD+  ->  a [DNA ligase]-N6-(5'-adenylyl)-L-lysine + b-nicotinamide D-ribonucleotide + 2 H+
+RXN-13032                                                   a [glycine-cleavage complex H protein] N6-[(R)-lipoyl]-L-lysine + a [lipoyl-carrier protein]-L-lysine  ->  a [lipoyl-carrier protein]-N6-[(R)-lipoyl]-L-lysine + [glycine cleavage system lipoyl-carrier protein]-L-lysine
+RXN-13031                                                   a [lipoyl-carrier protein]-N6-[(R)-lipoyl]-L-lysine + H2O  ->  a [lipoyl-carrier protein]-L-lysine + (R)-lipoate
+RXN0-5098                                                   a [lipoyl-carrier protein]-L-lysine + octanoate + ATP  ->  a [lipoyl-carrier protein] N6-octanoyl-L-lysine + AMP + diphosphate + H+
+RXN-17362                                                   a [prolipoprotein]-S-1,2-diacyl-sn-glyceryl-L-cysteine + H2O  ->  an (S-diacyl-sn-glyceryl)-L-cysteinyl-[apolipoprotein] + a lipoprotein signal peptide
+RXN0-20                                                     a [prolipoprotein]-L-cysteine + a phosphatidylglycerol  ->  a [prolipoprotein]-S-1,2-diacyl-sn-glyceryl-L-cysteine + sn-glycerol 1-phosphate + H+
+RXN-22554                                                   a [prolipoprotein]-L-cysteine[in]  ->  a [prolipoprotein]-L-cysteine[membrane]
+3.1.3.16-RXN                                                a [protein] (L-serine/L-threonine) phosphate + H2O  ->  a [protein]-(L-serine/L-threonine) + phosphate
+RXN-17355                                                   a [PTS enzyme I]-Np-phospho-L-histidine + an [HPr]-L-histidine  ->  a [PTS enzyme I]-L-histidine + an [HPr protein]-Np-phospho-L-histidine
+RXN0-1132                                                   a [pyruvate dehydrogenase E2 protein] N6-dihydrolipoyl-L-lysine + NAD+  ->  a [pyruvate dehydrogenase E2 protein] N6-lipoyl-L-lysine + NADH + H+
+RXN-18709                                                   a [TusA sulfur-carrier protein]-S-sulfanyl-L-cysteine + a [TusD]-L-cysteine  ->  a [TusA]-L-cysteine + a [TusD sulfur-carrier protein]-S-sulfanyl-L-cysteine
+RXN-18708                                                   a [TusD sulfur-carrier protein]-S-sulfanyl-L-cysteine + a [TusE sulfur carrier protein]-L-cysteine  ->  a [TusD]-L-cysteine + a [TusE sulfur carrier protein]-S-sulfanylcysteine
+RXN-22699                                                   a [TusE sulfur carrier protein]-S-sulfanylcysteine + a [tRNA-uridine 2-sulfurtransferase]-L-cysteine  ->  a [tRNA-uridine 2-sulfurtransferase]-S-sulfanyl-L-cysteine + a [TusE sulfur carrier protein]-L-cysteine
+RXN0-1133                                                   acetyl-CoA + a [pyruvate dehydrogenase E2 protein] N6-dihydrolipoyl-L-lysine  <-  coenzyme A + a [pyruvate dehydrogenase E2 protein] N6-S-acetyldihydrolipoyl-L-lysine
+RXN-14386                                                   an S-sulfanyl-[cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex  ->  a [cysteine desulfurase]-(S-sulfanyl)2-[disordered-form scaffold protein] complex
+RXN-14384                                                   an S-sulfanyl-[cysteine desulfurase]-[disordered-form scaffold protein] complex  ->  a [cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex
+RXN-14381                                                   an S-sulfanyl-[L-cysteine desulfurase] + a [disordered-form [Fe-S] cluster scaffold protein]  ->  an S-sulfanyl-[cysteine desulfurase]-[disordered-form scaffold protein] complex
+RXN-1381                                                    an acyl-CoA + sn-glycerol 3-phosphate  ->  a 2-lysophosphatidate + coenzyme A
+RXN-1623                                                    an acyl-CoA + a 2-lysophosphatidate  ->  a phosphatidate + coenzyme A
+RXN-12460                                                   an L-asparaginyl-[tRNAAsn] + H2O  ->  L-asparagine + tRNAAsn + H+
+TRANS-RXN-157                                               an [HPr protein]-Np-phospho-L-histidine + D-glucopyranose[out]  ->  D-glucopyranose 6-phosphate[in] + an [HPr]-L-histidine
+RXN-8654                                                    ATP + (R)-lipoate + H+  ->  [(R)-lipoyl]adenylate + diphosphate
+PROTEIN-KINASE-RXN                                          ATP + a [protein]-(L-serine/L-threonine)  ->  ADP + a [protein] (L-serine/L-threonine) phosphate + H+
+RXN-20080                                                   ATP + an L-aspartyl-[tRNAAsn]  ->  ADP + a 4-phosphooxy-L-aspartyl-[tRNAAsn]
+RXN-20082                                                   ATP + an L-glutamyl-[tRNAGln]  ->  a 5-phosphooxy-L-glutamyl-[tRNAGln] + ADP
+DTMPKI-RXN                                                  ATP + dTMP  ->  ADP + dTDP
+DUDPKIN-RXN                                                 ATP + dUDP  ->  ADP + dUTP
+RXN-12002                                                   ATP + UMP  ->  ADP + UDP
+CDPDIGLYSYN-RXN                                             CTP + a phosphatidate + H+  ->  a CDP-diacylglycerol + diphosphate
+CYTIDEAM2-RXN                                               cytidine + H+ + H2O  ->  uridine + ammonium
+PRPPSYN-RXN                                                 D-ribose 5-phosphate + ATP  ->  5-phospho-a-D-ribose 1-diphosphate + AMP + H+
+RXN-12862                                                   dehydroascorbate + H2O + H+  ->  dehydroascorbate (bicyclic form)
+DUTP-PYROP-RXN                                              dUTP + H2O  ->  dUMP + diphosphate + H+
+RXN-20755                                                   geranyl diphosphate + a 5-[(methylamino)methyl]-2-thiouridine34 in tRNA  ->  a 5-methylaminomethyl-2-(S-geranyl)thiouridine34 in tRNA + diphosphate
+RXN-16165                                                   initiator tRNAMet + L-methionine + ATP  ->  an L-methionyl-[initiator tRNAMet] + AMP + diphosphate
+RXN-14385                                                   L-cysteine + a [cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex  ->  L-alanine + an S-sulfanyl-[cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex
+RXN-15881                                                   L-cysteine + L-cysteine desulfurase  ->  L-alanine + an S-sulfanyl-[L-cysteine desulfurase]
+RXN-15122                                                   L-threonine  ->  (Z)-2-aminobutenoate + H2O
+RXN-14569                                                   L-threonine + hydrogencarbonate + ATP  ->  (L-threonylcarbamoyl)adenylate + diphosphate + H2O
+RXN-21561                                                   MCD cofactor chaperone + cytidylyl molybdenum cofactor (trioxo)  ->  a [cytidylyl molybdenum cofactor chaperone]-cytidylyl molybdenum cofactor
+RXN-17354                                                   phosphoenolpyruvate + a [PTS enzyme I]-L-histidine  ->  pyruvate + a [PTS enzyme I]-Np-phospho-L-histidine
+RXN-12583                                                   pyruvate + thiamine diphosphate + H+  ->  2-(a-hydroxyethyl)thiamine diphosphate + CO2
+RXN-18510                                                   roseoflavin + ATP  ->  roseoflavin 5'-phosphate + ADP + H+
+RXN-20756                                                   selenophosphate + a 5-methylaminomethyl-2-(S-geranyl)thiouridine34 in tRNA  ->  a 5-methylaminomethyl-2-(Se-phospho)selenouridine34 in tRNA + (2E)-3,7-dimethylocta-2,6-diene-1-thiol
+RXN490-3616                                                 tRNAAsn + L-aspartate + ATP  ->  an L-aspartyl-[tRNAAsn] + AMP + diphosphate
+RXN-21550                                                   [bis-MGD cofactor chaperone]-bis-MGD + a [bis(guanylyl molybdopterin) cofactor chaperone]-S-sulfanyl-L-cysteine + a reduced two electron carrier  ->  a [bis(guanylyl molybdopterin) cofactor chaperone]-L-cysteine + sulfo-bis(guanylyl molybdopterin) cofactor + an oxidized electron carrier + H2O
+
+Reactions that are chokepoints on the consuming side (82):
+
+GALACTOKIN-RXN                                              a-D-galactopyranose + ATP  ->  a-D-galactose 1-phosphate + ADP + H+
+2.7.7.1-RXN                                                 b-nicotinamide D-ribonucleotide + ATP + H+  ->  NAD+ + diphosphate
+NICONUCADENYLYLTRAN-RXN                                     b-nicotinate D-ribonucleotide + ATP + H+  ->  nicotinate adenine dinucleotide + diphosphate
+QUINOPRIBOTRANS-RXN                                         b-nicotinate D-ribonucleotide + CO2 + diphosphate  <-  5-phospho-a-D-ribose 1-diphosphate + quinolinate + 2 H+
+RXN-15121                                                   (Z)-2-aminobutenoate  ->  2-iminobutanoate
+RXN-14570                                                   (L-threonylcarbamoyl)adenylate + an adenine37 in tRNA  ->  an N6-L-threonylcarbamoyladenine37 in tRNA + AMP + H+
+RXN-22915                                                   (R)-4'-phosphopantothenoyl-cytidylate + L-cysteine  ->  (R)-4'-phosphopantothenoyl-L-cysteine + CMP + 2 H+
+P-PANTOCYSDECARB-RXN                                        (R)-4'-phosphopantothenoyl-L-cysteine + H+  ->  4'-phosphopantetheine + CO2
+RXN-3523                                                    2 monodehydroascorbate radical  ->  dehydroascorbate + L-ascorbate + 2 H+
+URA-PHOSPH-RXN                                              2'-deoxyuridine + phosphate  ->  2-deoxy-a-D-ribose 1-phosphate + uracil
+RXN-12508                                                   2-(a-hydroxyethyl)thiamine diphosphate + a [pyruvate dehydrogenase E2 protein] N6-lipoyl-L-lysine  ->  a [pyruvate dehydrogenase E2 protein] N6-S-acetyldihydrolipoyl-L-lysine + thiamine diphosphate
+RXN-15123                                                   2-iminobutanoate + H2O  ->  2-oxobutanoate + ammonium
+KETOBUTFORMLY-RXN                                           2-oxobutanoate + coenzyme A  ->  propanoyl-CoA + formate
+DEPHOSPHOCOAKIN-RXN                                         3'-dephospho-CoA + ATP  ->  coenzyme A + ADP + H+
+RXN0-704                                                    3-dehydro-L-gulonate + ATP  ->  3-dehydro-L-gulonate 6-phosphate + ADP + H+
+RXN0-703                                                    3-dehydro-L-gulonate + NAD+  <-  2,3-didehydro-L-gulonate + NADH + H+
+RXN0-705                                                    3-dehydro-L-gulonate 6-phosphate + H+  ->  L-xylulose 5-phosphate + CO2
+PANTEPADENYLYLTRAN-RXN                                      4'-phosphopantetheine + ATP + H+  ->  3'-dephospho-CoA + diphosphate
+RXN-19329                                                   5,6,7,8-tetrahydrofolate + NADP+  <-  7,8-dihydrofolate monoglutamate + NADPH + H+
+RXN-12241                                                   S-methyl-5'-thioinosine + phosphate  ->  hypoxanthine + S-methyl-5-thio-a-D-ribose 1-phosphate
+RIBONUCLEOSIDE-DIP-REDUCTI-RXN                              a 2'-deoxyribonucleoside 5'-diphosphate + an oxidized thioredoxin + H2O  <-  a ribonucleoside diphosphate + a reduced thioredoxin
+RXN-20081                                                   a 4-phosphooxy-L-aspartyl-[tRNAAsn] + ammonia  ->  an L-asparaginyl-[tRNAAsn] + phosphate
+THYMIDYLATESYN-RXN                                          a 5,10-methylenetetrahydrofolate + dUMP  ->  dTMP + a 7,8-dihydrofolate
+RXN0-7081                                                   a 5-carboxymethylaminomethyl-2-thiouridine34 in tRNA + an oxidized electron carrier + H2O + H+  ->  a 5-(aminomethyl)-2-thiouridine34 in tRNA + glyoxylate + a reduced two electron carrier
+RXN-20757                                                   a 5-methylaminomethyl-2-(Se-phospho)selenouridine34 in tRNA + H2O  ->  a 5-methylaminomethyl-2-selenouridine34 in tRNA + phosphate
+RXN-20083                                                   a 5-phosphooxy-L-glutamyl-[tRNAGln] + ammonia  ->  an L-glutaminyl-[tRNAGln] + phosphate
+PHOSPHAGLYPSYN-RXN                                          a CDP-diacylglycerol + sn-glycerol 3-phosphate  ->  CMP + a phosphatidylglycerophosphate + H+
+3.1.13.3-RXN                                                a double-stranded oligonucleotide + H2O  ->  n a nucleoside 5'-monophosphate
+RXN0-3201                                                   a lipoprotein signal peptide + n H2O  ->  n+1 a peptide
+RXN0-6480                                                   a tRNA precursor with a 5' extension + H2O  ->  an uncharged tRNA + a tRNA fragment
+PROLINE--TRNA-LIGASE-RXN                                    a tRNAPro + L-proline + ATP  ->  an L-prolyl-[tRNAPro] + AMP + diphosphate
+RXN0-2023                                                   a uridine34 in tRNA + a [tRNA-uridine 2-sulfurtransferase]-S-sulfanyl-L-cysteine + ATP + a reduced two electron carrier  ->  a 2-thiouridine34 in tRNA + a [tRNA-uridine 2-sulfurtransferase]-L-cysteine + AMP + an oxidized electron carrier + diphosphate + H+
+RXN-14391                                                   a [chaperone-ADP]-[disordered-form scaffold protein] complex + ATP  ->  an [Fe-S cluster biosynthesis chaperone]-ATP + a [disordered-form [Fe-S] cluster scaffold protein] + ADP
+RXN-14390                                                   a [chaperone-ATP]-[co-chaperone]-[scaffold protein-(2Fe-2S)] complex + an apo-iron-sulfur protein  ->  a [chaperone-ADP]-[disordered-form scaffold protein] complex + an [Fe-S cluster biosynthesis co-chaperone] + an [2Fe-2S] cluster protein + phosphate
+RXN-14389                                                   a [co-chaperone]-[scaffold protein-(2Fe-2S)] complex + an [Fe-S cluster biosynthesis chaperone]-ATP  ->  a [chaperone-ATP]-[co-chaperone]-[scaffold protein-(2Fe-2S)] complex
+RXN-14387                                                   a [cysteine desulfurase]-(S-sulfanyl)2-[disordered-form scaffold protein] complex + 2 Fe3+  ->  a [cysteine desulfurase]-[scaffold protein-(2Fe-2S)] complex
+RXN-14388                                                   a [cysteine desulfurase]-[scaffold protein-(2Fe-2S)] complex + an [Fe-S cluster biosynthesis co-chaperone]  ->  a [co-chaperone]-[scaffold protein-(2Fe-2S)] complex + L-cysteine desulfurase
+RXN-17918                                                   a [DNA ligase]-N6-(5'-adenylyl)-L-lysine + a 5'-phospho-[DNA] + 2 H+  ->  an adenosine-5'-diphospho-5'-[DNA] + a [DNA ligase]-L-lysine
+RXN-17920                                                   a [DNA ligase]-L-lysine + NAD+  ->  a [DNA ligase]-N6-(5'-adenylyl)-L-lysine + b-nicotinamide D-ribonucleotide + 2 H+
+RXN0-949                                                    a [lipoyl-carrier protein] N6-octanoyl-L-lysine + an [Fe-S] cluster scaffold protein carrying a [4Fe-4S]+2 cluster + 2 a reduced ferredoxin [iron-sulfur] cluster + 2 S-adenosyl-L-methionine + 6 H+  ->  a [lipoyl-carrier protein]-N6-[(R)-dihydrolipoyl]-L-lysine + 2 5'-deoxyadenosine + 2 L-methionine + an [Fe-S] cluster scaffold protein + 2 S2- + 4 Fe2+ + 2 an oxidized ferredoxin [iron-sulfur] cluster
+RXN-13031                                                   a [lipoyl-carrier protein]-N6-[(R)-lipoyl]-L-lysine + H2O  ->  a [lipoyl-carrier protein]-L-lysine + (R)-lipoate
+RXN-17362                                                   a [prolipoprotein]-S-1,2-diacyl-sn-glyceryl-L-cysteine + H2O  ->  an (S-diacyl-sn-glyceryl)-L-cysteinyl-[apolipoprotein] + a lipoprotein signal peptide
+3.1.3.16-RXN                                                a [protein] (L-serine/L-threonine) phosphate + H2O  ->  a [protein]-(L-serine/L-threonine) + phosphate
+RXN-17355                                                   a [PTS enzyme I]-Np-phospho-L-histidine + an [HPr]-L-histidine  ->  a [PTS enzyme I]-L-histidine + an [HPr protein]-Np-phospho-L-histidine
+RXN0-1132                                                   a [pyruvate dehydrogenase E2 protein] N6-dihydrolipoyl-L-lysine + NAD+  ->  a [pyruvate dehydrogenase E2 protein] N6-lipoyl-L-lysine + NADH + H+
+RXN-18709                                                   a [TusA sulfur-carrier protein]-S-sulfanyl-L-cysteine + a [TusD]-L-cysteine  ->  a [TusA]-L-cysteine + a [TusD sulfur-carrier protein]-S-sulfanyl-L-cysteine
+RXN-18708                                                   a [TusD sulfur-carrier protein]-S-sulfanyl-L-cysteine + a [TusE sulfur carrier protein]-L-cysteine  ->  a [TusD]-L-cysteine + a [TusE sulfur carrier protein]-S-sulfanylcysteine
+RXN-22699                                                   a [TusE sulfur carrier protein]-S-sulfanylcysteine + a [tRNA-uridine 2-sulfurtransferase]-L-cysteine  ->  a [tRNA-uridine 2-sulfurtransferase]-S-sulfanyl-L-cysteine + a [TusE sulfur carrier protein]-L-cysteine
+RXN0-1133                                                   acetyl-CoA + a [pyruvate dehydrogenase E2 protein] N6-dihydrolipoyl-L-lysine  <-  coenzyme A + a [pyruvate dehydrogenase E2 protein] N6-S-acetyldihydrolipoyl-L-lysine
+PHOSACETYLTRANS-RXN                                         acetyl-CoA + phosphate  ->  acetyl phosphate + coenzyme A
+RXN-17363                                                   an (S-diacyl-sn-glyceryl)-L-cysteinyl-[apolipoprotein] + a phosphoglyceride  ->  an N-acyl-(S-diacyl-sn-glyceryl)-L-cysteinyl-[lipoprotein] + a 1-lysophospholipid + H+
+RXN-22427                                                   an N-acyl-(S-diacyl-sn-glyceryl)-L-cysteinyl-[lipoprotein][membrane] + a LolA lipoprotein chaperone[out] + ATP + H2O[in]  ->  a LolA-lipoprotein complex[out] + ADP + phosphate + H+[in]
+METHIONYL-TRNA-FORMYLTRANSFERASE-RXN                        an N10-formyltetrahydrofolate + an L-methionyl-[initiator tRNAMet]  ->  a tetrahydrofolate + an N-formyl-L-methionyl-[initiator tRNAmet] + H+
+RXN-14386                                                   an S-sulfanyl-[cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex  ->  a [cysteine desulfurase]-(S-sulfanyl)2-[disordered-form scaffold protein] complex
+RXN-14384                                                   an S-sulfanyl-[cysteine desulfurase]-[disordered-form scaffold protein] complex  ->  a [cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex
+RXN-14381                                                   an S-sulfanyl-[L-cysteine desulfurase] + a [disordered-form [Fe-S] cluster scaffold protein]  ->  an S-sulfanyl-[cysteine desulfurase]-[disordered-form scaffold protein] complex
+RXN-1623                                                    an acyl-CoA + a 2-lysophosphatidate  ->  a phosphatidate + coenzyme A
+RXN-12460                                                   an L-asparaginyl-[tRNAAsn] + H2O  ->  L-asparagine + tRNAAsn + H+
+TRANS-RXN-157                                               an [HPr protein]-Np-phospho-L-histidine + D-glucopyranose[out]  ->  D-glucopyranose 6-phosphate[in] + an [HPr]-L-histidine
+PROTEIN-KINASE-RXN                                          ATP + a [protein]-(L-serine/L-threonine)  ->  ADP + a [protein] (L-serine/L-threonine) phosphate + H+
+DTDPKIN-RXN                                                 ATP + dTDP  ->  ADP + dTTP
+DTMPKI-RXN                                                  ATP + dTMP  ->  ADP + dTDP
+DUDPKIN-RXN                                                 ATP + dUDP  ->  ADP + dUTP
+RXN-12002                                                   ATP + UMP  ->  ADP + UDP
+CDPDIGLYSYN-RXN                                             CTP + a phosphatidate + H+  ->  a CDP-diacylglycerol + diphosphate
+RXN-12861                                                   dehydroascorbate (bicyclic form)  ->  2,3-didehydro-L-gulonate + H+
+DUTP-PYROP-RXN                                              dUTP + H2O  ->  dUMP + diphosphate + H+
+RXN-20755                                                   geranyl diphosphate + a 5-[(methylamino)methyl]-2-thiouridine34 in tRNA  ->  a 5-methylaminomethyl-2-(S-geranyl)thiouridine34 in tRNA + diphosphate
+RXN-14385                                                   L-cysteine + a [cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex  ->  L-alanine + an S-sulfanyl-[cysteine desulfurase]-S-sulfanyl-[disordered-form scaffold protein] complex
+RXN-21560                                                   L-cysteine + a [cytidylyl molybdenum cofactor chaperone]-cytidylyl molybdenum cofactor + a reduced two electron carrier  ->  L-alanine + a [cytidylyl molybdenum cofactor chaperone]-cytidylyl molybdenum cofactor (sulfo-dioxo) + an oxidized electron carrier + H2O
+RXN-15881                                                   L-cysteine + L-cysteine desulfurase  ->  L-alanine + an S-sulfanyl-[L-cysteine desulfurase]
+DIHYDROFOLATESYNTH-RXN                                      L-glutamate + 7,8-dihydropteroate + ATP  ->  ADP + 7,8-dihydrofolate monoglutamate + phosphate + H+
+LXULRU5P-RXN                                                L-ribulose 5-phosphate  <-  L-xylulose 5-phosphate
+RXN-17354                                                   phosphoenolpyruvate + a [PTS enzyme I]-L-histidine  ->  pyruvate + a [PTS enzyme I]-Np-phospho-L-histidine
+PTAALT-RXN                                                  propanoyl-CoA + phosphate  ->  propanoyl phosphate + coenzyme A
+RXN-12583                                                   pyruvate + thiamine diphosphate + H+  ->  2-(a-hydroxyethyl)thiamine diphosphate + CO2
+RXN-18511                                                   roseoflavin 5'-phosphate + ATP + H+  ->  roseoflavin adenine dinucleotide + diphosphate
+RXN-20756                                                   selenophosphate + a 5-methylaminomethyl-2-(S-geranyl)thiouridine34 in tRNA  ->  a 5-methylaminomethyl-2-(Se-phospho)selenouridine34 in tRNA + (2E)-3,7-dimethylocta-2,6-diene-1-thiol
+ASPARAGINE--TRNA-LIGASE-RXN                                 tRNAAsn + L-asparagine + ATP  ->  an L-asparaginyl-[tRNAAsn] + AMP + diphosphate
+GALACTURIDYLYLTRANS-RXN                                     UDP-a-D-glucose + a-D-galactose 1-phosphate  ->  UDP-a-D-galactose + a-D-glucopyranose 1-phosphate
+URACIL-PRIBOSYLTRANS-RXN                                    UMP + diphosphate  <-  5-phospho-a-D-ribose 1-diphosphate + uracil
+RXN-21550                                                   [bis-MGD cofactor chaperone]-bis-MGD + a [bis(guanylyl molybdopterin) cofactor chaperone]-S-sulfanyl-L-cysteine + a reduced two electron carrier  ->  a [bis(guanylyl molybdopterin) cofactor chaperone]-L-cysteine + sulfo-bis(guanylyl molybdopterin) cofactor + an oxidized electron carrier + H2O
+
+Reactions that are not chokepoints, but are candidates (11):
+
+2.7.7.60-RXN                                                2-C-methyl-D-erythritol 4-phosphate + CTP + H+  =  4-(cytidine 5'-diphospho)-2-C-methyl-D-erythritol + diphosphate
+DEOXYRIBOSE-P-ALD-RXN                                       2-deoxy-D-ribose 5-phosphate  =  D-glyceraldehyde 3-phosphate + acetaldehyde
+RXN0-302                                                    2-phospho-4-(cytidine 5'-diphospho)-2-C-methyl-D-erythritol  =  2-C-methyl-D-erythritol-2,4-cyclodiphosphate + CMP
+1.2.1.25-RXN                                                3-methyl-2-oxobutanoate + coenzyme A + NAD+  =  isobutanoyl-CoA + CO2 + NADH
+ISOVALERYLCOA-DHLIPOAMIDE-RXN                               3-methylbutanoyl-CoA + an [apo BCAA dehydrogenase E2 protein] N6-dihydrolipoyl-L-lysine  =  a [apo BCAA dehydrogenase E2 protein] N6-S-[3-methylbutanoyl]dihydrolipoyl-L-lysine + coenzyme A
+3.5.1.88-RXN                                                a [protein] N-terminal-formyl-L-methionine + H2O  =  an N-terminal L-methionyl-[protein] + formate
+RXN-16637                                                   an L-cysteinyl-[tRNACys] + H2O  =  L-cysteine + a tRNACys + H+
+RXN-12621                                                   an [L-cysteine desulfurase]-S-sulfanyl-L-cysteine + a carboxy-adenylated-[ThiS sulfur-carrier protein] + a reduced two electron carrier  =  a thiocarboxylated-[ThiS sulfur-carrier protein] + an [L-cysteine desulfurase]-L-cysteine + AMP + an oxidized electron carrier + 2 H+
+RXN-14382                                                   an [L-cysteine desulfurase]-S-sulfanyl-L-cysteine + a [ThiI sulfur-carrier protein]-L-cysteine  =  an [L-cysteine desulfurase]-L-cysteine + a [ThiI sulfur-carrier protein]-S-sulfanyl-L-cysteine
+RXN0-308                                                    L-cysteine + an [L-cysteine desulfurase]-L-cysteine  =  L-alanine + an [L-cysteine desulfurase]-S-sulfanyl-L-cysteine
+GMP-SYN-NH3-RXN                                             XMP + ammonia + ATP  =  GMP + AMP + diphosphate + H+
