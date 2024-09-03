@@ -64,10 +64,10 @@ To test the pipeline, we provide the small genome of *Mycoplasma pneumoniae*.
 This dataset includes the GenBank (GBK) file, the proteome ID for structural data, and the SBML file for metabolism analysis. 
 You can find the test dataset in the `organism/test` folder.
 
-    To run the pipeline with the test dataset:
+To run the pipeline with the test dataset:
 
     ```bash
-    python test.py
+    python tests.py
     ```
 
 ### Editing the `config.yml` File

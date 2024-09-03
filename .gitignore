@@ -2,3 +2,4 @@ databases/
 ftscripts/*.pyc
 organism/
 logs/
+__pycache__/
