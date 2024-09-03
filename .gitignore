@@ -1,2 +1,4 @@
-
+databases/
 ftscripts/*.pyc
+organism/
+logs/
