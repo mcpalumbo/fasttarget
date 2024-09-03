@@ -20,6 +20,20 @@ To obtain metabolic files, you can use the Pathway Tools program. Here's a brief
 
 3. **Save and Export**: Once the analysis is complete, export the metabolic files in the required format for use in this pipeline.
 
+     **Export SBML File**:
+        - Go to `File > Export > Generate SBML file for > Selected Reactions`.
+        - In the `Type` section, select those that are small molecules.
+
+    **Find Chokepoints**:
+        - Go to `Tools > Chokepoint Reaction Finder`.
+        - Do not select any filters to obtain all possible reactions.
+        - You will find the chokepoints file in the Reports folder of your PGDB.
+
+    **Create and Export Smartables**:
+        - Go to `Smartables > Create New Smartable`, and choose to include `All Genes`.
+        - Once the Smartable is created, in `Smartable`, click on `Select Columns to Show` and make sure to select the `Reactions` column.
+        - Then go to `Smartable > Export Smarttable > Tab-Delimited File`, and ensure that `Identifiers` are selected to include the IDs.
+
 ## 3. Finding the Proteome ID
 
 To find the proteome ID for your organism:
