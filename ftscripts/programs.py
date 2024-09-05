@@ -365,27 +365,36 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
 
     dehydrated_file =  os.path.join(output_dir, f'{organism_name}_dehydrated.zip')
     dehydrated_dir =  os.path.join(output_dir, f'{organism_name}_dataset')
+    checkpoint_file =  os.path.join(output_dir, f'{organism_name}_checkpoint_ncbi_datasets.txt')
     
-    if not os.path.exists(dehydrated_file):
-        datasets_command = f"datasets download genome taxon {tax_id} --assembly-level complete --annotated --assembly-source 'RefSeq' --include gbff,gff3 --exclude-atypical --dehydrated  --filename {dehydrated_file}"
-        run_bash_command(datasets_command)
-        print(f'Download a dehydrated data package in {dehydrated_file}')
+    if not files.file_check(checkpoint_file):
+        if not os.path.exists(dehydrated_file):
+            datasets_command = f"datasets download genome taxon {tax_id} --assembly-level complete --annotated --assembly-source 'RefSeq' --include gbff,gff3 --exclude-atypical --dehydrated  --filename {dehydrated_file}"
+            run_bash_command(datasets_command)
+            print(f'Download a dehydrated data package in {dehydrated_file}')
+        else:
+            print(f'Dehydrated data package in {dehydrated_file}')
+        
+        if not os.path.exists(dehydrated_dir):
+            os.makedirs(dehydrated_dir)
+            print(f"Created directory: {dehydrated_dir}")
+            run_unzip(dehydrated_file, dehydrated_dir)
+            print(f'Unzip a dehydrated data package in {dehydrated_dir}')
+        else:
+            print(f'Dehydrated data package in {dehydrated_dir}')
+        
+        rehydrate_command = f'datasets rehydrate --directory {dehydrated_dir}'
+        run_bash_command(rehydrate_command)
+        print(f'Rehydrated complete')
+        
+        print('NCBI download complete')
+
+        with open(checkpoint_file, 'w') as f:
+            f.write("Download complete: " + str(dehydrated_dir))
+            f.close()
     else:
-        print(f'Dehydrated data package in {dehydrated_file}')
-    
-    if not os.path.exists(dehydrated_dir):
-        os.makedirs(dehydrated_dir)
-        print(f"Created directory: {dehydrated_dir}")
-        run_unzip(dehydrated_file, dehydrated_dir)
-        print(f'Unzip a dehydrated data package in {dehydrated_dir}')
-    else:
-        print(f'Dehydrated data package in {dehydrated_dir}')
-    
-    rehydrate_command = f'datasets rehydrate --directory {dehydrated_dir}'
-    run_bash_command(rehydrate_command)
-    print(f'Rehydrated complete')
-    
-    print('NCBI download complete')
+        print(f"Checkpoint file '{checkpoint_file}' already exists.", file=sys.stderr)
+        print(f"NCBI datasets download already completed.", file=sys.stderr)
 
 def run_ncbi_accession(accession, output_dir):
 

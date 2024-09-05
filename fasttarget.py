@@ -128,14 +128,14 @@ def main(config, base_path):
 
             # Download complete NCBI genomes from organism tax id
             print('----- 1. Downloading tax_id genomes from NCBI -----')   
-            #genome.core_download_genomes_ncbi(base_path, organism_name, tax_id)
-            #genome.core_download_missing_accessions(base_path, organism_name, tax_id)
+            genome.core_download_genomes_ncbi(base_path, organism_name, tax_id)
+            genome.core_download_missing_accessions(base_path, organism_name, tax_id)
             logging.info('Genomes downloaded')
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
-            #core_files = genome.core_files(base_path, organism_name)
-            #genome.core_check_files(base_path, organism_name)
+            core_files = genome.core_files(base_path, organism_name)
+            genome.core_check_files(base_path, organism_name)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
@@ -147,7 +147,7 @@ def main(config, base_path):
                     genome.core_genome_programs(base_path, organism_name, cpus, program_list=['roary'])
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
-                    core_roary, df_roary = genome.roary_output(base_path, organism_name)
+                    df_roary = genome.roary_output(base_path, organism_name)
                     tables.append(df_roary)
                     logging.info(f'Core genome:{len(core_roary)}')
                     logging.info('Roary analysis finished')
@@ -167,7 +167,7 @@ def main(config, base_path):
                     genome.core_genome_programs(base_path, organism_name, cpus, corecruncher_bin=corecruncher_script, program_list=['corecruncher'])
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
-                    core_cc, df_cc = genome.corecruncher_output(base_path, organism_name)
+                    df_cc = genome.corecruncher_output(base_path, organism_name)
                     tables.append(df_cc)
                     logging.info(f'Core genome:{len(core_cc)}')
                     logging.info('CoreCruncher analysis finished')
