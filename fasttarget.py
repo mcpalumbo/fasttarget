@@ -5,7 +5,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, databases
+from ftscripts import files, structures, pathways, offtargets, genome, databases, essentiality
 from datetime import datetime
 import logging
 import sys
@@ -185,19 +185,34 @@ def main(config, base_path):
     # Run OFFTARGETS
     if config.offtarget:
         try:
+            offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+
             if config.offtarget['human']:
                 try:
                     print_stylized('HUMAN OFFTARGET')
 
-                    # Run blastp search
-                    print('-----  Blastp search -----')
-                    offtargets.human_offtarget_blast(base_path, organism_name, cpus)
-                    logging.info('Human offtarget blast search finished')
-                    # Parse results
-                    highest_human_hits, df_human = offtargets.human_offtarget_parse(base_path, organism_name)
-                    tables.append(df_human)
-                    logging.info('Human offtarget analysis finished')
-                    print('----- Finished -----')                  
+                    human_blast_output = os.path.join(offtarget_path, 'human_offtarget_blast.tsv')
+                    human_results = os.path.join(offtarget_path, 'human_offtarget.tsv')
+                    
+                    if not files.file_check(human_blast_output):
+                        # Run blastp search
+                        print('-----  Blastp search -----')
+                        offtargets.human_offtarget_blast(base_path, organism_name, cpus)
+                        logging.info('Human offtarget blast search finished')
+                        if not files.file_check(human_results):
+                            # Parse results
+                            highest_human_hits, df_human = offtargets.human_offtarget_parse(base_path, organism_name)
+                            tables.append(df_human)
+                            logging.info('Human offtarget analysis finished')
+                            print('----- Finished -----')
+                        else:
+                            logging.info('Human offtarget analysis already done')
+                            print('Human offtarget analysis already done, output file found')
+                            print(human_results)
+                    else:
+                        logging.info('Blast with human already done')
+                        print('Blast output file found')
+                        print(human_blast_output)                  
                 except Exception as e:
                     logging.error(f'Error in human offtarget analysis: {e}')
             else:
@@ -205,22 +220,36 @@ def main(config, base_path):
 
             if config.offtarget['microbiome']:
                 try:
+                    microbiome_blast_output = os.path.join(offtarget_path, 'microbiome_offtarget_blast.tsv')
+                    microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget.tsv')
+
                     print_stylized('MICROBIOME OFFTARGET')
 
-                    microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
-                    microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
-                    logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
-                    logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
+                    if not files.file_check(microbiome_blast_output):
+                        microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
+                        microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
+                        logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
+                        logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
 
-                    # Run blastp search
-                    print('----- Blastp search -----')
-                    offtargets.microbiome_offtarget_blast(base_path, organism_name, cpus)
-                    logging.info('Microbiome offtarget blast search finished')
-                    # Parse results
-                    norm_microbiome_hits, df_microbiome = offtargets.microbiome_offtarget_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
-                    tables.append(df_microbiome)
-                    logging.info('Microbiome offtarget analysis finished')
-                    print('----- Finished -----')
+                        # Run blastp search
+                        print('----- Blastp search -----')
+                        offtargets.microbiome_offtarget_blast(base_path, organism_name, cpus)
+                        logging.info('Microbiome offtarget blast search finished')
+
+                        if not files.file_check(microbiome_results):
+                            # Parse results
+                            norm_microbiome_hits, df_microbiome = offtargets.microbiome_offtarget_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
+                            tables.append(df_microbiome)
+                            logging.info('Microbiome offtarget analysis finished')
+                            print('----- Finished -----')
+                        else:
+                            logging.info('Microbiome offtarget analysis already done')
+                            print('Microbiome offtarget analysis already done, output file found')
+                            print(microbiome_results)
+                    else:
+                        logging.info('Blast with microbiome already done')
+                        print('Blast output file found')
+                        print(microbiome_blast_output)
                 except Exception as e:
                     logging.error(f'Error in microbiome offtarget analysis: {e}')
             else:
@@ -233,23 +262,39 @@ def main(config, base_path):
 
     # Run ESSENTIALITY
     if config.deg:
+        essentiality_path = os.path.join(base_path, 'organism', f'{organism_name}', 'essentiality')
         try:
             print_stylized('ESSENTIALITY')
 
-            deg_identity_filter = config.deg['deg_identity_filter']
-            deg_coverage_filter = config.deg['deg_coverage_filter']
-            logging.info(f'DEG identity filter: {deg_identity_filter}')
-            logging.info(f'DEG coverage filter: {deg_coverage_filter}')
+            deg_blast_output = os.path.join(essentiality_path, 'deg_blast.tsv')
+            deg_results = os.path.join(essentiality_path, 'hit_in_deg.tsv')
 
-            # Run blastp search
-            print('----- Blastp search -----')
-            offtargets.essential_deg_blast(base_path, organism_name, cpus)
-            logging.info('DEG blast search finished')
-            # Parse results
-            deg_hits, df_deg = offtargets.deg_parse(base_path, organism_name, deg_identity_filter, deg_coverage_filter)
-            tables.append(df_deg)
-            logging.info('DEG analysis finished')
-            print('----- Finished -----')
+            if not files.file_check(deg_blast_output):
+                deg_identity_filter = config.deg['deg_identity_filter']
+                deg_coverage_filter = config.deg['deg_coverage_filter']
+                logging.info(f'DEG identity filter: {deg_identity_filter}')
+                logging.info(f'DEG coverage filter: {deg_coverage_filter}')
+
+                # Run blastp search
+                print('----- Blastp search -----')
+                essentiality.essential_deg_blast(base_path, organism_name, cpus)
+                logging.info('DEG blast search finished')
+
+                if not files.file_check(deg_results):
+                    # Parse results
+                    deg_hits, df_deg = essentiality.deg_parse(base_path, organism_name, deg_identity_filter, deg_coverage_filter)
+                    tables.append(df_deg)
+                    logging.info('DEG analysis finished')
+                    print('----- Finished -----')
+                else:
+                    logging.info('DEG analysis already done')
+                    print('DEG analysis already done, output file found')
+                    print(deg_blast_output)
+            else:
+                logging.info('Blast with DEG already done')
+                print('Blast output file found')
+                print(deg_blast_output)
+
         except Exception as e:
             logging.error(f'Error in essentiality analysis: {e}')
     else:
@@ -265,7 +310,7 @@ def main(config, base_path):
             
             #Run psortb
             print('----- Running psort -----')
-            psort_dict, df_psort = genome.localization_prediction(base_path, organism_name, gram_type)
+            df_psort = genome.localization_prediction(base_path, organism_name, gram_type)
             tables.append(df_psort)
             logging.info('Psortb analysis finished')
             print('----- Finished -----')
@@ -291,6 +336,10 @@ def main(config, base_path):
 
     # Merge dfs
     results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
+    print(' Length of tables:')
+    print(len(tables))
+    print(' Tables:')
+    print(tables)
     if len[tables] > 1:
         combined_df = tables[0]
         for df in tables[1:]:
