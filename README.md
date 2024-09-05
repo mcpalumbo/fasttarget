@@ -34,10 +34,10 @@ This project requires the use of Docker images to run specific bioinformatics to
    bash setup_docker.sh
    ```
 
-<small>**Note:** This pipeline is designed to run Docker commands without `sudo`. <small>
-<small>To set up Docker so that `sudo` is not required, follow these steps:<small>
+**Note:** This pipeline is designed to run Docker commands without `sudo`.
+To set up Docker so that `sudo` is not required, follow these steps:
 
-<small>1. **Create the Docker group** (if it doesn't already exist):<small>
+1. **Create the Docker group** (if it doesn't already exist):
 
    ```bash
    sudo groupadd docker
