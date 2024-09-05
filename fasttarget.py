@@ -149,7 +149,6 @@ def main(config, base_path):
                     print('----- 2. Parsing Roary results -----')
                     df_roary = genome.roary_output(base_path, organism_name)
                     tables.append(df_roary)
-                    logging.info(f'Core genome:{len(core_roary)}')
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
@@ -169,7 +168,6 @@ def main(config, base_path):
                     print('----- 2. Parsing CoreCruncher results -----')
                     df_cc = genome.corecruncher_output(base_path, organism_name)
                     tables.append(df_cc)
-                    logging.info(f'Core genome:{len(core_cc)}')
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:

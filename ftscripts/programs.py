@@ -242,8 +242,9 @@ def run_genbank2gff3(input, output):
                 print('bp_genbank2gff3.pl executed successfully.')
                 if os.path.exists(output):
                     shutil.move(file_output, file_final)
-                    shutil.copy(file_final, output)
-                    print(f'Gff3 file saved in {output}')
+                    if not os.path.exists(os.path.join(output, file_final)):
+                        shutil.copy(file_final, output)
+                        print(f'Gff3 file saved in {output}')
                 else:
                     print(f"Directory '{output}' not found.", file=sys.stderr)
         except Exception as e:
@@ -366,7 +367,7 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
     dehydrated_file =  os.path.join(output_dir, f'{organism_name}_dehydrated.zip')
     dehydrated_dir =  os.path.join(output_dir, f'{organism_name}_dataset')
     checkpoint_file =  os.path.join(output_dir, f'{organism_name}_checkpoint_ncbi_datasets.txt')
-    
+
     if not files.file_check(checkpoint_file):
         if not os.path.exists(dehydrated_file):
             datasets_command = f"datasets download genome taxon {tax_id} --assembly-level complete --annotated --assembly-source 'RefSeq' --include gbff,gff3 --exclude-atypical --dehydrated  --filename {dehydrated_file}"

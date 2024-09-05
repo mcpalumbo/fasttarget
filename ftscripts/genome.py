@@ -505,6 +505,7 @@ def core_check_files(base_path, organism_name):
             pending_files.append(faa_files)
             print(f'{faa_files} not found.')
     
+    print('Pending files:')
     print(pending_files)
 
     if len(pending_files) == 0:
@@ -656,7 +657,7 @@ def corecruncher_output(base_path, organism_name):
     else:
         print(f'CoreCruncher output file already exists: {cc_results_table}.')
         corecruncher_table = pd.read_csv(cc_results_table, sep='\t', index_col=0, header=0)
-        
+
     return corecruncher_table
 
 def localization_prediction(base_path, organism_name, organism_type):
@@ -685,19 +686,19 @@ def localization_prediction(base_path, organism_name, organism_type):
     localization_dir = os.path.join(base_path, 'organism', organism_name, 'localization')
 
     file_pattern = os.path.join(localization_dir, "*_psortb_*.txt")
-    files = glob.glob(file_pattern)
+    all_files = glob.glob(file_pattern)
 
-    if not files:
+    if not all_files:
         programs.run_psort(faa_path, organism_type, localization_dir, output_format='terse')
-    elif len(files) > 1:
+    elif len(all_files) > 1:
         raise FileNotFoundError(f"Multiple psort result files found in {localization_dir}. Leave only one.")
     else:
-        print(f"Localization prediction already performed. Reading {files[0]}")
+        print(f"Localization prediction already performed. Reading {all_files[0]}")
 
         psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
 
         if not files.file_check(psort_results):
-            file_path = files[0]
+            file_path = all_files[0]
             df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
 
             result_dict = df.set_index('SeqID')['Localization'].to_dict()
