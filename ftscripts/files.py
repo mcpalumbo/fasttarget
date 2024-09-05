@@ -135,7 +135,7 @@ def create_organism_subfolders(base_path, organism_name):
         os.makedirs(organism_dir, exist_ok=True)
         print(f'Created directory: {organism_dir}')
     
-    list_dir = ['offtarget', 'metabolism', 'structures', 'conservation', 'metadata', 'genome', 'localization']
+    list_dir = ['offtarget', 'metabolism', 'structures', 'essentiality', 'conservation', 'metadata', 'genome', 'localization']
     # Subfolders
     for dir in list_dir:
         dir_path = os.path.join(organism_dir, dir)
