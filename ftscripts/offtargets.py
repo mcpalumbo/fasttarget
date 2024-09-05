@@ -1,4 +1,4 @@
-from ftscripts import programs, metadata
+from ftscripts import programs, metadata, files
 import os
 import pandas as pd
 import multiprocessing
@@ -125,22 +125,28 @@ def human_offtarget_parse (base_path, organism_name):
 
     offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
     human_blast_output = os.path.join(offtarget_path, 'human_offtarget_blast.tsv')
+    human_results = os.path.join(offtarget_path, 'human_offtarget.tsv')
 
-    blast_output_df = read_blast_output(human_blast_output)
+    if not files.file_check(human_results):
+        blast_output_df = read_blast_output(human_blast_output)
 
-    highest_pident_values = {}
+        highest_pident_values = {}
 
-    for index,row in blast_output_df.iterrows():
-        qseqid = row['qseqid']
-        pident = row['pident']
+        for index,row in blast_output_df.iterrows():
+            qseqid = row['qseqid']
+            pident = row['pident']
 
-        if qseqid not in highest_pident_values or pident > highest_pident_values[qseqid]:
-             highest_pident_values[qseqid] = pident
+            if qseqid not in highest_pident_values or pident > highest_pident_values[qseqid]:
+                highest_pident_values[qseqid] = pident
 
-    df_human = metadata.metadata_table_with_values(base_path, organism_name, highest_pident_values, 
-                                        'human_offtarget', offtarget_path, 'no_hit')
+        df_human = metadata.metadata_table_with_values(base_path, organism_name, highest_pident_values, 
+                                            'human_offtarget', offtarget_path, 'no_hit')
+    else:
+        print('Human offtarget analysis already done, output file found')
+        print(human_results)
+        df_human = pd.read_csv(human_results, sep='\t', header=0)
 
-    return highest_pident_values, df_human
+    return df_human
 
 def microbiome_offtarget_parse (base_path, organism_name, identity_filter, coverage_filter):
 
@@ -162,22 +168,29 @@ def microbiome_offtarget_parse (base_path, organism_name, identity_filter, cover
 
     offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
     microbiome_blast_output = os.path.join(offtarget_path, 'microbiome_offtarget_blast.tsv')
+    microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget.tsv')
 
-    blast_output_df = read_blast_output(microbiome_blast_output)
+    if not files.file_check(microbiome_results):
 
-    #Filter % identity and coverage
-    filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
-                                  & (blast_output_df['qcovs'] > coverage_filter)]
+        blast_output_df = read_blast_output(microbiome_blast_output)
 
-    value_counts = filtered_df['qseqid'].value_counts()
-    max_count = value_counts.max()
-    norm_counts = value_counts / max_count
+        #Filter % identity and coverage
+        filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
+                                    & (blast_output_df['qcovs'] > coverage_filter)]
 
-    normalized_counts_dict = norm_counts.to_dict()
+        value_counts = filtered_df['qseqid'].value_counts()
+        max_count = value_counts.max()
+        norm_counts = value_counts / max_count
 
-    df_microbiome = metadata.metadata_table_with_values(base_path, organism_name, normalized_counts_dict, 
-                                        'gut_microbiome_offtarget', offtarget_path, 'no_hit')
+        normalized_counts_dict = norm_counts.to_dict()
 
-    return normalized_counts_dict, df_microbiome
+        df_microbiome = metadata.metadata_table_with_values(base_path, organism_name, normalized_counts_dict, 
+                                            'gut_microbiome_offtarget', offtarget_path, 'no_hit')
 
+    else:
+        print('Microbiome offtarget analysis already done, output file found')
+        print(microbiome_results)
+        df_microbiome = pd.read_csv(microbiome_results, sep='\t', header=0)
+        
+    return df_microbiome
 

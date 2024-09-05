@@ -1,4 +1,4 @@
-from ftscripts import programs, metadata, offtargets
+from ftscripts import programs, metadata, offtargets, files
 import os
 import pandas as pd
 import multiprocessing
@@ -56,19 +56,25 @@ def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
 
     essentiality_path = os.path.join(base_path, 'organism', f'{organism_name}', 'essentiality')
     deg_blast_output = os.path.join(essentiality_path, 'deg_blast.tsv')
+    deg_results = os.path.join(essentiality_path, 'hit_in_deg.tsv')
 
-    blast_output_df = offtargets.read_blast_output(deg_blast_output)
+    if not files.file_check(deg_results):
+        blast_output_df = offtargets.read_blast_output(deg_blast_output)
 
-    #Filter % identity and coverage
-    filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
-                                  & (blast_output_df['qcovs'] > coverage_filter)]
+        #Filter % identity and coverage
+        filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
+                                    & (blast_output_df['qcovs'] > coverage_filter)]
 
-    unique_values = filtered_df['qseqid'].unique()
-    deg_hits = unique_values.tolist()
+        unique_values = filtered_df['qseqid'].unique()
+        deg_hits = unique_values.tolist()
 
-    df_deg = metadata.metadata_table_bool(base_path, organism_name, deg_hits, 
-                                        'hit_in_deg', essentiality_path)
-
-    return deg_hits, df_deg
+        df_deg = metadata.metadata_table_bool(base_path, organism_name, deg_hits, 
+                                            'hit_in_deg', essentiality_path)
+    else:
+        print('DEG analysis already done, output file found')
+        print(deg_results)
+        df_deg = pd.read_csv(deg_results, sep='\t', header=0)
+        
+    return df_deg
 
     

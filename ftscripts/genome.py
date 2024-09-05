@@ -679,7 +679,7 @@ def localization_prediction(base_path, organism_name, organism_type):
             return psort_df
         else:
             print(f"Localization prediction already performed. Reading {psort_results}")
-            psort_df = metadata.metadata_table(base_path, organism_name, 'psortb_localization', localization_dir)
+            psort_df = pd.read_csv(psort_results, sep='\t', index_col=0, header=0)
 
             return psort_df
         
