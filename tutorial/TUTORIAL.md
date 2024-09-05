@@ -14,9 +14,9 @@ To get the GenBank file (`.gbk`) for your organism, you have a couple of options
 
 To obtain metabolic files, you can use the Pathway Tools program. Here's a brief guide:
 
-1. **Install Pathway Tools**: Download and install Pathway Tools from the [Pathway Tools website](https://bioinformatics.ai.sri.com/ptools/).
+1. **Install Pathway Tools**: Download and install Pathway Tools from the official [Pathway Tools website](https://bioinformatics.ai.sri.com/ptools/).
 
-2. **Generate Metabolic Data**: Use Pathway Tools to generate metabolic files for your organism. This usually involves loading your GenBank file into Pathway Tools and running the metabolic pathway analysis.
+2. **Generate Metabolic Data**: Utilize PathoLogic to create a new Pathway/Genome Database (PGDB) for your organism. This powerful tool predicts metabolic pathways by analyzing a GenBank file with the assistance of the MetaCyc pathway database.
 
 3. **Save and Export**: Once the analysis is complete, export the metabolic files in the required format for use in this pipeline.
 
@@ -27,7 +27,7 @@ To obtain metabolic files, you can use the Pathway Tools program. Here's a brief
     **Find Chokepoints**:
         - Go to `Tools > Chokepoint Reaction Finder`.
         - Do not select any filters to obtain all possible reactions.
-        - You will find the chokepoints file in the Reports folder of your PGDB.
+        - You will find the chokepoints file in the `Reports` folder of your PGDB.
 
     **Create and Export Smartables**:
         - Go to `Smartables > Create New Smartable`, and choose to include `All Genes`.
