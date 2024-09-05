@@ -63,8 +63,8 @@ You can find the test dataset in the `organism/test` folder.
 
 1. **Run the pipeline with the test dataset:**
    ```bash
-      python tests.py
-      ```
+   python tests.py
+   ```
 
       #### Example Files
 
