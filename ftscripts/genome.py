@@ -478,7 +478,7 @@ def core_check_files(base_path, organism_name):
     pending_files = []
 
     for genome in tqdm.tqdm(genomes_list, initial=1):
-        gff_file = os.path.join(gff_dir, f"{genome}.gbk.gff")
+        gff_file = os.path.join(gff_dir, f"{genome}.gff")
         faa_files = os.path.join(fasta_dir, f"{genome}.faa")
 
         if not os.path.exists(gff_file):
@@ -567,18 +567,18 @@ def roary_output(base_path, organism_name):
         print(f'No roary output found in {roary_out_dir}.', file=sys.stderr)
 
     if os.path.exists(genes_csv_file):
-        dtypes = {'No. isolates': 'int', f'{organism_name}.gbk': 'str'}
+        dtypes = {'No. isolates': 'int', f'{organism_name}': 'str'}
         df = pd.read_csv(genes_csv_file, usecols= ['No. isolates', f'{organism_name}'], dtype=dtypes)
         max_isolates = df['No. isolates'].max()
         max_isolates_rows = df[df['No. isolates'] >= int(max_isolates)*0.9]
         print(f'Roary total core genes (> 90% strains): {len(max_isolates_rows)}')
-        gbk_ids = max_isolates_rows[f'{organism_name}.gbk'].dropna().tolist()
+        gbk_ids = max_isolates_rows[f'{organism_name}'].dropna().tolist()
         print(f'Roary {organism_name} core genes: {len(gbk_ids)}')
     else:
         print('No roary "gene_presence_absence.csv" file found.', file=sys.stderr)
 
-    gff_file = os.path.join(gff_dir, f'{organism_name}.gbk.gff')
-    gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gbk.gff')
+    gff_file = os.path.join(gff_dir, f'{organism_name}.gff')
+    gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gff')
     if os.path.exists(gff_file_fixed):
         print(f'Reading {gff_file_fixed}')
         core_locus_tag = id_to_locustag_gff(gff_file_fixed, gbk_ids)
@@ -586,7 +586,7 @@ def roary_output(base_path, organism_name):
         print(f'Reading {gff_file}')
         core_locus_tag = id_to_locustag_gff(gff_file, gbk_ids)
     else:
-        print(f'{organism_name}.gbk.gff not found.', file=sys.stderr)
+        print(f'{organism_name}.gff not found.', file=sys.stderr)
 
     roary_table = metadata.metadata_table_bool(base_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
 
@@ -664,14 +664,24 @@ def localization_prediction(base_path, organism_name, organism_type):
     elif len(files) > 1:
         raise FileNotFoundError(f"Multiple psort result files found in {localization_dir}. Leave only one.")
     else:
-        file_path = files[0]
-        df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
+        print(f"Localization prediction already performed. Reading {files[0]}")
 
-        result_dict = df.set_index('SeqID')['Localization'].to_dict()
+        psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
 
-        psort_df = metadata.metadata_table_with_values(base_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
+        if not files.file_check(psort_results):
+            file_path = files[0]
+            df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
 
+            result_dict = df.set_index('SeqID')['Localization'].to_dict()
 
-    return result_dict, psort_df
+            psort_df = metadata.metadata_table_with_values(base_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
+
+            return psort_df
+        else:
+            print(f"Localization prediction already performed. Reading {psort_results}")
+            psort_df = metadata.metadata_table(base_path, organism_name, 'psortb_localization', localization_dir)
+
+            return psort_df
+        
     
 
