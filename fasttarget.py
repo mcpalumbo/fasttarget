@@ -111,9 +111,8 @@ def main(config, base_path):
             # Find pockets using Fpocket. Keep the pockets with higher Druggability Score  
             df_structures = structures.pockets (base_path, organism_name, id_equivalences, uniprot_proteome_annotations, cpus=8)
             logging.info('Pockets searched and filtered')
-            tables.append(df_structures)
-
             logging.info('Structures analysis finished')
+            tables.append(df_structures)
 
         except Exception as e:
             logging.error(f'Error in structures analysis: {e}')
@@ -318,17 +317,17 @@ def main(config, base_path):
 
     # Merge dfs
     results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
-    print(' Length of tables:')
-    print(len(tables))
-    print(' Tables:')
-    print(tables)
     if len(tables) > 1:
         combined_df = tables[0]
         for df in tables[1:]:
-            combined_df = pd.merge(combined_df, df, on='gene')
-            combined_df.to_csv(results_path, sep='\t', index=False)
-            print(f'Final FastTarget results saved in {results_path}.')
-            logging.info(f'Final FastTarget results saved.')
+            if df is not None:
+                combined_df = pd.merge(combined_df, df, on='gene')
+        
+        combined_df.to_csv(results_path, sep='\t', index=False)
+        
+        print(f'Final FastTarget results saved in {results_path}.')
+        logging.info(f'Final FastTarget results saved.')
+        
         return combined_df
     elif len(tables) == 1:
         tables[0].to_csv(results_path, sep='\t', index=False)

@@ -926,11 +926,12 @@ def final_structure_table (base_path, organism_name, mapped_dict):
         final_pockets_df.to_csv(final_structure_file, sep='\t', index=False)
    
         print(f'Structure final results saved to {final_structure_file}.')
-
-        return final_pockets_df
     
     else:
-        print(f'Structure final results in {final_structure_file}.')     
+        print(f'Structure final results in {final_structure_file}.')
+        final_pockets_df = pd.read_csv(final_structure_file, sep='\t')
+
+    return final_pockets_df   
 
 def uniprot_proteome(base_path, organism_name, proteome_id, cpus=multiprocessing.cpu_count()):
 
