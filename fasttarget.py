@@ -31,6 +31,7 @@ def main(config, base_path):
 
     :return: DataFrame with the results.
     """
+    results = None
     
     #Obtaining the databases: DEG, HUMAN and MICROBIOME
     print_stylized('DATABASES')
@@ -326,12 +327,12 @@ def main(config, base_path):
         print(f'Final FastTarget results saved in {results_path}.')
         logging.info(f'Final FastTarget results saved.')
         
-        return combined_df
+        results = combined_df
     elif len(tables) == 1:
         tables[0].to_csv(results_path, sep='\t', index=False)
         print(f'Final FastTarget results saved in {results_path}.')
         logging.info(f'Final FastTarget results saved.')
-        return tables[0]
+        results = tables[0]
     else:
         logging.error('----- Error: No final DataFrame data. -----')
 
@@ -341,6 +342,8 @@ def main(config, base_path):
     logging.info('Tables for Target Pathogen created')
 
     print('------------------------------------- FINISHED ----------------------------------------')
+    
+    return results 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='FastTarget script')
