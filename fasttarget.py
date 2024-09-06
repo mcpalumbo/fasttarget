@@ -5,12 +5,12 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, databases, essentiality
+from ftscripts import files, structures, pathways, offtargets, genome, databases, essentiality, metadata
 from datetime import datetime
 import logging
 import sys
 from ftscripts.logger import logger 
-
+import shutil
 
 def print_stylized(title, width=80):
     """
@@ -303,6 +303,7 @@ def main(config, base_path):
             print_stylized('METADATA')
             for table in config.metadata['meta_tables']:
                 print(f'----- Loading metadata table: {table} -----')
+                shutil.copy(table, os.path.join(base_path, 'organism', 'metadata'))
                 df_meta = pd.read_csv(table, header=0, sep='\t')
                 tables.append(df_meta)
                 logging.info(f'Metadata table {table} loaded')
@@ -333,6 +334,8 @@ def main(config, base_path):
         return tables[0]
     else:
         logging.error('----- Error: No final DataFrame data. -----')
+
+    metadata.tables_for_TP(base_path, organism_name)
 
     print('------------------------------------- FINISHED ----------------------------------------')
 

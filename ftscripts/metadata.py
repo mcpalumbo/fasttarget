@@ -1,6 +1,7 @@
 from Bio import SeqIO
 import pandas as pd
 import os
+from ftscripts import files
 
 def ref_gbk_locus(base_path, organism_name):
     """
@@ -83,4 +84,34 @@ def metadata_table_with_values(base_path, organism_name, values_dict:str, proper
     print(f"{out_dir}/{property}.csv and .tsv have been created.")
 
     return metadata_table
+
+def tables_for_TP(base_path, organism_name):
+    """
+    Generates separate metadata tables for each property in the results table.
+    This tables can be imported as metadata in Target Pathogen.
+    They are saved in the 'tables_for_TP' directory.
+
+    :param base_path: Base path where the repository data is stored.
+    :param organism_name: Name of the organism
+    """
+
+    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
+    TP_metadata_path = os.path.join(base_path, 'organism', organism_name, 'tables_for_TP')
+
+    os.makedirs(TP_metadata_path, exist_ok=True)
+
+    if files.file_check(results_path):
+        
+        results_table = pd.read_csv(results_path, sep='\t', header=0)
+
+        # Generate separate metadata tables for each property
+
+        for column in results_table.columns[1:]:
+            sub_table = results_table[['gene', column]]
+            sub_table.to_csv(f"{TP_metadata_path}/{column}.tsv", index=False, sep='\t')
+            print(f"{TP_metadata_path}/{column}.tsv has been created.")
+    
+    else:
+        print(f"{results_path} not found.")
+
 
