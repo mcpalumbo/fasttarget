@@ -146,15 +146,20 @@ Once you have set up the configuration file, you can run the FastTarget pipeline
 
 The results are stored in a file called `results_table.tsv` in the folder of your organism. This file contains the following columns:
 
-- `protein_id`: Protein ID.
-- `protein_name`: Protein name.
-- `localization`: Localization of the protein.
-- `essential`: Essentiality of the protein.
-- `offtarget_human`: Human offtarget score.
-- `offtarget_microbiome`: Microbiome offtarget score.
-- `metabolism`: Metabolism score.
-- `structure`: Structure score.
-- `core`: Core genome score.
+- `gene`: Locus_tag ID.
+- `betweenness_centrality`: Measure of the protein's centrality within the network.
+- `edges`: Number of edges connected to the protein in the network.
+- `chokepoints`: Indication of whether the protein is a chokepoint.
+- `uniprot`: Identifier of the protein in the UniProt database.
+- `druggability_score`: Druggability score assigned by FPocket to the best binding pocket.
+- `pocket`: Best binding pocket of the protein.
+- `structure`: Structure containing the best pocket (could be an AlphaFold model or a PDB crystal structure).
+- `core_roary`: Indication of the protein's presence in the core genome according to Roary.
+- `core_corecruncher`: Indication of the protein's presence in the core genome according to CoreCruncher.
+- `human_offtarget`: BLASTp hit in the human proteome.
+- `gut_microbiome_offtarget`: This score is calculated based on the number of hits in the microbiota and is normalized. A value of 1 indicates that there are at least 1000 BLASTp hits.
+- `hit_in_deg`: BLASTp hit in the Database of Essential Genes (DEG).
+- `psortb_localization`: Predicted localization of the protein based on PSORTb analysis.
 - `metadata`: Each metadata table should have its own column.
 
 
@@ -162,7 +167,6 @@ The results are stored in a file called `results_table.tsv` in the folder of you
 
 The data generated in this pipeline can be loaded as metadata in Target Pathogen.
 
-All the tables are located in the `tables_for_TP` folder.
 
 This is a web interface that allows for the integration of multi-omics data to identify attractive targets in pathogens. 
 One of its main features is the visualization of genome structures along with their druggable pockets, and the ability to customize filters and scoring functions to prioritize targets. 
