@@ -236,17 +236,22 @@ def run_genbank2gff3(input, output):
                 image_name=image_name,
                 command=command
             )
+            # Files genomes
             file_output = f'{input}.gff'
-            file_final = os.path.splitext(input)[0]+'.gff'
+            file_final_name = os.path.splitext(input)[0]+'.gff'
+            # File for roary
+            file_roary_name = os.path.basename(input).replace('.gbk', '.gff')
+            file_final_roary = os.path.join(output, file_roary_name)
+
+            if not os.path.exists(output):
+                os.makedirs(output, exist_ok=True)
             if os.path.exists(file_output):
                 print('bp_genbank2gff3.pl executed successfully.')
-                if os.path.exists(output):
-                    shutil.move(file_output, file_final)
-                    if not os.path.exists(os.path.join(output, file_final)):
-                        shutil.copy(file_final, output)
-                        print(f'Gff3 file saved in {output}')
-                else:
-                    print(f"Directory '{output}' not found.", file=sys.stderr)
+                shutil.move(file_output, file_final_name)
+                if not os.path.exists(file_final_roary):
+                    shutil.copy(file_final_name, file_final_roary)
+                    print(f'Gff3 file saved in {output}')
+
         except Exception as e:
             print(f'Error running bp_genbank2gff3.pl: {e}')
             print(f"An error occurred: {e}")
