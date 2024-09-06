@@ -99,6 +99,7 @@ def tables_for_TP(base_path, organism_name):
     TP_metadata_path = os.path.join(base_path, 'organism', organism_name, 'tables_for_TP')
 
     os.makedirs(TP_metadata_path, exist_ok=True)
+    print(f"{TP_metadata_path} has been created.")
 
     if files.file_check(results_path):
         

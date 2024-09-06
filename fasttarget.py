@@ -303,7 +303,7 @@ def main(config, base_path):
             print_stylized('METADATA')
             for table in config.metadata['meta_tables']:
                 print(f'----- Loading metadata table: {table} -----')
-                shutil.copy(table, os.path.join(base_path, 'organism', 'metadata'))
+                shutil.copy(table, os.path.join(base_path, 'organism', organism_name, 'metadata'))
                 df_meta = pd.read_csv(table, header=0, sep='\t')
                 tables.append(df_meta)
                 logging.info(f'Metadata table {table} loaded')
@@ -335,7 +335,10 @@ def main(config, base_path):
     else:
         logging.error('----- Error: No final DataFrame data. -----')
 
+    # Create metadata tables for Target Pathogen
+    print('Creating metadata tables for Target Pathogen')
     metadata.tables_for_TP(base_path, organism_name)
+    logging.info('Tables for Target Pathogen created')
 
     print('------------------------------------- FINISHED ----------------------------------------')
 
