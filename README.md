@@ -144,6 +144,12 @@ Once you have set up the configuration file, you can run the FastTarget pipeline
      python fasttarget.py
      ```
 
+   **Note:** If you want to run the pipeline with your own config file, you can use the following command:
+   ```bash
+   python fasttarget.py --config_file mi_config.yml
+   ```
+
+
 The results are stored in a file called `results_table.tsv` in the folder of your organism. This file contains the following columns:
 
 - `gene`: Locus_tag ID.
