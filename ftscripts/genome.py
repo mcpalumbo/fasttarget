@@ -385,92 +385,88 @@ def core_files(base_path, organism_name):
 
     conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
     ncbi_download_data = os.path.join(conservation_dir, f'{organism_name}_dataset', 'ncbi_dataset', 'data')
-    ids_file = os.path.join(conservation_dir,'core_genomes_IDs.txt')
+           
+    #Output directory for Roary, for input takes gff files
+    gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
+    os.makedirs(gff_dir, exist_ok=True)
+    #Output directory for CoreCruncher, for input takes faa files
+    fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
+    os.makedirs(fasta_dir, exist_ok=True)
+    
+    print('Conservation gff and faa folders created.')
+    core_genomes = [organism_name]
 
-    if not files.file_check(ids_file):
-        #Output directory for Roary, for input takes gff files
-        gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
-        os.makedirs(gff_dir, exist_ok=True)
-        #Output directory for CoreCruncher, for input takes faa files
-        fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
-        os.makedirs(fasta_dir, exist_ok=True)
-        
-        print('Conservation gff and faa folders created.')
-        core_genomes = [organism_name]
+    #Reference genome
+    ref_gbk = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gbk')
+    ref_gff = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gff')
+    ref_faa = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.faa')
 
-        #Reference genome
-        ref_gbk = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gbk')
-        ref_gff = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gff')
+    if not os.path.exists(os.path.join(gff_dir, f'{organism_name}.gff')):
         shutil.copy(ref_gff, gff_dir)
-        ref_faa = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.faa')
+    if not os.path.exists(os.path.join(fasta_dir, f'{organism_name}.faa')):
         shutil.copy(ref_faa, fasta_dir)
 
-        ref_locus, ref_strain, ref_host = gbk_locus_strain_host(ref_gbk)
+    ref_locus, ref_strain, ref_host = gbk_locus_strain_host(ref_gbk)
 
-        #Core genomes from NCBI
-        for root, dirs, files_names in os.walk(ncbi_download_data):
-            for i, dir_name in enumerate(dirs):
-                print(f'Genome {i} from {len(dirs)}: {dir_name}')
-                gbff_pattern = os.path.join(root, dir_name, "*.gbff")
-                gbff_files = glob.glob(gbff_pattern)
+    #Core genomes from NCBI
+    for root, dirs, files_names in os.walk(ncbi_download_data):
+        for i, dir_name in enumerate(dirs):
+            print(f'Genome {i} from {len(dirs)}: {dir_name}')
+            gbff_pattern = os.path.join(root, dir_name, "*.gbff")
+            gbff_files = glob.glob(gbff_pattern)
 
-                gff_pattern = os.path.join(root, dir_name, "*.gff")
-                gff_files = glob.glob(gff_pattern)
-        
-                if not len(gbff_files) > 1:
+            gff_pattern = os.path.join(root, dir_name, "*.gff")
+            gff_files = glob.glob(gff_pattern)
+    
+            if not len(gbff_files) > 1:
 
-                    locus, strain, host = gbk_locus_strain_host(gbff_files[0])
+                locus, strain, host = gbk_locus_strain_host(gbff_files[0])
 
-                    if locus != ref_locus and strain != ref_strain:
-                        if host == 'Homo sapiens':
-                            if locus and strain:
-                                new_name = f"{strain}_{locus}"
-                                core_genomes.append(f'{strain}_{locus}')
-                            if not strain:
-                                new_name = f"{locus}"
-                                core_genomes.append(f'{locus}')  
-                            
-                            new_gbk = os.path.join(root, dir_name, f'{new_name}.gbk')
-                            new_faa = os.path.join(fasta_dir, f'{new_name}.faa')
-                            new_gff = os.path.join(gff_dir, f'{new_name}.gff')
+                if locus != ref_locus and strain != ref_strain:
+                    if host == 'Homo sapiens':
+                        if locus and strain:
+                            new_name = f"{strain}_{locus}"
+                            core_genomes.append(f'{strain}_{locus}')
+                        if not strain:
+                            new_name = f"{locus}"
+                            core_genomes.append(f'{locus}')  
+                        
+                        new_gbk = os.path.join(root, dir_name, f'{new_name}.gbk')
+                        new_faa = os.path.join(fasta_dir, f'{new_name}.faa')
+                        new_gff = os.path.join(gff_dir, f'{new_name}.gff')
 
-                            if not os.path.exists(new_gbk):
-                                shutil.copy(gbff_files[0], new_gbk)
-                            else:
-                                print(f'{new_gbk} already exists.')
-
-                            if not os.path.exists(new_faa):
-                                gbk_to_fasta(new_gbk, output_file_faa=new_faa)
-                            else:
-                                print(f'{new_faa} already exists.')
-
-                            if not os.path.exists(new_gff):
-                                try:      
-                                    programs.run_genbank2gff3(new_gbk, gff_dir)
-                                    print(f"Processed {new_name}.gff")
-                                except Exception as e:
-                                    print(f'Error in run_genbank2gff3: {e}')
-                                    add_sequences_to_gff3(gff_files[0], new_gbk)
-                                    shutil.copy(gff_files[0], new_gff)                 
-                                    print(f"Processed {new_name}.gff")
-                            else:
-                                print(f"{new_name}.gff already exists.")      
+                        if not os.path.exists(new_gbk):
+                            shutil.copy(gbff_files[0], new_gbk)
                         else:
-                            shutil.rmtree(os.path.join(root, dir_name))
+                            print(f'{new_gbk} already exists.')
+
+                        if not os.path.exists(new_faa):
+                            gbk_to_fasta(new_gbk, output_file_faa=new_faa)
+                        else:
+                            print(f'{new_faa} already exists.')
+
+                        if not os.path.exists(new_gff):
+                            try:      
+                                programs.run_genbank2gff3(new_gbk, gff_dir)
+                                print(f"Processed {new_name}.gff")
+                            except Exception as e:
+                                print(f'Error in run_genbank2gff3: {e}')
+                                add_sequences_to_gff3(gff_files[0], new_gbk)
+                                shutil.copy(gff_files[0], new_gff)                 
+                                print(f"Processed {new_name}.gff")
+                        else:
+                            print(f"{new_name}.gff already exists.")      
                     else:
                         shutil.rmtree(os.path.join(root, dir_name))
                 else:
-                    print(f'More than one genome files.')
+                    shutil.rmtree(os.path.join(root, dir_name))
+            else:
+                print(f'More than one genome files.')
 
-        print("Files processed successfully.")
+    print("Files processed successfully.")
         
-        files.list_to_file(ids_file,core_genomes)
-
-    else:
-        core_genomes = files.file_to_list(ids_file)
-        print('Core genomes already processed.')
-
     return core_genomes
+
 
 def core_check_files(base_path, organism_name):
     """
@@ -479,6 +475,7 @@ def core_check_files(base_path, organism_name):
 
     This function checks if the necessary files for the core genomes analysis are present.
     It checks for the presence of the .gff and .faa files.
+    If pending files are found, it runs the `core_files` function to generate the missing files.
 
     :param base_path: Base path where the repository data is stored.
     :param organism_name: Name of the organism.
@@ -486,30 +483,49 @@ def core_check_files(base_path, organism_name):
     """
     conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')  
     genomes_file = os.path.join(conservation_dir,'core_genomes_IDs.txt')
-    genomes_list = files.file_to_list(genomes_file)
-
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
-   
-    pending_files = []
 
-    for genome in tqdm.tqdm(genomes_list, initial=1):
-        gff_file = os.path.join(gff_dir, f"{genome}.gff")
-        faa_files = os.path.join(fasta_dir, f"{genome}.faa")
+    def pending_files(genomes_list):
+        
+        pending_files = []
 
-        if not os.path.exists(gff_file):
-            pending_files.append(gff_file)
-            print(f'{gff_file} not found.')
+        for genome in tqdm.tqdm(genomes_list, initial=1):
+            gff_file = os.path.join(gff_dir, f"{genome}.gff")
+            faa_files = os.path.join(fasta_dir, f"{genome}.faa")
 
-        if not os.path.exists(faa_files):
-            pending_files.append(faa_files)
-            print(f'{faa_files} not found.')
-    
-    print('Pending files:')
-    print(pending_files)
+            if not os.path.exists(gff_file):
+                pending_files.append(gff_file)
+                print(f'{gff_file} not found.')
 
-    if len(pending_files) == 0:
-        print('All core files correct.')
+            if not os.path.exists(faa_files):
+                pending_files.append(faa_files)
+                print(f'{faa_files} not found.')
+        
+        if len(pending_files) == 0:
+            print('All core files correct.')
+        else:
+            print('Error: Some core files are missing.')
+            print(f'Number of pending files: {len(pending_files)}')
+        
+        return pending_files
+
+    if files.file_check(genomes_file):
+        genomes_list = files.file_to_list(genomes_file)
+        pending_files = pending_files(genomes_list)
+        if len(pending_files) > 0:
+            core_files(base_path, organism_name)
+    else:
+        core_files(base_path, organism_name)
+        if files.file_check(genomes_file):
+            genomes_list = files.file_to_list(genomes_file)
+            pending_files = pending_files(genomes_list)
+            if len(pending_files) > 0:
+                core_files(base_path, organism_name)
+        else:
+            print(f'No core genomes file found or empty: {genomes_file}.')
+
+    return pending_files
 
 def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_count(), corecruncher_bin=None, program_list=['roary','corecruncher']):
 
