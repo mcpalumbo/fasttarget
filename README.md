@@ -171,8 +171,10 @@ The results are stored in a file called `results_table.tsv` in the folder of you
 
 ### Visualization on Target Pathogen
 
-The data generated in this pipeline can be loaded as metadata in Target Pathogen.
 
+The data generated in this pipeline can be loaded as metadata in Target Pathogen. 
+
+You can find each metadata table to upload to Target Pathogen in `tables_for_TP` inside the folder of your organism.
 
 This is a web interface that allows for the integration of multi-omics data to identify attractive targets in pathogens. 
 One of its main features is the visualization of genome structures along with their druggable pockets, and the ability to customize filters and scoring functions to prioritize targets. 
