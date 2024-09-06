@@ -32,7 +32,7 @@ def main(config, base_path):
     :return: DataFrame with the results.
     """
     results = None
-    
+
     #Obtaining the databases: DEG, HUMAN and MICROBIOME
     print_stylized('DATABASES')
     databases.main(base_path)
@@ -315,6 +315,7 @@ def main(config, base_path):
         logging.info('Metadata analysis not enabled')
 
     # Merge dfs
+    print_stylized('RESULTS')
     results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
     if len(tables) > 1:
         combined_df = tables[0]
@@ -337,6 +338,7 @@ def main(config, base_path):
         logging.error('----- Error: No final DataFrame data. -----')
 
     # Create metadata tables for Target Pathogen
+    print('\n')
     print('Creating metadata tables for Target Pathogen')
     metadata.tables_for_TP(base_path, organism_name)
     logging.info('Tables for Target Pathogen created')
