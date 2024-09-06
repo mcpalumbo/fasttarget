@@ -134,7 +134,6 @@ def main(config, base_path):
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
-            core_files = genome.core_files(base_path, organism_name)
             genome.core_check_files(base_path, organism_name)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
