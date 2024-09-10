@@ -303,7 +303,16 @@ def main(config, base_path):
             for table in config.metadata['meta_tables']:
                 print(f'----- Loading metadata table: {table} -----')
                 shutil.copy(table, os.path.join(base_path, 'organism', organism_name, 'metadata'))
-                df_meta = pd.read_csv(table, header=0, sep='\t')
+                with open(table, 'r') as file:
+                    first_line = file.readline()
+                    if '\t' in first_line:
+                        sep = '\t'
+                    elif ',' in first_line:
+                        sep = ','
+                    else:
+                        raise ValueError('Invalid file format. Only CSV and TSV metadata files are supported.')
+
+                df_meta = pd.read_csv(table, header=0, sep=sep)
                 tables.append(df_meta)
                 logging.info(f'Metadata table {table} loaded')
                 print('----- Finished -----')
