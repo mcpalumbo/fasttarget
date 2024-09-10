@@ -1,5 +1,3 @@
-#import sys
-#sys.path.append('/home/miranda/anaconda3/envs/fasttarget2/lib/python3.10/site-packages')
 import os
 import configuration
 import pandas as pd
