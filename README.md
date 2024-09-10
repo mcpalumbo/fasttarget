@@ -55,7 +55,21 @@ To set up Docker so that `sudo` is not required, follow these steps:
 
 After completing these steps, you will be able to run Docker commands without needing to prepend `sudo`.
 
-### Test Case
+
+## Databases
+
+This repository downloads and uses several key databases for analysis:
+
+1. **Human Proteome from UniProt (UP000005640)**: The complete *Homo sapiens* proteome will be downloaded from UniProt, including all annotated proteins for the organism.
+
+2. **Database of Essential Genes (DEG)**: This database contains essential bacterial genes and can be obtained from [DEG](http://origin.tubic.org/deg/public/index.php/download).
+
+3. **Unified Human Gastrointestinal Protein (UHGP) catalog (UHGP-90)**: The [UHGP] (https://doi.org/10.1038/s41587-020-0603-3) catalog clustered at 90% amino acid sequence identity will be downloaded.  **Note:** This file is over 10 GB in size, so ensure you have enough disk space available.
+
+During pipeline execution, if structural data calculations are enabled, proteins from **PDB** and **AlphaFold** will also be downloaded, which may take up several GB depending on the size of the organism being analyzed.
+
+
+## Test Case
 
 To test the pipeline, we provide the small genome of *Mycoplasma pneumoniae*.
 This dataset includes the GenBank (GBK) file, the proteome ID for structural data, and the SBML file for metabolism analysis. 
@@ -71,7 +85,7 @@ You can find the test dataset in the `organism/test` folder.
       In the `organism/test` folder, you can find example files that are used in this pipeline. These files include the GenBank (GBK) file, the SBML file for metabolism analysis, and others. These examples can serve as a reference for setting up your own dataset.
 
 
-### Editing the `config.yml` File
+## Editing the `config.yml` File
 
 The `config.yml` file is the central configuration file for this repository. It allows you to specify various settings related to your organism, CPU usage, structural data, metabolism, core genome analysis, offtarget analysis, DEG (Database of Essential Genes) analysis, localization, and metadata. Follow these steps to correctly fill out this file:
 
@@ -132,11 +146,11 @@ After editing the `config.yml` file, you can use the `configuration.py` script t
 3. **View the Loaded Configuration:**
    - After validation, the script will print the loaded configuration details, allowing you to verify that everything is set up correctly.
 
-### Running the FastTarget Pipeline
+## Running the FastTarget Pipeline
 
 Once you have set up the configuration file, you can run the FastTarget pipeline using the `fasttarget.py` script.
 
-#### Steps:
+### Steps:
 
 1. **Run the FastTarget Script:**
    - In your terminal, navigate to the repository directory and run the following command:
@@ -169,7 +183,7 @@ The results are stored in a file called `results_table.tsv` in the folder of you
 - `metadata`: Each metadata table should have its own column.
 
 
-### Visualization on Target Pathogen
+## Visualization on Target Pathogen
 
 
 The data generated in this pipeline can be loaded as metadata in Target Pathogen. 
