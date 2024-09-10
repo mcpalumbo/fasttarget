@@ -64,7 +64,7 @@ This repository downloads and uses several key databases for analysis:
 
 2. **Database of Essential Genes (DEG)**: This database contains essential bacterial genes and can be obtained from [DEG](http://origin.tubic.org/deg/public/index.php/download).
 
-3. **Unified Human Gastrointestinal Protein (UHGP) catalog (UHGP-90)**: The [UHGP] (https://doi.org/10.1038/s41587-020-0603-3) catalog clustered at 90% amino acid sequence identity will be downloaded.  **Note:** This file is over 10 GB in size, so ensure you have enough disk space available.
+3. **Unified Human Gastrointestinal Protein (UHGP) catalog (UHGP-90)**: The [UHGP](https://doi.org/10.1038/s41587-020-0603-3) catalog clustered at 90% amino acid sequence identity will be downloaded.  **Note:** This file is over 10 GB in size, so ensure you have enough disk space available.
 
 During pipeline execution, if structural data calculations are enabled, proteins from **PDB** and **AlphaFold** will also be downloaded, which may take up several GB depending on the size of the organism being analyzed.
 
