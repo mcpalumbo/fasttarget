@@ -55,7 +55,7 @@ def main(config, base_path):
     logging.info(f'Genome files created in {base_path}/organism/{organism_name}')
 
     # Number of CPUS
-    if config.cpus:
+    if isinstance(config.cpus, int):
         cpus = config.cpus
     else:
         cpus = multiprocessing.cpu_count()
