@@ -27,7 +27,9 @@ After successfully creating the environment, activate it:
    conda activate fasttarget
    ```
 
-This project requires the use of Docker images to run specific bioinformatics tools. To download these images, execute the following command:
+This project requires the use of Docker images to run specific bioinformatics tools.
+
+To download these images, execute the following command:
 
 3. **Set up Docker images:**
    ```bash
@@ -50,6 +52,10 @@ To set up Docker so that `sudo` is not required, follow these steps:
    ```bash
    sudo usermod -aG docker your-username
    ```
+   
+##### Warning ⚠️
+
+If you have Docker Desktop installed, this solution may not work and could result in errors, certain configurations with Docker Desktop can lead to issues.
 
 3. **Log out and log back in** for the changes to take effect.
 
