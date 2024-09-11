@@ -52,15 +52,14 @@ To set up Docker so that `sudo` is not required, follow these steps:
    ```bash
    sudo usermod -aG docker your-username
    ```
-   
-##### Warning ⚠️
-
-If you have Docker Desktop installed, this solution may not work and could result in errors, certain configurations with Docker Desktop can lead to issues.
 
 3. **Log out and log back in** for the changes to take effect.
 
 After completing these steps, you will be able to run Docker commands without needing to prepend `sudo`.
 
+##### Warning ⚠️
+
+If you have Docker Desktop installed, this solution may not work and could result in errors, certain configurations with Docker Desktop can lead to issues.
 
 ## Databases
 
