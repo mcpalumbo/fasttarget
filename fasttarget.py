@@ -156,12 +156,10 @@ def main(config, base_path):
 
             if config.core['corecruncher']:
                 try:
-                    corecruncher_script = config.core['corecruncher_script']
-                    logging.info(f'CoreCruncher script: {corecruncher_script}')
                     # Run CoreCruncher
                     print('----- 2. Running CoreCruncher -----')
                     logging.info('Starting CoreCruncher analysis')
-                    genome.core_genome_programs(base_path, organism_name, cpus, corecruncher_bin=corecruncher_script, program_list=['corecruncher'])
+                    genome.core_genome_programs(base_path, organism_name, cpus, program_list=['corecruncher'])
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
                     df_cc = genome.corecruncher_output(base_path, organism_name)

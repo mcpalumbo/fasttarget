@@ -109,7 +109,7 @@ The `config.yml` file is the central configuration file for this repository. It 
 4. **Core Genome Analysis:**
    - `core`: Set to `True` if core genome analysis is required; otherwise, set to `False`.
    - `roary`: Enable Roary for core genome analysis by setting this to `True`.
-   - `corecruncher`: Enable CoreCruncher by setting this to `True`. Provide the path to the CoreCruncher script under `corecruncher_script`.
+   - `corecruncher`: Enable CoreCruncher by setting this to `True`.
 
 5. **Metabolism:**
    - `metabolism`: Set to `True` if metabolic data is to be analyzed; otherwise, set to `False`.

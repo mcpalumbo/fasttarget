@@ -76,8 +76,6 @@ def print_config(config):
     if config.core:
         print(f"Roary Enabled: {config.core['roary']}")       
         print(f"CoreCruncher Enabled: {config.core['corecruncher']}")
-        if config.core['corecruncher']:
-            print(f"CoreCruncher Script: {config.core['corecruncher_script']}")
     else:
         print(f"Core Enabled: {config.core}")
       

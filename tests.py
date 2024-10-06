@@ -40,8 +40,7 @@ if __name__ == "__main__":
         "core": {
             "enabled": True,
             "roary": True,
-            "corecruncher": False,
-            "corecruncher_script": "/path/to/corecruncher_master.py"
+            "corecruncher": True
         },
         "offtarget": {
             "enabled": True,

@@ -35,8 +35,6 @@ core:
   enabled: False
   roary: False
   corecruncher: False
-  # corecruncher_script: Fill with the path of the corecruncher script. Example: /home/user/CoreCruncher-master/corecruncher_master.py.
-  corecruncher_script: /path/to/corecruncher_master.py
 
 # ---- Offtarget ----
 offtarget:

@@ -536,7 +536,7 @@ def core_check_files(base_path, organism_name):
 
     return pending_files
 
-def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_count(), corecruncher_bin=None, program_list=['roary','corecruncher']):
+def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
 
     """
     Run Roary and CoreCruncher programs for the core genomes analysis of the given organism.
@@ -549,7 +549,6 @@ def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_coun
     :param base_path: Base path where the repository data is is stored.
     :param organism_name: Name of the organism.
     :param cpus: Number of CPUs to use.
-    :param corecruncher_bin: Path to the CoreCruncher binary.
     :param program_list: List of programs to run, can be 'roary', 'corecruncher', or both
     
     """
@@ -572,7 +571,7 @@ def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_coun
         else:
             print(f'{gff_dir} not found.')
 
-    if 'corecruncher' in program_list and corecruncher_bin:
+    if 'corecruncher' in program_list:
         ccruncher_out_dir = os.path.join(conservation_dir, 'corecruncher_output')
         cc_output_file = os.path.join(ccruncher_out_dir, 'families_core.txt')
         
@@ -580,7 +579,7 @@ def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_coun
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
                 print('Running CoreCruncher')
-                programs.run_core_cruncher(corecruncher_bin, fasta_dir, ccruncher_out_dir, reference_file)
+                programs.run_core_cruncher(ccruncher_out_dir, reference_file)
                 print('Finished')
             else:
                 print(f'CoreCruncher output file already exists: {cc_output_file}.')

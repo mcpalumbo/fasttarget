@@ -285,31 +285,37 @@ def run_roary(work_dir:str, input:str, output:str, cpus=multiprocessing.cpu_coun
     else:
         print(f"Directory '{input}' not found.", file=sys.stderr)
 
-def run_core_cruncher(ccruncher_script:str, input:str, output:str, reference:str):
+def run_core_cruncher(corecruncher_dir:str, reference:str):
     """
     Runs CoreCruncher, a core genome tool. Default options.
+    Runs the docker image mcpalumbo/corecruncher:1.
     More info: https://github.com/lbobay/CoreCruncher
 
-    :param ccruncher_script: Path of corecruncher_master.py script.
-    :param input: Path to a folder containing the genomes to analyze.
-    :param output: CoreCruncher will create an output folder containg all the results of the analysis.
+    :param dir: Folder containing the input directory and where to find all the results of the analysis. faa/ subfolder must contain the genomes to analyze (.faa files).
     :param reference: Pivot genome, specify the name of the file.
     
     """
-   
-    if os.path.exists(ccruncher_script):
-        if os.path.exists(input):
-            if os.path.exists(output):
-            
-                ccruncher_command = f'{ccruncher_script} -in {input} -out {output} -ref {reference}'
-                run_bash_command(ccruncher_command)
-
-            else:
-                print(f"Directory '{output}' not found.", file=sys.stderr)
+    work_dir = corecruncher_dir
+    bind_dir = '/data'
+    image_name = 'mcpalumbo/corecruncher:1'
+    command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -ref {reference}'
+    
+    if os.path.exists(corecruncher_dir):
+        if os.path.exists(os.path.join(corecruncher_dir, 'faa')):    
+            try:
+                run_docker_container(
+                    work_dir=work_dir,
+                    bind_dir=bind_dir,
+                    image_name=image_name,
+                    command=command
+                )
+            except Exception as e:
+                print(f'Error running corecruncher: {e}')
+                print(f"An error occurred: {e}")
         else:
-            print(f"Directory '{input}' not found.", file=sys.stderr)
+            print(f"Directory '{os.path.join(corecruncher_dir, 'faa')}' not found.", file=sys.stderr)
     else:
-        print(f"Script '{ccruncher_script}' not found.", file=sys.stderr)
+        print(f"Directory '{corecruncher_dir}' not found.", file=sys.stderr)
 
 def run_panx(panx_script, input, species_name, cpus=multiprocessing.cpu_count()):
     """
