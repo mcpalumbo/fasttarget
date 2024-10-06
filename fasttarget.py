@@ -323,7 +323,8 @@ def main(config, base_path):
 
     # Merge dfs
     print_stylized('RESULTS')
-    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
+    current_date = datetime.now().strftime('%Y-%m-%d-%H-%M')
+    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table_{current_date}.tsv')
     if len(tables) > 1:
         combined_df = tables[0]
         for df in tables[1:]:
