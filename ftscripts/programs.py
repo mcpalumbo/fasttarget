@@ -225,7 +225,7 @@ def run_genbank2gff3(input, output):
     """
     work_dir = os.path.dirname(input)
     bind_dir = '/data'
-    image_name = 'docker-bioperl'
+    image_name = 'mcpalumbo/bioperl:1'
     command = f'bp_genbank2gff3 {os.path.basename(input)}'
 
     if files.file_check(input):
