@@ -9,14 +9,18 @@ class PrintLogger:
         self.in_write = False
 
     def write(self, message):
-        if message.strip() and not self.in_write:
-            self.in_write = True
-            # Log message only to file (without printing it to console)
-            self.logger.info(message.strip())
-            # Print the raw message directly to the terminal (without log format)
-            sys.__stdout__.write(message + '\n')
+        if message.startswith('\r'):
+            sys.__stdout__.write(message)
             sys.__stdout__.flush()
-            self.in_write = False
+        else:
+            if message.strip() and not self.in_write:
+                self.in_write = True
+                # Log message only to file (without printing it to console)
+                self.logger.info(message.strip())
+                # Print the raw message directly to the terminal (without log format)
+                sys.__stdout__.write(message + '\n')
+                sys.__stdout__.flush()
+                self.in_write = False
 
     def flush(self):
         pass
