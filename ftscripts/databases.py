@@ -4,7 +4,7 @@ import tarfile
 import shutil
 import os
 import time
-from ftscripts import programs,files
+from ftscripts import programs,files, structures
 
 import urllib.request
 
@@ -125,21 +125,58 @@ def download_microbiome(base_path):
 def download_human(base_path):
     """
     Downloads Human proteome form Uniprot (UP000005640). 
-    The fasta file is located in "databases" folder.
+    Obtains fasta sequences and structures from AlphaFold and PDB.
+    The fasta file and annotations are located in "databases" folder.
+    The structures are located in "databases/human_structures" folder.
 
     :param base_path =  Path to the directory where 'databases' folder is located.
 
+    :return: human_ann_dict = Dictionary with Uniprot annotations for human proteome.
+    :return: human_failed_pdb = List with PDB IDs that failed to download.
+    :return: human_failed_AF = List with AlphaFold IDs that failed to download.
+
     """
+    #Download fasta sequences
     databases_path = os.path.join(base_path, 'databases')
     humanprot_path = os.path.join(databases_path, 'human_uniprot_UP000005640.faa')
     
     url = 'https://rest.uniprot.org/uniprotkb/stream?format=fasta&query=%28%28proteome%3AUP000005640%29%29'
     
-    print('Downloading human proteome.')
+    print('Downloading human proteome: fasta sequences.')
     download_with_wget(url, humanprot_path)
     print('Finished.')
 
     print(f'File {humanprot_path} downloaded successfully')
+
+    #Download structures
+    human_structures_path = os.path.join(databases_path, 'human_structures')
+    if not os.path.exists(human_structures_path):
+        os.makedirs(human_structures_path, exist_ok=True)
+
+    human_ann_dict = structures.uniprot_proteome_to_dict(human_structures_path,'UP000005640')
+    
+    human_alphafold_ids, human_pdb_ids = uniprot_proteome_annotation_to_structure_ids (human_ann_dict)
+    
+    print('Downloading human proteome: PDB and AlphaFold structures.') 
+    human_failed_pdb, human_failed_AF = get_pdb_files (human_structures_path, human_alphafold_ids, human_pdb_ids, cpus=multiprocessing.cpu_count())
+    print('Finished.')
+
+    #Check if all structures were downloaded
+
+    human_downloaded_pdb_files = glob.glob(os.path.join(human_structures_path, 'PDB_files', '*.pdb'))
+    human_downloaded_AF_files = glob.glob(os.path.join(human_structures_path, 'AlphaFold_files', '*.pdb'))
+
+    check = False
+    PDB_complete = len(human_pdb_ids) == len(human_downloaded_pdb_files) + len(human_failed_pdb)
+    AF_complete = len(human_alphafold_ids) == len(human_downloaded_AF_files) + len(human_failed_AF)
+
+    if PDB_complete and AF_complete:
+        print(f'All structures downloaded correctly in {human_structures_path}.')
+        check = True
+    else:
+        print(f'Error downloading structures in {human_structures_path}. Check the failed files.')
+
+    return human_ann_dict, human_failed_pdb, human_failed_AF, check
 
 def index_db_blast_human (base_path):
 
