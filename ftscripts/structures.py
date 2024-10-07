@@ -147,20 +147,19 @@ def uniprot_proteome_ids(proteome_id):
     uniprot_list = list(filter(None, uniprot_list))
     return uniprot_list
 
-def uniprot_proteome_save_annotations (base_path, organism_name, proteome_id, cpus=multiprocessing.cpu_count()):
+def uniprot_proteome_to_dict (outdir, proteome_id, cpus=multiprocessing.cpu_count()):
     """
     Return a dictionary with UniProt annotations for a proteome ID.
     Create a .json file with this data.
     
-    :param base_path: Base path.
-    :param organism_name: Name of organism.
+    :param outdir: Output directory path.
     :param proteome_id: Uniprot proteome ID for the organism.
     :param cpus: Number of threads (CPUs) to use.
 
     :return: Dictionary with annotations for the UniProt proteome ID.
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
-    proteome_json = os.path.join(structure_dir, f"{proteome_id}_ann.json")
+
+    proteome_json = os.path.join(outdir, f"{proteome_id}_ann.json")
 
     if not files.file_check(proteome_json):
         print(f'Getting data from UniProt proteome {proteome_id}.')
@@ -181,7 +180,7 @@ def uniprot_proteome_save_annotations (base_path, organism_name, proteome_id, cp
                 dict_proteome[single_id] = protein_data
 
         print(f'UniProt proteome {proteome_id} data retrieved.')
-        files.dict_to_json(structure_dir, f"{proteome_id}_ann.json", dict_proteome)
+        files.dict_to_json(outdir, f"{proteome_id}_ann.json", dict_proteome)
         print(f'UniProt proteome data saved to "{proteome_json}".')
 
     else:
@@ -189,6 +188,52 @@ def uniprot_proteome_save_annotations (base_path, organism_name, proteome_id, cp
         dict_proteome = files.json_to_dict(proteome_json)
 
     return dict_proteome
+
+def uniprot_proteome_save_annotations (base_path, organism_name, proteome_id, cpus=multiprocessing.cpu_count()):
+    """
+    Save a dictionary with annotations for a UniProt proteome ID, located in structures dir of the organism.
+    Returns a dictionary with the annotations.
+
+    :param base_path: Base path.
+    :param organism_name: Name of organism.
+    :param proteome_id: Uniprot proteome ID for the organism.
+    :param cpus: Number of threads (CPUs) to use.
+
+    :return: Dictionary with annotations for the UniProt proteome ID.
+    """
+    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')   
+
+    dict_proteome = uniprot_proteome_to_dict(structure_dir, proteome_id, cpus)
+
+    return dict_proteome
+
+def uniprot_proteome_annotation_to_structure_ids (proteome_ann_dict):
+
+    """
+    Parse a dictionary with annotations for a UniProt proteme ID.
+    Returns two lists with IDs of AlphaFold and PDB structures.
+    
+    :param proteome_ann_dict : Dictionary with annotations for a UniProt proteome ID.
+
+    :return: Lists with AlphaFold IDs.
+    :return: Lists with PDB IDs.
+    """
+    alphafold_ids = []
+    pdb_ids = []
+
+    for uniprot_id in proteome_ann_dict.keys():
+
+        if proteome_ann_dict[uniprot_id]['AlphaFoldDB']:
+            alphafold_ids.append(proteome_ann_dict[uniprot_id]['AlphaFoldDB'])
+        
+        if proteome_ann_dict[uniprot_id]['PDB_id']:
+            for pdb_entry in proteome_ann_dict[uniprot_id]['PDB_id']:
+                pdb_ids.append(pdb_entry['ID'])
+
+    alphafold_ids_uniq = list(set(alphafold_ids))
+    pdb_ids_uniq = list(set(pdb_ids))
+
+    return alphafold_ids_uniq, pdb_ids_uniq
 
 def uniprot_proteome_structure_ids (base_path, organism_name, proteome_id):
 
@@ -209,20 +254,7 @@ def uniprot_proteome_structure_ids (base_path, organism_name, proteome_id):
     
     proteome_ann_dict = files.json_to_dict(file_json)
 
-    alphafold_ids = []
-    pdb_ids = []
-
-    for uniprot_id in proteome_ann_dict.keys():
-
-        if proteome_ann_dict[uniprot_id]['AlphaFoldDB']:
-            alphafold_ids.append(proteome_ann_dict[uniprot_id]['AlphaFoldDB'])
-        
-        if proteome_ann_dict[uniprot_id]['PDB_id']:
-            for pdb_entry in proteome_ann_dict[uniprot_id]['PDB_id']:
-                pdb_ids.append(pdb_entry['ID'])
-
-    alphafold_ids_uniq = list(set(alphafold_ids))
-    pdb_ids_uniq = list(set(pdb_ids))
+    alphafold_ids_uniq, pdb_ids_uniq = uniprot_proteome_annotation_to_structure_ids(proteome_ann_dict)
 
     return alphafold_ids_uniq, pdb_ids_uniq
 
@@ -462,29 +494,26 @@ def get_structure_alphafold(output_path, uniprot_id):
    
     return res
 
-def get_structures (base_path, organism_name, proteome_id, cpus=multiprocessing.cpu_count()):
+def get_pdb_files (outdir, alphafold_ids, pdb_ids, cpus=multiprocessing.cpu_count()):
     """
     Download PDB and AlphaFold structures from a list of IDs. 
-    This function creates two directories in the 'structures' directory: 'PDB_files' and 'AlphaFold_files'.
+    This function creates two directories in the 'outdir' directory: 'PDB_files' and 'AlphaFold_files'.
     Returns lists of failed IDs.
     
-    :param base_path: Base path.
-    :param organism_name: Name of organism.
-    :param proteome_id: Uniprot proteome ID for the organism.
+    :param outdir: Output directory path.
+    :param alphafold_ids: List of AlphaFold IDs.
+    :param pdb_ids: List of PDB IDs.
     :param cpus: Number of threads (CPUs) to use.
 
     :return: Lists of failed PDB IDs.
     :return: Lists of failed AlphaFold IDs.
     """
 
-    alphafold_ids, pdb_ids = uniprot_proteome_structure_ids(base_path, organism_name, proteome_id)
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
-
-    if os.path.exists(structure_dir):
-        output_dir_PDB = os.path.join(structure_dir, 'PDB_files')
+    if os.path.exists(outdir):
+        output_dir_PDB = os.path.join(outdir, 'PDB_files')
         os.makedirs(output_dir_PDB, exist_ok=True)
 
-        output_dir_AF = os.path.join(structure_dir, 'AlphaFold_files')
+        output_dir_AF = os.path.join(outdir, 'AlphaFold_files')
         os.makedirs(output_dir_AF, exist_ok=True)
 
         failed_pdb = []
@@ -553,7 +582,29 @@ def get_structures (base_path, organism_name, proteome_id, cpus=multiprocessing.
         return failed_pdb, failed_AF
 
     else:
-        print(f"The directory '{structure_dir}' not found.", file=sys.stderr)
+        print(f"The directory '{outdir}' not found.", file=sys.stderr)
+
+def get_structures (base_path, organism_name, proteome_id, cpus=multiprocessing.cpu_count()):
+    """
+    Download PDB and AlphaFold structures for an organism. 
+    This function creates two directories in the 'structures' directory: 'PDB_files' and 'AlphaFold_files'.
+    Returns lists of failed IDs.
+    
+    :param base_path: Base path.
+    :param organism_name: Name of organism.
+    :param proteome_id: Uniprot proteome ID for the organism.
+    :param cpus: Number of threads (CPUs) to use.
+
+    :return: Lists of failed PDB IDs.
+    :return: Lists of failed AlphaFold IDs.
+    """
+
+    alphafold_ids, pdb_ids = uniprot_proteome_structure_ids(base_path, organism_name, proteome_id)
+    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+
+    failed_pdb, failed_AF = get_pdb_files(structure_dir, alphafold_ids, pdb_ids, cpus)
+
+    return failed_pdb, failed_AF
 
 def check_complete_structures (base_path, organism_name, proteome_id):
 
