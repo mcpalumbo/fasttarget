@@ -104,7 +104,7 @@ def run_bash_command(command):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 
-def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None):
+def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None):
     """
     Run a docker container.
 
@@ -113,10 +113,14 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None)
     :param image_name: The image to run.
     :param command: The command to run.
     :param env_vars: Dictionary of environment variables to set in the container.
+    :param volumes: Dictionary of volumes to mount in the container.
+
     """
     client = docker.from_env()
 
-    volumes = {work_dir: {'bind': bind_dir, 'mode': 'rw'}}
+    if volumes == None:
+        volumes = {work_dir: {'bind': bind_dir, 'mode': 'rw'}}
+    
     user_str = f"{os.getuid()}:{os.getgid()}"
 
     try:
@@ -291,17 +295,17 @@ def run_core_cruncher(corecruncher_dir:str, reference:str):
     Runs the docker image mcpalumbo/corecruncher:1.
     More info: https://github.com/lbobay/CoreCruncher
 
-    :param dir: Folder containing the input directory and where to find all the results of the analysis. faa/ subfolder must contain the genomes to analyze (.faa files).
+    :param corecruncher_dir: Folder containing the input directory and where to find all the results of the analysis. faa/ subfolder must contain the genomes to analyze (.faa files).
     :param reference: Pivot genome, specify the name of the file.
     
     """
-    work_dir = corecruncher_dir
-    bind_dir = '/data'
-    image_name = 'mcpalumbo/corecruncher:1'
-    command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -ref {reference}'
-    
+   
     if os.path.exists(corecruncher_dir):
-        if os.path.exists(os.path.join(corecruncher_dir, 'faa')):    
+        if os.path.exists(os.path.join(corecruncher_dir, 'faa')):
+            work_dir = corecruncher_dir
+            bind_dir = '/data'
+            image_name = 'mcpalumbo/corecruncher:1'
+            command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -ref {reference}'  
             try:
                 run_docker_container(
                     work_dir=work_dir,
@@ -317,6 +321,103 @@ def run_core_cruncher(corecruncher_dir:str, reference:str):
     else:
         print(f"Directory '{corecruncher_dir}' not found.", file=sys.stderr)
 
+def run_foldseek_create_index_db(structures_dir:str, DB_name:str):
+
+    """
+    Creates a database and indexes it for Foldseek, a tool designed for efficient protein structure comparison.
+    Runs the docker image mcpalumbo/foldseek:1.
+    More info: https://github.com/steineggerlab/foldseek
+
+    :param structures_dir: Folder containing the .pdb structures to make the database.
+    :param DB_name: Name of the database to create.
+    
+    """
+
+    if os.path.exists(structures_dir):
+        
+        DB_foldseek_path = os.path.join(structures_dir, 'DB_foldseek')
+        
+        if not os.path.exists(DB_foldseek_path):
+            os.makedirs(DB_foldseek_path, exist_ok=True)
+
+        work_dir = structures_dir
+        bind_dir = '/data'
+        image_name = 'mcpalumbo/foldseek:1'
+        command_create = f'createdb /data /data/DB_foldseek/{DB_name}'
+        command_index = f'createindex /data/DB_foldseek/{DB_name} /data/DB_foldseek/tmp'
+
+        try:
+            run_docker_container(
+                work_dir=work_dir,
+                bind_dir=bind_dir,
+                image_name=image_name,
+                command=command_create
+            )
+            try:
+                run_docker_container(
+                    work_dir=work_dir,
+                    bind_dir=bind_dir,
+                    image_name=image_name,
+                    command=command_index
+                )
+            except Exception as e:
+                print(f'Error running foldseek createindex: {e}')
+                print(f"An error occurred: {e}")
+        except Exception as e:
+            print(f'Error running foldseek createdb: {e}')
+            print(f"An error occurred: {e}")
+    else:
+        print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
+
+def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
+
+    """
+    Runs Foldseek easy-search, a tool designed for efficient protein structure comparison.
+    Runs the docker image mcpalumbo/foldseek:1.
+    More info: https://github.com/steineggerlab/foldseek
+
+    :param structures_dir: Folder containing the .pdb structures to search in the database.
+    :param DB_dir: Folder containing the database.
+    :param DB_name: Name of the database to create.
+    :param query: Query structure file name. Should be in structures_dir.
+
+    """
+  
+    if os.path.exists(structures_dir):
+
+        foldseek_results_path = os.path.join(structures_dir, 'foldseek_results')
+    
+        if not os.path.exists(foldseek_results_path):
+            os.makedirs(foldseek_results_path, exist_ok=True)
+        
+        if os.path.exists(DB_dir):
+
+            volumes = {
+                DB_dir: {'bind': '/data', 'mode': 'rw'},
+                structures_dir: {'bind': '/media', 'mode': 'rw'}
+                }
+            work_dir = structures_dir
+            bind_dir = '/media'
+            image_name = 'mcpalumbo/foldseek:1'
+            command = f'easy-search /media/{query} /data/{DB_name} /media/foldseek_results/{query}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
+
+            try:
+                run_docker_container(
+                    volumes=volumes,
+                    work_dir=work_dir,
+                    bind_dir=bind_dir,
+                    image_name=image_name,
+                    command=command
+                )
+            except Exception as e:
+                print(f'Error running foldseek easy-search: {e}')
+                print(f"An error occurred: {e}")
+        else:
+            print(f"Directory '{DB_dir}' not found. Please make the DB again.", file=sys.stderr)
+    else:
+        print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
+
+ 
 def run_panx(panx_script, input, species_name, cpus=multiprocessing.cpu_count()):
     """
     Runs pan-genome-analysis, a pan-genome tool. Default options.
