@@ -66,6 +66,7 @@ If you have Docker Desktop installed, this solution may not work and could resul
 This repository downloads and uses several key databases for analysis:
 
 1. **Human Proteome from UniProt (UP000005640)**: The complete *Homo sapiens* proteome will be downloaded from UniProt, including all annotated proteins for the organism.
+Human PDB and AlphaFold structures will be downloaded for use with Foldseek. **Note:** Please be aware that this may require over 80GB of storage space. Ensure that you have sufficient disk space available before proceeding with the download to avoid any interruptions.
 
 2. **Database of Essential Genes (DEG)**: This database contains essential bacterial genes and can be obtained from [DEG](http://origin.tubic.org/deg/public/index.php/download).
 
