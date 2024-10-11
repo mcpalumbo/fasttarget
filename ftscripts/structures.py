@@ -451,9 +451,44 @@ def get_structure_PDB (output_path, PDB_id):
             else:
                 max_retries += 1
                 if max_retries == 3:
-                    print(f"Failed to download {PDB_id}.")
+                    print(f"Failed to download .pdb for {PDB_id}.")
         except requests.exceptions.RequestException as e:
-            print(f'Failed to download {PDB_id}, attempt number {max_retries}: {e}')
+            print(f'Failed to download .pdb for {PDB_id}, attempt number {max_retries}: {e}')
+            max_retries += 1
+        
+    return res
+
+def get_structure_CIF (output_path, PDB_id):
+    """
+    Download structure from PDB. Returns True if successful.
+    
+    :param output_path: Output directory path.
+    :param PDB_id: ID of PDB structure.
+
+    :return: True if successful.
+    """
+    res = False
+    file_path = os.path.join(output_path, f"PDB_{PDB_id}.cif")
+
+    pdb_url = f"https://files.rcsb.org/download/{PDB_id}.cif"
+
+    max_retries = 0
+
+    while max_retries < 3:
+        try:
+            response = requests.get(pdb_url)
+            if response.status_code == 200:
+                with open(file_path, 'wb') as file:
+                    file.write(response.content)
+                print(f"Download {PDB_id} finished.")
+                max_retries += 3
+                res = True
+            else:
+                max_retries += 1
+                if max_retries == 3:
+                    print(f"Failed to download .cif for {PDB_id}.")
+        except requests.exceptions.RequestException as e:
+            print(f'Failed to download .cif for {PDB_id}, attempt number {max_retries}: {e}')
             max_retries += 1
         
     return res
