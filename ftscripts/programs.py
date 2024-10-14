@@ -10,6 +10,7 @@ import sys
 import glob
 import pwd
 import grp
+import time
 from pathlib import Path
 import shutil
 
@@ -74,6 +75,45 @@ def load_config(base_path):
     with config_path.open() as file:
         config = json.load(file)
     return config
+
+def run_bash_command_with_retries(command, retries=3, delay=5):
+    """
+    Run a bash command with retry logic.
+
+    :param command: The command to run.
+    :param retries: Number of retries if the command fails. Default is 3.
+    :param delay: Delay (in seconds) between retries. Default is 5 seconds.
+    """
+    attempt = 0
+    while attempt < retries:
+        try:
+            print(f'Running (attempt {attempt+1}/{retries}): {command}')
+            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            stdout, stderr = process.communicate()
+            print(f"STDOUT:\n{stdout}")  # Always print stdout
+            print(f"STDERR:\n{stderr}")
+
+            if process.returncode == 0:
+                print("Command executed successfully.")
+                return stdout  # Return stdout if successful
+            else:
+                print(f"Command failed with return code {process.returncode}.")
+                if stderr:
+                    print(f"STDERR:\n{stderr}")
+                raise Exception(f"Command failed with return code {process.returncode}.")
+
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            attempt += 1
+            if attempt < retries:
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                print("Max retries reached. Command failed.")
+                raise  # Raise the last exception after max retries
+
+    return None
 
 def run_bash_command(command):
     """
@@ -502,7 +542,7 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
             print(f'Dehydrated data package in {dehydrated_dir}')
         
         rehydrate_command = f'datasets rehydrate --directory {dehydrated_dir}'
-        run_bash_command(rehydrate_command)
+        run_bash_command_with_retries(rehydrate_command)
         print(f'Rehydrated complete')
         
         print('NCBI download complete')
