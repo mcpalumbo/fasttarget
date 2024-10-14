@@ -479,21 +479,12 @@ def final_foldseek_structure_table (base_path, organism_name, mapped_dict):
     if not files.file_check(final_foldseek_file):
 
         rows = []
-        pepe_1 = 0
-        pepe_2 = 0
+
         for locus_tag in all_locus_tags:
             if locus_tag in mapped_dict:
                 rows.append(mapped_dict[locus_tag])
-                pepe_1 += 1
             else:
                 rows.append({'gene': locus_tag, 'structure': 'No hit', 'target': None, 'rmsd': None, 'prob': None, 'pident': None })
-                pepe_2 += 1
-        print('Hits')
-        print(pepe_1)
-        print('Non hits')
-        print(pepe_2)
-        print(len(rows))
-        print(rows[0:2])
 
         final_foldseek_df = pd.DataFrame(rows).rename(columns={
             'structure': 'FS_organism_structure_query',
