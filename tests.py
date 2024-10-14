@@ -47,7 +47,8 @@ if __name__ == "__main__":
             "human": True,
             "microbiome": True,
             "microbiome_identity_filter": 40,
-            "microbiome_coverage_filter": 30
+            "microbiome_coverage_filter": 30,
+            "foldseek_human": True
         },
         "deg": {
             "enabled": True,

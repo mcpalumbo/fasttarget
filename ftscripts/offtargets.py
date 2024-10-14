@@ -470,8 +470,6 @@ def final_foldseek_structure_table (base_path, organism_name, mapped_dict):
     structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
 
     all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
-    print('Number of locus tags')
-    print(len(all_locus_tags))
     
     # Create a DataFrame with final results
     final_foldseek_file = os.path.join(structure_dir, f'{organism_name}_final_foldseek_results.tsv')
