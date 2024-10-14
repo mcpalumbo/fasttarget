@@ -87,6 +87,10 @@ def print_config(config):
         if config.offtarget['microbiome']:
             print(f"Microbiome Identity Filter: {config.offtarget['microbiome_identity_filter']}")
             print(f"Microbiome Coverage Filter: {config.offtarget['microbiome_coverage_filter']}")
+        if config.structures:
+            print(f"Foldseek Human Offtarget Enabled: {config.offtarget['foldseek_human']}")
+        else:
+            print('Structures must be enabled to use Foldseek')
     else:
         print(f"Offtarget Enabled: {config.offtarget}")
         

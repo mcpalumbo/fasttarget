@@ -185,8 +185,8 @@ def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', 
     :param blastdb: BLAST database name (full path).
     :param query: Query fasta (protein) file path.
     :param output: Output file path.
-    :param evalue: Expect value (E) for saving hits. Deafult 1e-5.
-    :param max_hsps: Maximum number of HSPs (alignments) to keep for any single query-subject pair. Dafault 1.
+    :param evalue: Expect value (E) for saving hits. Default 1e-5.
+    :param max_hsps: Maximum number of HSPs (alignments) to keep for any single query-subject pair. Default 1.
     :param outfmt: Output format. Default 6 (tabular).
     :param max_target_seqs: Number of aligned sequences to keep.
     :param cpus: Number of threads (CPUs) to use in blast search.
@@ -390,30 +390,35 @@ def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
         if not os.path.exists(foldseek_results_path):
             os.makedirs(foldseek_results_path, exist_ok=True)
         
-        if os.path.exists(DB_dir):
+        results_tsv_file= os.path.join(foldseek_results_path, f'{query}_vs_{DB_name}_foldseek_results.tsv')
 
-            volumes = {
-                DB_dir: {'bind': '/data', 'mode': 'rw'},
-                structures_dir: {'bind': '/media', 'mode': 'rw'}
-                }
-            work_dir = structures_dir
-            bind_dir = '/media'
-            image_name = 'mcpalumbo/foldseek:1'
-            command = f'easy-search /media/{query} /data/{DB_name} /media/foldseek_results/{query}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
+        if not files.file_check(results_tsv_file):
+            if os.path.exists(DB_dir):
 
-            try:
-                run_docker_container(
-                    volumes=volumes,
-                    work_dir=work_dir,
-                    bind_dir=bind_dir,
-                    image_name=image_name,
-                    command=command
-                )
-            except Exception as e:
-                print(f'Error running foldseek easy-search: {e}')
-                print(f"An error occurred: {e}")
+                volumes = {
+                    DB_dir: {'bind': '/data', 'mode': 'rw'},
+                    structures_dir: {'bind': '/media', 'mode': 'rw'}
+                    }
+                work_dir = structures_dir
+                bind_dir = '/media'
+                image_name = 'mcpalumbo/foldseek:1'
+                command = f'easy-search /media/{query} /data/{DB_name} /media/foldseek_results/{query}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
+
+                try:
+                    run_docker_container(
+                        volumes=volumes,
+                        work_dir=work_dir,
+                        bind_dir=bind_dir,
+                        image_name=image_name,
+                        command=command
+                    )
+                except Exception as e:
+                    print(f'Error running foldseek easy-search: {e}')
+                    print(f"An error occurred: {e}")
+            else:
+                print(f"Directory '{DB_dir}' not found. Please make the DB again.", file=sys.stderr)
         else:
-            print(f"Directory '{DB_dir}' not found. Please make the DB again.", file=sys.stderr)
+            print(f"Foldseek results file '{results_tsv_file}' already exists.", file=sys.stderr)
     else:
         print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
 
