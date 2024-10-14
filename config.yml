@@ -45,6 +45,8 @@ offtarget:
   microbiome_identity_filter: 0
   # microbiome_coverage_filter: Filter value of query coverage, only hits with higher values will be used.
   microbiome_coverage_filter: 0
+  # foldseek_human: True if you want to use Foldseek to search for human off-targets. OBS: offtarget AND structures must be enabled.
+  foldseek_human: False
 
 # ---- DEG ----
 deg:
