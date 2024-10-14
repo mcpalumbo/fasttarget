@@ -311,7 +311,7 @@ def core_check_genomes_ncbi(base_path, organism_name):
     assembly_json = os.path.join(ncbi_download_data,'assembly_data_report.jsonl')
     assembly_dict = files.jsonl_to_dict(assembly_json)
 
-    required_files = ['.gbff', '.gff']
+    required_files = ['*.gbff', '*.gff']
     all_accessions = []
     missing_files_accessions = []
 
@@ -374,7 +374,7 @@ def core_download_missing_accessions(base_path, organism_name, tax_id):
             #     print(f'{accession} downloaded.')
         
         with open(checkpoint_file, 'w') as f:
-            f.write("Check core genomes complete. Missing genomes:"+ str(missing_files_accessions))
+            f.write("Check core genomes complete. Missing genomes:"+ str(set(missing_files_accessions)))
             f.close()
     else:
         print('Check already performed.')
