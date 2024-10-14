@@ -236,6 +236,27 @@ def main(config, base_path):
                     logging.error(f'Error in microbiome offtarget analysis: {e}')
             else:
                 logging.info('Microbiome offtarget analysis not enabled')
+            
+            if config.structures and config.offtarget['foldseek_human']:
+                try:
+                    print_stylized('FOLDSEEK HUMAN OFFTARGET')
+
+                    # Get annotation information from UniProt proteome and links IDs with the genome locus_tags of the organism
+                    uniprot_proteome_annotations, id_equivalences = structures.uniprot_proteome(base_path, organism_name, proteome_uniprot, cpus=8)
+                    # Run foldseek against human structures
+                    offtargets.run_foldseek_human_structures (base_path, organism_name)
+                    logging.info('Foldseek human offtarget search finished')
+                    # Parse results
+                    results_foldseek_dict = offtargets.foldseek_human_parser (base_path, organism_name)
+                    mapped_dict_foldseek = offtargets.merge_foldseek_data (base_path, organism_name, id_equivalences, uniprot_proteome_annotations)
+                    final_foldseek_df = offtargets.final_foldseek_structure_table (base_path, organism_name, mapped_dict_foldseek)
+                    tables.append(final_foldseek_df)
+                    logging.info('Foldseek human offtarget analysis finished')
+                    print('----- Finished -----')
+                except Exception as e:
+                    logging.error(f'Error in foldseek human offtarget analysis: {e}')
+            else:
+                logging.info('Foldseek human offtarget analysis not enabled')           
 
         except Exception as e:
             logging.error(f'Error in offtarget analysis: {e}')
@@ -322,32 +343,46 @@ def main(config, base_path):
     # Merge dfs
     print_stylized('RESULTS')
     current_date = datetime.now().strftime('%Y-%m-%d-%H-%M')
-    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table_{current_date}.tsv')
+    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_{current_date}')
+    results_table_path = os.path.join(base_path, 'organism', organism_name, results_path, f'{organism_name}_results_table.tsv')
+
+    if not os.path.exists(results_path):
+        os.makedirs(results_path, exist_ok=True)
+        logging.info(f'Results directory created in {results_path}')
+    
+
     if len(tables) > 1:
         combined_df = tables[0]
         for df in tables[1:]:
             if df is not None:
                 combined_df = pd.merge(combined_df, df, on='gene')
         
-        combined_df.to_csv(results_path, sep='\t', index=False)
+        combined_df.to_csv(results_table_path, sep='\t', index=False)
         
-        print(f'Final FastTarget results saved in {results_path}.')
+        print(f'Final FastTarget results saved in {results_table_path}.')
         logging.info(f'Final FastTarget results saved.')
         
         results = combined_df
+
+        # Create metadata tables for Target Pathogen
+        print('\n')
+        print('Creating metadata tables for Target Pathogen')
+        metadata.tables_for_TP(organism_name, results_path)
+        logging.info('Tables for Target Pathogen created')
+
     elif len(tables) == 1:
-        tables[0].to_csv(results_path, sep='\t', index=False)
-        print(f'Final FastTarget results saved in {results_path}.')
+        tables[0].to_csv(results_table_path, sep='\t', index=False)
+        print(f'Final FastTarget results saved in {results_table_path}.')
         logging.info(f'Final FastTarget results saved.')
         results = tables[0]
+
+        # Create metadata tables for Target Pathogen
+        print('\n')
+        print('Creating metadata tables for Target Pathogen')
+        metadata.tables_for_TP(organism_name, results_path)
+        logging.info('Tables for Target Pathogen created')
     else:
         logging.error('----- Error: No final DataFrame data. -----')
-
-    # Create metadata tables for Target Pathogen
-    print('\n')
-    print('Creating metadata tables for Target Pathogen')
-    metadata.tables_for_TP(base_path, organism_name)
-    logging.info('Tables for Target Pathogen created')
 
     print('------------------------------------- FINISHED ----------------------------------------')
     

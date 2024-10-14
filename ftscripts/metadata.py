@@ -85,25 +85,26 @@ def metadata_table_with_values(base_path, organism_name, values_dict:str, proper
 
     return metadata_table
 
-def tables_for_TP(base_path, organism_name):
+def tables_for_TP(organism_name, results_path):
     """
     Generates separate metadata tables for each property in the results table.
     This tables can be imported as metadata in Target Pathogen.
     They are saved in the 'tables_for_TP' directory.
 
-    :param base_path: Base path where the repository data is stored.
     :param organism_name: Name of the organism
+    :param results_path: Path to the results directory.
     """
 
-    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_table.tsv')
-    TP_metadata_path = os.path.join(base_path, 'organism', organism_name, 'tables_for_TP')
+    TP_metadata_path = os.path.join(results_path, 'tables_for_TP')
+
+    results_table_path = os.path.join(results_path, f'{organism_name}_results_table.tsv')
 
     os.makedirs(TP_metadata_path, exist_ok=True)
     print(f"{TP_metadata_path} has been created.")
 
-    if files.file_check(results_path):
+    if files.file_check(results_table_path):
         
-        results_table = pd.read_csv(results_path, sep='\t', header=0)
+        results_table = pd.read_csv(results_table_path, sep='\t', header=0)
 
         # Generate separate metadata tables for each property
 
@@ -113,6 +114,6 @@ def tables_for_TP(base_path, organism_name):
             print(f"{TP_metadata_path}/{column}.tsv has been created.")
     
     else:
-        print(f"{results_path} not found.")
+        print(f"{results_table_path} not found.")
 
 
