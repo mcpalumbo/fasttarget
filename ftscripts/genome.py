@@ -260,13 +260,14 @@ def ref_genome_files (gbk_file, base_path, organism_name):
     else:
         print('Reference Gbk file not found.')
     
-def id_to_locustag_gff(file_path:str, ids):
+def id_to_locustag_gff(file_path:str, ids, fix=False):
     """
 
     Parses a .gff file, from a list of IDs retrieves the list of locus_tag.
 
     :param file_path: Path to the gff file.
     :param ids: List of IDs.
+    :param fix: If True, work with IDs of roary index.
 
     """
     locus_tags = {}
@@ -276,8 +277,12 @@ def id_to_locustag_gff(file_path:str, ids):
                 if 'ID' in feature.qualifiers:
                     feature_id = feature.qualifiers['ID'][0]
                     for id in ids:
-                        if feature_id in id:
-                            locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
+                        if fix:
+                            if feature_id == id and feature_id not in locus_tags:
+                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
+                        else:
+                            if feature_id in id and feature_id not in locus_tags:
+                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
     return locus_tags
 
 def core_download_genomes_ncbi(base_path, organism_name, tax_id):
@@ -621,7 +626,7 @@ def roary_output(base_path, organism_name):
                 gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gff')
                 if os.path.exists(gff_file_fixed):
                     print(f'Reading {gff_file_fixed}')
-                    core_locus_tag = id_to_locustag_gff(gff_file_fixed, gbk_ids)
+                    core_locus_tag = id_to_locustag_gff(gff_file_fixed, gbk_ids, fix=True)
                 elif os.path.exists(gff_file):
                     print(f'Reading {gff_file}')
                     core_locus_tag = id_to_locustag_gff(gff_file, gbk_ids)
