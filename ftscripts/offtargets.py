@@ -301,22 +301,30 @@ def foldseek_human_parser (base_path, organism_name):
         for query, files_query in queries_pdb.items():
             dfs = []
             for file in files_query:
-                df = pd.read_csv(file, sep='\t')
+                df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
                 if not df.empty:
                     dfs.append(df)
             
-            dfs_combined = pd.concat(dfs, ignore_index=True)
-            best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
-            pdb_id = best_row['query'].split('_')[1]
+            if len(dfs) > 0:
+                dfs_combined = pd.concat(dfs, ignore_index=True)
+                best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
+                pdb_id = best_row['query'].split('_')[1]
 
-            if pdb_id == query:
-                    
+                if pdb_id == query:
+                        
+                    results_foldseek_dict[query] = {
+                            'target_foldseek': best_row['target'],
+                            'rmsd_foldseek': best_row['rmsd'],
+                            'prob_foldseek': best_row['prob'],
+                            'pident_foldseek': best_row['pident']
+                        }
+            else:
                 results_foldseek_dict[query] = {
-                        'target_foldseek': best_row['target'],
-                        'rmsd_foldseek': best_row['rmsd'],
-                        'prob_foldseek': best_row['prob'],
-                        'pident_foldseek': best_row['pident']
-                    }
+                            'target_foldseek': None,
+                            'rmsd_foldseek': None,
+                            'prob_foldseek': None,
+                            'pident_foldseek': None
+                        }
 
         # AlphaFold structures
         structures_AF_path = os.path.join(structure_dir, 'AlphaFold_files')
@@ -340,23 +348,29 @@ def foldseek_human_parser (base_path, organism_name):
         for query, files_query in queries_AF.items():
             dfs = []
             for file in files_query:
-                df = pd.read_csv(file, sep='\t')
+                df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
                 if not df.empty:
                     dfs.append(df)
             
-            dfs_combined = pd.concat(dfs, ignore_index=True)
-            
-            best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
+            if len(dfs) > 0:
+                dfs_combined = pd.concat(dfs, ignore_index=True)
+                best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
+                af_id = best_row['query'].split('_')[1]
 
-            af_id = best_row['query'].split('_')[1]
-
-            if af_id == query and not query in results_foldseek_dict.keys():
-                    
+                if af_id == query and not query in results_foldseek_dict.keys():
+                        
+                    results_foldseek_dict[query] = {
+                            'target_foldseek': best_row['target'],
+                            'rmsd_foldseek': best_row['rmsd'],
+                            'prob_foldseek': best_row['prob'],
+                            'pident_foldseek': best_row['pident']
+                        }
+            elif len(dfs) == 0 and not query in results_foldseek_dict.keys():
                 results_foldseek_dict[query] = {
-                        'target_foldseek': best_row['target'],
-                        'rmsd_foldseek': best_row['rmsd'],
-                        'prob_foldseek': best_row['prob'],
-                        'pident_foldseek': best_row['pident']
+                        'target_foldseek': None,
+                        'rmsd_foldseek': None,
+                        'prob_foldseek': None,
+                        'pident_foldseek': None
                     }
 
         files.dict_to_json(structure_dir, 'human_foldseek_dict.json', results_foldseek_dict)
@@ -414,35 +428,37 @@ def merge_foldseek_data (base_path, organism_name, id_equivalences, uniprot_prot
                     if pdb_ids:
                         for pdb_id in pdb_ids:
                             if pdb_id in results_foldseek_dict:
-                                if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[pdb_id]['prob_foldseek']:
-                                    mapped_dict[locus_tag] = {
-                                                'gene': locus_tag,
-                                                'structure': pdb_id,
-                                                'target': results_foldseek_dict[pdb_id]['target_foldseek'],
-                                                'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
-                                                'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
-                                                'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
-                                            }
-                                elif mapped_dict[locus_tag]['prob'] == results_foldseek_dict[pdb_id]['prob_foldseek'] and mapped_dict[locus_tag]['pident'] < results_foldseek_dict[pdb_id]['pident_foldseek']:
-                                    mapped_dict[locus_tag] = {
-                                                'gene': locus_tag,
-                                                'structure': pdb_id,
-                                                'target': results_foldseek_dict[pdb_id]['target_foldseek'],
-                                                'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
-                                                'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
-                                                'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
-                                            }
+                                if results_foldseek_dict[pdb_id]['prob_foldseek']:
+                                    if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[pdb_id]['prob_foldseek']:
+                                        mapped_dict[locus_tag] = {
+                                                    'gene': locus_tag,
+                                                    'structure': pdb_id,
+                                                    'target': results_foldseek_dict[pdb_id]['target_foldseek'],
+                                                    'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
+                                                    'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
+                                                    'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
+                                                }
+                                    elif mapped_dict[locus_tag]['prob'] == results_foldseek_dict[pdb_id]['prob_foldseek'] and mapped_dict[locus_tag]['pident'] < results_foldseek_dict[pdb_id]['pident_foldseek']:
+                                        mapped_dict[locus_tag] = {
+                                                    'gene': locus_tag,
+                                                    'structure': pdb_id,
+                                                    'target': results_foldseek_dict[pdb_id]['target_foldseek'],
+                                                    'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
+                                                    'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
+                                                    'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
+                                                }
                         
                     if uniprot_id in results_foldseek_dict:
-                        if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[uniprot_id]['prob_foldseek']:
-                            mapped_dict[locus_tag] = {
-                                        'gene': locus_tag,
-                                        'structure': uniprot_id,
-                                        'target': results_foldseek_dict[uniprot_id]['target_foldseek'],
-                                        'rmsd': results_foldseek_dict[uniprot_id]['rmsd_foldseek'],
-                                        'prob': results_foldseek_dict[uniprot_id]['prob_foldseek'],
-                                        'pident': results_foldseek_dict[uniprot_id]['pident_foldseek']
-                                    }
+                        if results_foldseek_dict[uniprot_id]['prob_foldseek']:
+                            if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[uniprot_id]['prob_foldseek']:
+                                mapped_dict[locus_tag] = {
+                                            'gene': locus_tag,
+                                            'structure': uniprot_id,
+                                            'target': results_foldseek_dict[uniprot_id]['target_foldseek'],
+                                            'rmsd': results_foldseek_dict[uniprot_id]['rmsd_foldseek'],
+                                            'prob': results_foldseek_dict[uniprot_id]['prob_foldseek'],
+                                            'pident': results_foldseek_dict[uniprot_id]['pident_foldseek']
+                                        }
 
             files.dict_to_json(structure_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)                    
             print(f'Foldseek results saved to {organism_name}_final_foldseek_results.json.')
