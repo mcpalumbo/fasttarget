@@ -263,11 +263,13 @@ def ref_genome_files (gbk_file, base_path, organism_name):
 def id_to_locustag_gff(file_path:str, ids, fix=False):
     """
 
-    Parses a .gff file, from a list of IDs retrieves the list of locus_tag.
+    Parses a .gff file, from a list of IDs retrieves a dictionary with the locus_tag for each ID.
 
     :param file_path: Path to the gff file.
     :param ids: List of IDs.
     :param fix: If True, work with IDs of roary index.
+
+    :return: Dictionary with the locus_tag for each ID.
 
     """
     locus_tags = {}
@@ -283,7 +285,9 @@ def id_to_locustag_gff(file_path:str, ids, fix=False):
                         else:
                             if feature_id in id and feature_id not in locus_tags:
                                 locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
-    return locus_tags
+    
+    list_locus = list(locus_tags.values())
+    return list_locus
 
 def core_download_genomes_ncbi(base_path, organism_name, tax_id):
     """
