@@ -93,7 +93,7 @@ def process_chokepoint_ptools(base_path, organism_name, chokepoint_file):
     if os.path.exists(chokepoint_file):
         shutil.copy(chokepoint_file, chokepoint_path)
     else:
-        print(f"Chokepont file '{chokepoint_file}' not found.", file=sys.stderr)
+        print(f"Chokepoint file '{chokepoint_file}' not found.", file=sys.stderr)
 
     with open(chokepoint_path, 'r') as file:
         text = file.read()
@@ -245,21 +245,23 @@ def mapping_chokepoints(locus_reaction_dict, producing_ck, consuming_ck, both_ck
     :param consuming_ck: Set of consuming chokepoints.
     :param both_ck: Set of both producing and consuming chokepoints.
 
-    :return: Dictionary with the genes as keys and the chokepoint type as values.
+    :return: Dictionaries with the genes as keys and the chokepoints as values. Returns three dictionaries: producing chokepoints, consuming chokepoints, and both chokepoints.
     """
     
-    locustag_chokepoints = {}
+    producing_chokepoint = {}
+    consuming_chokepoint = {}
+    both_chokepoint = {}
         
     for gene, rxns in locus_reaction_dict.items():
         for rxn in rxns:
             if rxn in producing_ck:
-                locustag_chokepoints[gene] = 'producing_choke-point'
+                producing_chokepoint[gene] = rxn
             elif rxn in consuming_ck:
-                locustag_chokepoints[gene] = 'consuming_choke-point'
+                consuming_chokepoint[gene] = rxn
             elif rxn in both_ck:
-                locustag_chokepoints[gene] = 'both_choke-point'
+                both_chokepoint[gene] = rxn
 
-    return locustag_chokepoints
+    return producing_chokepoint, consuming_chokepoint, both_chokepoint
 
 def run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file):
     """
@@ -305,13 +307,15 @@ def run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smartt
 
     print(f'---------- 6. Obtaining Choke-points ----------')
     producing_set, consuming_set, both_set = process_chokepoint_ptools(base_path, organism_name, chokepoint_file)
-    ck_dict = mapping_chokepoints(locus_reaction_dict, producing_set, consuming_set, both_set)
+    producing_chokepoint, consuming_chokepoint, both_chokepoint = mapping_chokepoints(locus_reaction_dict, producing_set, consuming_set, both_set)
     print(f'---------- 6. Finished ----------')
 
     print(f'---------- 7. Generating results files ----------')
     bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, bc_dict, "betweenness_centrality", metabolism_dir, 0)
     edges_df = metadata.metadata_table_with_values(base_path, organism_name, edge_dict, "edges", metabolism_dir, 0)
-    chokepoints_df = metadata.metadata_table_with_values(base_path, organism_name, ck_dict, "chokepoints", metabolism_dir, 'None')
+    producing_df = metadata.metadata_table_with_values(base_path, organism_name, producing_chokepoint, "producing_chokepoints", metabolism_dir, 'None')
+    consuming_df = metadata.metadata_table_with_values(base_path, organism_name, consuming_chokepoint, "consuming_chokepoints", metabolism_dir, 'None')
+    both_df = metadata.metadata_table_with_values(base_path, organism_name, both_chokepoint, "both_chokepoints", metabolism_dir, 'None')
     print(f'---------- 7. Finished ----------')
 
-    return bcentrality_df, edges_df, chokepoints_df
+    return bcentrality_df, edges_df, producing_df, consuming_df, both_df

@@ -80,10 +80,12 @@ def main(config, base_path):
             logging.info(f'Smarttable file: {smarttable_file}')
 
             # Parse metabolic files, make network and calculate centrality
-            df_centrality, df_edges, df_chokepoints = pathways.run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
+            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
             tables.append(df_centrality)
             tables.append(df_edges)
-            tables.append(df_chokepoints)
+            tables.append(producing_df)
+            tables.append(consuming_df)
+            tables.append(both_df)
 
             logging.info('Metabolic analysis finished')
 
