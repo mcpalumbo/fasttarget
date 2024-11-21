@@ -7,7 +7,7 @@
 To begin, make sure you have the latest version of the repository. You can do this by either downloading the repository or running a `git pull` if you have already cloned it. Then, navigate to the repository folder:
 
 ```bash
-git clone git@github.com:mcpalumbo/fasttarget.git
+git clone https://github.com/mcpalumbo/fasttarget.git
 cd fasttarget
 ```
 
