@@ -312,6 +312,7 @@ def run_roary(work_dir:str, input:str, output:str, cluster_number=50000,cpus=mul
     :param input: Directory where gff3 files are found.
     :param output: Output directory path.
     :param cpus: Number of threads.
+    :param cluster_number: Cluster sequences. Default 50000.
     """
 
     if os.path.exists(input):
