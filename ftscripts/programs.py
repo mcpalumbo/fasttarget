@@ -302,7 +302,7 @@ def run_genbank2gff3(input, output):
     else:
         print(f"GenBank file '{input}' not found.", file=sys.stderr)
 
-def run_roary(work_dir:str, input:str, output:str, cpus=multiprocessing.cpu_count()):
+def run_roary(work_dir:str, input:str, output:str, cluster_number=50000,cpus=multiprocessing.cpu_count()):
 
     """
     Runs the docker image sangerpathogens/roary, a pan genome pipeline. Default options.
@@ -323,7 +323,7 @@ def run_roary(work_dir:str, input:str, output:str, cpus=multiprocessing.cpu_coun
         gff_files_str = " ".join(gff_files)
 
         ROARY_image = "sangerpathogens/roary"
-        ROARY_command = f"roary -p {cpus} -f {output} {gff_files_str}"
+        ROARY_command = f"roary -p {cpus} -f {output} {gff_files_str} -g {cluster_number}"
 
         run_docker_container(work_dir, work_dir, ROARY_image, ROARY_command)
     else:
