@@ -482,6 +482,7 @@ def core_files(base_path, organism_name):
                 print(f'More than one genome files.')
 
     print("Files processed successfully.")
+    files.list_to_file(os.path.join(conservation_dir, 'core_genomes_IDs.txt'), core_genomes)
         
     return core_genomes
 
