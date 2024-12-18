@@ -281,10 +281,10 @@ def id_to_locustag_gff(file_path:str, ids, fix=False):
                     for id in ids:
                         if fix:
                             if feature_id == id and feature_id not in locus_tags:
-                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
+                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', [feature_id])[0]
                         else:
                             if feature_id in id and feature_id not in locus_tags:
-                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', ['N/A'])[0]
+                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', [feature_id])[0]
     
     list_locus = list(locus_tags.values())
     return list_locus
