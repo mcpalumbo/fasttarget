@@ -342,7 +342,7 @@ def run_genbank2gff3(input, output):
     else:
         print(f"GenBank file '{input}' not found.", file=sys.stderr)
 
-def run_roary(work_dir:str, input:str, output:str, cluster_number=50000,cpus=multiprocessing.cpu_count()):
+def run_roary(work_dir:str, input:str, output:str, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count()):
 
     """
     Runs the docker image sangerpathogens/roary, a pan genome pipeline. Default options.
@@ -351,6 +351,8 @@ def run_roary(work_dir:str, input:str, output:str, cluster_number=50000,cpus=mul
     :param work_dir: Directory where gff and roary output folders are.
     :param input: Directory where gff3 files are found.
     :param output: Output directory path.
+    :param core_threshold: Threshold (in percentage) of isolates required to define a core gene.
+    :param identity: Minimum percentage identity for sequence comparisons performed by blastp. 
     :param cpus: Number of threads.
     :param cluster_number: Cluster sequences. Default 50000.
     """
@@ -364,13 +366,13 @@ def run_roary(work_dir:str, input:str, output:str, cluster_number=50000,cpus=mul
         gff_files_str = " ".join(gff_files)
 
         ROARY_image = "sangerpathogens/roary"
-        ROARY_command = f"roary -p {cpus} -f {output} {gff_files_str} -g {cluster_number}"
+        ROARY_command = f"roary -p {cpus} -g {cluster_number} -cd {core_threshold} -i {identity} -f {output} {gff_files_str}"
 
         run_docker_container(work_dir, work_dir, ROARY_image, ROARY_command)
     else:
         print(f"Directory '{input}' not found.", file=sys.stderr)
 
-def run_core_cruncher(corecruncher_dir:str, reference:str):
+def run_core_cruncher(corecruncher_dir:str, reference:str, core_threshold=99, identity=95):
     """
     Runs CoreCruncher, a core genome tool. Default options.
     Runs the docker image mcpalumbo/corecruncher:1.
@@ -378,7 +380,9 @@ def run_core_cruncher(corecruncher_dir:str, reference:str):
 
     :param corecruncher_dir: Folder containing the input directory and where to find all the results of the analysis. faa/ subfolder must contain the genomes to analyze (.faa files).
     :param reference: Pivot genome, specify the name of the file.
-    
+    :param core_threshold: Minimum frequency of the gene across genomes to be considered core.
+    :param identity: Identity score used by usearch or blast to define orthologs (percentage).
+
     """
    
     if os.path.exists(corecruncher_dir):
@@ -386,7 +390,7 @@ def run_core_cruncher(corecruncher_dir:str, reference:str):
             work_dir = corecruncher_dir
             bind_dir = '/data'
             image_name = 'mcpalumbo/corecruncher:1'
-            command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -ref {reference}'  
+            command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -freq {core_threshold} -score {identity} -ref {reference}'  
             try:
                 run_docker_container(
                     work_dir=work_dir,
