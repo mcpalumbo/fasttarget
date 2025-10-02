@@ -977,7 +977,30 @@ def download_and_index_deg(databases_path):
             print('DEG database already indexed')
     print('----- 3. Finished -----')
 
-    print('All databases downloaded and indexed successfully.')
+def main(base_path, selected_databases):
+    """
+    Downloads and indexes Human proteome, Microbiome database and DEG database.
+
+    :param base_path =  Path to the repository folder.
+
+    """
+
+    databases_path = os.path.join(base_path, 'databases')
+    if not os.path.exists(databases_path):
+        os.makedirs(databases_path)
+    
+    if 'human' in selected_databases:
+        download_and_index_human(databases_path)
+    if 'microbiome' in selected_databases:
+        download_and_index_microbiome(databases_path)
+    if 'deg' in selected_databases:
+        download_and_index_deg(databases_path)
+    
+    if not selected_databases:
+        print('No databases selected. Please specify which database(s) to run.')
+
+    print('All selected databases downloaded and indexed successfully.')
+
 
 if __name__ == '__main__':
     #base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
