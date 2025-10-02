@@ -3,7 +3,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, databases, essentiality, metadata
+from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata
 from datetime import datetime
 import logging
 import sys
