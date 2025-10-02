@@ -87,6 +87,27 @@ def download_with_wget(url, filepath, max_retries=5):
             else:
                 print('Max retries reached. Download failed.')
 
+
+def simple_concat_faa(input_dir: str, output_path: str):
+    """
+    Concatenate all .faa files from a directory into a single FASTA file.
+
+    :param input_dir : Directory containing .faa files.
+    :param output_path : Path to the output concatenated FASTA file.
+    
+    """
+    faa_files = sorted(glob.glob(os.path.join(input_dir, "**", "*.faa"), recursive=True))
+
+    if not faa_files:
+        raise FileNotFoundError(f"No .faa files found in {input_dir}")
+
+    with open(output_path, "w") as outfile:
+        for fname in tqdm.tqdm(faa_files, desc="Concatenating .faa files", unit="file"):
+            with open(fname) as infile:
+                for line in infile:
+                    outfile.write(line)
+
+
 def batch_uniprot_mapping(source, dest, ids, max_retries=5, sleep_time=5):
     """
     Maps a list of UniProt IDs from a source database to a destination database using the UniProt API.
