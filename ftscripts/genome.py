@@ -475,6 +475,7 @@ def core_files(base_path, organism_name):
                         else:
                             print(f"{new_name}.gff already exists.")      
                     else:
+                        print(f'{dir_name}: Host not Human: {host}, for {locus}, strain {strain}.')
                         shutil.rmtree(os.path.join(root, dir_name))
                 else:
                     shutil.rmtree(os.path.join(root, dir_name))
