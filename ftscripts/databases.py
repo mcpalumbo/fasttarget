@@ -849,20 +849,18 @@ def index_db_blast_deg (base_path):
     dbtype= 'prot'
     )
 
-def main(base_path):
+
+def download_and_index_human(databases_path):
     """
-    Downloads and indexes Human proteome, Microbiome database and DEG database.
+    Downloads and indexes Human proteome.
 
-    :param base_path =  Path to the repository folder.
+    :param databases_path =  Path to the 'databases' folder.
 
     """
-
-    databases_path = os.path.join(base_path, 'databases')
-    if not os.path.exists(databases_path):
-        os.makedirs(databases_path)
     
     # Download and index Human proteome
     print('----- 1. Downloading and indexing human proteome -----')
+    
     humanprot_path = os.path.join(databases_path, 'human_uniprot_UP000005640.faa')
     human_structures_path = os.path.join(databases_path, 'human_structures')
     downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
@@ -905,22 +903,63 @@ def main(base_path):
 
     print('----- 1. Finished -----')
 
+def download_and_index_microbiome(databases_path):
+    """
+    Downloads and indexes Microbiome database.
+
+    :param databases_path =  Path to the 'databases' folder.
+
+    """
 
     # Download and index Microbiome database
     print('----- 2. Downloading and indexing microbiome database -----')
-    if not files.file_check(os.path.join(databases_path, 'uhgp-90.faa')):
-        download_microbiome (base_path)
-        index_db_blast_microbiome (base_path)
+    species_path = os.path.join(databases_path, 'species_catalogue')
+    check_file = os.path.join(species_path, 'download_check.txt')
+
+    if not files.file_check(check_file):
+        download_microbiome_species_catalogue (base_path)
+        index_db_blast_microbiome_species_catalogue (base_path)
         print('Microbiome database downloaded and indexed')
     else:
-        print('Microbiome database already exists.')
-        if not files.file_check(os.path.join(databases_path, 'MICROBIOME_DB.00.phr')):
-            print('Indexing microbiome database')
-            index_db_blast_microbiome (base_path)
-            print('Microbiome database indexed')
-        else:
-            print('Microbiome database already indexed')
+        with open(check_file) as f:
+            content = f.read()
+            if "List of missing files:" in content:
+                print('Some files are missing in the species catalogue. Please check download_check.txt file.')                     
+                download_microbiome_species_catalogue (base_path)
+                index_db_blast_microbiome_species_catalogue (base_path)
+            else:
+                print('Microbiome sequences already exists.')
+
+        # Check if all .faa files have been indexed
+        required_extensions = {".dmnd"}
+
+        for root, dirs, allfiles in os.walk(species_path):
+            if root == species_path:
+                continue
+
+            files_set = set(os.path.splitext(f)[1] for f in allfiles)
+
+            if required_extensions.issubset(files_set):
+                continue
+
+            faa_files = [f for f in allfiles if f.endswith(".faa")]
+
+            if not faa_files:
+                print(f"⚠️ No .faa or index files found in {root}")
+            else:
+                faa_path = os.path.join(root, faa_files[0])
+                print(f"❌ No diamond blast index files in {root} → indexing {faa_path}")
+                index_db_blast_microbiome_species_catalogue(base_path, specific_file=faa_path)
+
     print('----- 2. Finished -----')
+
+def download_and_index_deg(databases_path):
+    """
+    Downloads and indexes DEG database.
+
+    :param databases_path =  Path to the 'databases' folder.
+
+    """
 
     # Download and index DEG database
     print('----- 3. Downloading and indexing DEG database -----')
