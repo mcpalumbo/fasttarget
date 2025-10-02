@@ -31,10 +31,6 @@ def main(config, base_path):
     """
     results = None
 
-    #Obtaining the databases: DEG, HUMAN and MICROBIOME
-    print_stylized('DATABASES')
-    databases.main(base_path)
-
     # Organism data
     print_stylized('GENOME')
 
@@ -210,26 +206,20 @@ def main(config, base_path):
 
             if config.offtarget['microbiome']:
                 try:
-                    microbiome_blast_output = os.path.join(offtarget_path, 'microbiome_offtarget_blast.tsv')
 
                     print_stylized('MICROBIOME OFFTARGET')
 
-                    if not files.file_check(microbiome_blast_output):
-                        # Run blastp search
-                        print('----- Blastp search -----')
-                        offtargets.microbiome_offtarget_blast(base_path, organism_name, cpus)
-                        logging.info('Microbiome offtarget blast search finished')
-                    else:
-                        logging.info('Blast with microbiome already done')
-                        print('Blast output file found')
-                        print(microbiome_blast_output)
+                    # Run blastp search
+                    print('----- Blastp search -----')
+                    offtargets.microbiome_offtarget_blast_species(base_path, organism_name, cpus)
+                    logging.info('Microbiome offtarget blast search finished')
 
                     # Parse results
                     microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
                     microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
                     logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
                     logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
-                    df_microbiome = offtargets.microbiome_offtarget_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
+                    df_microbiome = offtargets.microbiome_species_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
                     tables.append(df_microbiome)
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
