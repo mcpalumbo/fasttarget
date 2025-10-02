@@ -547,7 +547,7 @@ def core_check_files(base_path, organism_name):
 
     return pending_files
 
-def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
+def core_genome_programs(base_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
 
     """
     Run Roary and CoreCruncher programs for the core genomes analysis of the given organism.
@@ -575,7 +575,7 @@ def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_coun
         if os.path.exists(gff_dir):
             if not files.file_check(genes_csv_file):
                 print('Running Roary')
-                programs.run_roary(roary_out_dir, gff_dir, results_dir, cpus)
+                programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=99, identity=95, cpus=cpus)
                 print('Finished')
             else:
                 print(f'Roary output file already exists: {genes_csv_file}.')
@@ -590,7 +590,7 @@ def core_genome_programs(base_path, organism_name, cpus=multiprocessing.cpu_coun
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
                 print('Running CoreCruncher')
-                programs.run_core_cruncher(ccruncher_out_dir, reference_file)
+                programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=99, identity=95)
                 print('Finished')
             else:
                 print(f'CoreCruncher output file already exists: {cc_output_file}.')
