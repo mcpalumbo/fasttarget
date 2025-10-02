@@ -3,5 +3,5 @@ ftscripts/*.pyc
 organism/
 logs/
 __pycache__/
-config_PAO.yml
+*.yml
 .vscode/*
