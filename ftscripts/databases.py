@@ -793,6 +793,40 @@ def index_db_blast_microbiome_protein_catalogue (base_path):
     dbtype= 'prot'
     )
 
+def index_db_blast_microbiome_species_catalogue (base_path, specific_file=None):
+
+    """
+    Makes a Diamond BLAST db for gut microbiome species catalogue. 
+
+    :param base_path =  Base path of fasttarget folder.
+    :param specific_file =  Specific .faa file to index. If None, all .faa files in the
+    species_catalogue folder will be indexed.
+
+    """
+
+    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
+    faa_files = glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
+
+    if specific_file is None:
+
+        for faa_file in faa_files:
+            if not files.file_check(faa_file):
+                raise FileNotFoundError(f"File {faa_file} does not exist.")
+            else:
+                programs.run_makediamonddb(
+                input= faa_file,
+                output= faa_file.replace(".faa", "_DB")
+                )
+    else:
+        if not files.file_check(specific_file):
+            raise FileNotFoundError(f"File {specific_file} does not exist.")
+        else:
+            programs.run_makediamonddb(
+            input= specific_file,
+            output= specific_file.replace(".faa", "_DB")
+            )
+
+
 def index_db_blast_deg (base_path):
 
     """
