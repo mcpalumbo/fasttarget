@@ -257,6 +257,46 @@ def run_makeblastdb(input, output, title, dbtype):
     else:
         print(f"Blast database file '{input}' not found.", file=sys.stderr)
 
+
+def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6',cpus=multiprocessing.cpu_count()):
+
+    """
+    Runs Protein-Protein Diamond BLAST command line.
+    
+    :param blastdb: Diamond BLAST database name (full path).
+    :param query: Query fasta (protein) file path.
+    :param output: Output file path.
+    :param evalue: Expect value (E) for saving hits. Default 1e-5.
+    :param max_hsps: Maximum number of HSPs (alignments) to keep for any single query-subject pair. Default 1.
+    :param outfmt: Output format. Default 6 (tabular).
+    :param cpus: Number of threads (CPUs) to use in blast search.
+    
+    """
+    if files.file_check(query):
+
+        diamond_blastp_command = f'diamond blastp --evalue {evalue} --max-hsps {max_hsps} --outfmt {outfmt} --db {blastdb} --query {query} --threads {cpus} --out {output}'
+        run_bash_command(diamond_blastp_command)
+    else:
+        print(f"Query file '{query}' not found.", file=sys.stderr)
+
+
+def run_makediamonddb(input, output):
+
+    """
+    Creates a Diamond BLAST database from command line.
+    
+    :param input: Input fasta file path.
+    :param output: Output file path.
+        
+    """
+    
+    if files.file_check(input):
+            makediamond_command = f'diamond makedb --in {input} --db {output}'
+            run_bash_command(makediamond_command)
+    else:
+        print(f"Diamond Blast database file '{input}' not found.", file=sys.stderr)
+
+
 def run_genbank2gff3(input, output):
 
     """
