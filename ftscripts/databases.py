@@ -9,6 +9,7 @@ import tqdm
 import requests
 import multiprocessing
 import urllib.request
+from bs4 import BeautifulSoup
 import re
 import glob
 import json
@@ -17,6 +18,7 @@ from urllib.parse import urlparse, parse_qs, urlencode
 from requests.adapters import HTTPAdapter, Retry
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import socket
+import argparse
 
 def retry_on_timeout(func, *args, max_retries=3, delay=5, **kwargs):
     """
