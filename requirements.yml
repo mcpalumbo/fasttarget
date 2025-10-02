@@ -17,6 +17,7 @@ dependencies:
   - biopython
   - ncbi-datasets-cli
   - blast
+  - diamond
   - pip
   - pip:
       - sndg-bio
