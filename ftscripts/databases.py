@@ -750,10 +750,10 @@ def index_db_foldseek_human_structures (base_path):
         print('Error indexing human AlphaFold structures for Foldseek.', e)
 
 
-def index_db_blast_microbiome (base_path):
+def index_db_blast_microbiome_protein_catalogue (base_path):
 
     """
-    Makes a BLAST db for gut microbiome. 
+    Makes a BLAST db for gut microbiome protein catalogue. 
 
     :param base_path =  Base path of fasttarget folder.
 
