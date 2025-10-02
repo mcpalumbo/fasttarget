@@ -135,12 +135,15 @@ def main(config, base_path):
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
+            min_identity = config.core['min_identity']
+            min_core_freq = config.core['min_core_freq']
+
             if config.core['roary']:
                 try:
                     #Run roary
                     print('----- 2. Running Roary -----')
                     logging.info('Starting Roary analysis')
-                    genome.core_genome_programs(base_path, organism_name, cpus, program_list=['roary'])
+                    genome.core_genome_programs(base_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'])
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
                     df_roary = genome.roary_output(base_path, organism_name)
@@ -157,7 +160,7 @@ def main(config, base_path):
                     # Run CoreCruncher
                     print('----- 2. Running CoreCruncher -----')
                     logging.info('Starting CoreCruncher analysis')
-                    genome.core_genome_programs(base_path, organism_name, cpus, program_list=['corecruncher'])
+                    genome.core_genome_programs(base_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'])
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
                     df_cc = genome.corecruncher_output(base_path, organism_name)
