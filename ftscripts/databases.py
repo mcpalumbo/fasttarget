@@ -87,27 +87,6 @@ def download_with_wget(url, filepath, max_retries=5):
             else:
                 print('Max retries reached. Download failed.')
 
-
-def simple_concat_faa(input_dir: str, output_path: str):
-    """
-    Concatenate all .faa files from a directory into a single FASTA file.
-
-    :param input_dir : Directory containing .faa files.
-    :param output_path : Path to the output concatenated FASTA file.
-    
-    """
-    faa_files = sorted(glob.glob(os.path.join(input_dir, "**", "*.faa"), recursive=True))
-
-    if not faa_files:
-        raise FileNotFoundError(f"No .faa files found in {input_dir}")
-
-    with open(output_path, "w") as outfile:
-        for fname in tqdm.tqdm(faa_files, desc="Concatenating .faa files", unit="file"):
-            with open(fname) as infile:
-                for line in infile:
-                    outfile.write(line)
-
-
 def batch_uniprot_mapping(source, dest, ids, max_retries=5, sleep_time=5):
     """
     Maps a list of UniProt IDs from a source database to a destination database using the UniProt API.
@@ -343,7 +322,112 @@ def download_DEG(base_path):
             print(f'File {deg_fasta} downloaded and decompressed successfully.')
     os.remove(deg_path)        
 
-def download_microbiome(base_path):
+def download_microbiome_species_catalogue(base_path):
+
+    """
+    Downloads the Human Gut Microbiome Species Catalogue from the EBI Metagenomics (MGnify) database, 
+    Each genome has its own folder with a .faa file inside 'genome'.
+    Files are saved into 'databases/species_catalogue'.
+    https://www.ebi.ac.uk/metagenomics/genome-catalogues/human-gut-v2-0-2
+    DOI: 10.1093/nar/gkz1035
+
+    :param base_path =  Path to the directory where 'databases' folder is located.
+
+    """
+
+    databases_path = os.path.join(base_path, 'databases')  
+    species_path = os.path.join(databases_path, 'species_catalogue')
+    os.makedirs(species_path, exist_ok=True)
+
+    # Download README file
+    info_path = os.path.join(species_path, 'README_uhgp_v2.0.2.txt')
+    info_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
+    download_with_wget(info_url, info_path)
+
+    # Download metadata file
+    meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
+    meta_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/genomes-all_metadata.tsv'
+    download_with_wget(meta_url, meta_path)
+
+    # Download species catalogue
+
+    check_file = os.path.join(species_path, "download_check.txt")
+
+    if not os.path.exists(check_file):
+        
+        os.makedirs(species_path, exist_ok=True)
+        base_url = "https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/species_catalogue/"
+
+        r = requests.get(base_url)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Obtain folder links 
+        species_links = [a["href"] for a in soup.find_all("a") if a["href"].startswith("MGYG")]
+        expected_files = []
+
+        for sp in species_links:
+            sp_url = base_url + sp
+            r2 = requests.get(sp_url)
+            r2.raise_for_status()
+            soup2 = BeautifulSoup(r2.text, "html.parser")
+
+            genome_links = [a["href"] for a in soup2.find_all("a") if a["href"].startswith("MGYG")]
+
+            for genome in genome_links:
+                faa_url = f"{sp_url}{genome}genome/{genome[:-1]}.faa"
+
+                genome_path = os.path.join(species_path, genome[:-1])
+                os.makedirs(genome_path, exist_ok=True)
+
+                faa_name = os.path.basename(faa_url)
+                faa_out = os.path.join(genome_path, faa_name)
+                expected_files.append(faa_name)
+
+                if not os.path.exists(faa_out):
+                    print(f"Downloading {faa_name}...")
+                    download_with_wget(faa_url, faa_out)
+                else:
+                    print(f"{faa_name} already exists.")
+        
+        # Check for missing files
+        downloaded_files = [os.path.basename(f) for f in glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)]
+        missing_files = sorted(set(expected_files) - set(downloaded_files))
+        
+        with open(check_file, "w") as f:
+            f.write(f"Expected files: {len(expected_files)}\n")
+            f.write(f"Downloaded files: {len(downloaded_files)}\n")
+            f.write(f"Missing files: {len(missing_files)}\n\n")
+            if missing_files:
+                f.write("List of missing files:\n")
+                for mf in missing_files:
+                    f.write(mf + "\n")
+            else:
+                f.write("All files downloaded successfully!\n")
+    else:
+        print(f"{check_file} already exists. Species catalogue download previously attempted.")
+
+def concat_microbiome_species_catalogue(base_path):
+    """
+    Concatenates all .faa files from the species catalogue into a single FASTA file.
+    The concatenated fasta file is located in "databases/species_catalogue" folder.
+
+    :param base_path =  Path to the directory where 'databases' folder is located.
+
+    """
+
+    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
+    output_faa = os.path.join(species_path, 'species_catalogue.faa')
+
+    if not os.path.exists(output_faa):
+        print('Concatenating species catalogue .faa files...')
+        simple_concat_faa(species_path, output_faa)
+        print(f'File {output_faa} created successfully.')
+    else:
+        print(f'{output_faa} already exists.')
+
+    
+def download_microbiome_protein_catalogue(base_path):
 
     """
     Downloads Human-gut protein catalogue from EBI Metagenomics (MGnify) clustered at 90% aa identity. 
