@@ -76,6 +76,8 @@ def print_config(config):
     if config.core:
         print(f"Roary Enabled: {config.core['roary']}")       
         print(f"CoreCruncher Enabled: {config.core['corecruncher']}")
+        print(f"Minimum Identity: {config.core['min_identity']}%")
+        print(f"Minimum Core Frequency: {config.core['min_core_freq']}%")
     else:
         print(f"Core Enabled: {config.core}")
       

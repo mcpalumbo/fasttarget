@@ -35,6 +35,10 @@ core:
   enabled: False
   roary: False
   corecruncher: False
+  # min_identity: Minimum percentage identity for core genome analysis (0-100). Example: 95 for 95% identity.
+  min_identity: 95
+  # min_core_freq: Minimum frequency for a gene to be considered core (0-100). Example: 99 means gene must be present in 99% of genomes.
+  min_core_freq: 99
 
 # ---- Offtarget ----
 offtarget:
