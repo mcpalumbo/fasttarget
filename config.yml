@@ -2,8 +2,8 @@
 
 # ---- Organism information ----
 organism:
-  # name: Complete with a short alias/name for your genome, without spaces. Example: PAO.
-  name: name
+  # name: Complete with a short alias/name for your genome, without spaces. Example: PAO1 for Pseudomonas aeruginosa PAO1.
+  name: "MyPathogen"
   # tax_id: Fill with the number of NCBI Taxonomy ID of the specie of your organism. Example: 287 for Pseudomonas aeruginosa.
   # It is used to obtain the genomes to calculate the core genome.
   tax_id: tax_id
@@ -70,3 +70,4 @@ metadata:
     - /path/to/meta_table1.tsv
     - /path/to/meta_table2.tsv
     # Add more paths as needed
+
