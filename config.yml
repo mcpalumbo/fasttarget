@@ -51,10 +51,10 @@ offtarget:
 # ---- DEG ----
 deg:
   enabled: False
-  # deg_identity_filter: Filter value of %identity, only hits with higher values will be used.
-  deg_identity_filter: 0
-  # deg_coverage_filter: Filter value of query coverage, only hits with higher values will be used.
-  deg_coverage_filter: 0
+  # deg_identity_filter: Filter value of %identity, only hits with higher values will be used. Recommended: 30-60.
+  deg_identity_filter: 40
+  # deg_coverage_filter: Filter value of query coverage, only hits with higher values will be used. Recommended: 50-80.
+  deg_coverage_filter: 70
 
 # ---- Localization ----
 psortb:
