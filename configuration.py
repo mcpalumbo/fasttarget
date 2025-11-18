@@ -51,7 +51,8 @@ def print_config(config):
        
     print("\n---- Organism information ----")
     print(f"Organism Name: {config.organism['name']}")
-    print(f"Tax ID: {config.organism['tax_id']}")
+    print(f"Species Tax ID: {config.organism['tax_id']}")
+    print(f"Strain Tax ID: {config.organism['strain_taxid']}")
     print(f"GBK File: {config.organism['gbk_file']}")
     
     if config.cpus:
@@ -76,6 +77,8 @@ def print_config(config):
     if config.core:
         print(f"Roary Enabled: {config.core['roary']}")       
         print(f"CoreCruncher Enabled: {config.core['corecruncher']}")
+        print(f"Minimum Identity: {config.core['min_identity']}%")
+        print(f"Minimum Core Frequency: {config.core['min_core_freq']}%")
     else:
         print(f"Core Enabled: {config.core}")
       
@@ -116,6 +119,23 @@ def print_config(config):
     else:
         print(f"Metadata Enabled: {config.metadata}")
 
+    # Add summary section
+    print("\n" + "="*50)
+    print("CONFIGURATION SUMMARY")
+    print("="*50)
+    enabled_modules = []
+    if config.metabolism: enabled_modules.append("Metabolism")
+    if config.structures: enabled_modules.append("Structures") 
+    if config.core: enabled_modules.append("Core Analysis")
+    if config.offtarget: enabled_modules.append("Off-target")
+    if config.deg: enabled_modules.append("DEG")
+    if config.psortb: enabled_modules.append("Localization")
+    if config.metadata: enabled_modules.append("Metadata")
+    
+    print(f"Organism: {config.organism['name']}")
+    print(f"Enabled modules ({len(enabled_modules)}): {', '.join(enabled_modules)}")
+    print("="*50)
+
 
 def get_config(config_path):
     """
@@ -133,10 +153,18 @@ def get_config(config_path):
     return Config(config)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Process some configuration.')
+    parser = argparse.ArgumentParser(description='Validate and display FastTarget configuration.')
     parser.add_argument('--config_file', type=str, default='config.yml', help='Path to the configuration file')
     args = parser.parse_args()
     
-    config = get_config(args.config_file)
-    print_config(config)
-    print('Please modify config.yml to change data.')
+    try:
+        config = get_config(args.config_file)
+        print_config(config)
+        print('\n✅ Configuration is valid!')
+        print('To modify settings, edit config.yml and run this script again.')
+        print('To run the pipeline: python fasttarget.py --config_file config.yml')
+        exit(0)
+    except Exception as e:
+        print(f'\n❌ Configuration error: {e}')
+        print('Please fix config.yml and try again.')
+        exit(1)
