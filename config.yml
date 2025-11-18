@@ -1,4 +1,10 @@
-# Configuration file
+# FastTarget Configuration File
+# 
+# To validate this configuration before running:
+#   python configuration.py --config_file config.yml
+#
+# To run the pipeline:
+#   python fasttarget.py --config_file config.yml
 
 # ---- Organism information ----
 organism:
@@ -6,16 +12,13 @@ organism:
   name: "MyPathogen"
   # tax_id: Fill with the number of NCBI Taxonomy ID of the specie of your organism. Example: 287 for Pseudomonas aeruginosa.
   # It is used to obtain the genomes to calculate the core genome.
-  tax_id: 123456
-  # strain_taxid: Fill with the number of NCBI Taxonomy ID of the strain of your organism. Example: 208964 for Pseudomonas aeruginosa PAO1.
-  # It is used for structure analysis to map strain-specific proteins.
-  strain_taxid: 123456
+  tax_id: tax_id
   # gbk_file: Complete with the full path of the GBK file of your genome.
   gbk_file: /path/to/mypathogen.gbk
 
 # ---- CPU usage preferences ----
-# cpus: Complete with the number of CPUs used to run this pipeline.
-cpus: None
+# cpus: Number of CPUs to use for parallel processing. Use 'null' for auto-detection, or specify a number (e.g., 4, 8, 16).
+cpus: null
 
 # ---- Metabolism ----
 metabolism:
@@ -38,21 +41,18 @@ core:
   enabled: False
   roary: False
   corecruncher: False
-  # min_identity: Minimum percentage identity for core genome analysis (0-100). Example: 95 for 95% identity.
-  min_identity: 95
-  # min_core_freq: Minimum frequency for a gene to be considered core (0-100). Example: 99 means gene must be present in 99% of genomes.
-  min_core_freq: 99
 
 # ---- Offtarget ----
 offtarget:
   enabled: False
   human: False
   microbiome: False
-  # microbiome_identity_filter: Filter value of %identity, only hits with higher values will be used.
-  microbiome_identity_filter: 0
-  # microbiome_coverage_filter: Filter value of query coverage, only hits with higher values will be used.
-  microbiome_coverage_filter: 0
-  # foldseek_human: True if you want to use Foldseek to search for human off-targets. OBS: offtarget AND structures must be enabled.
+  # microbiome_identity_filter: Filter value of %identity, only hits with higher values will be used. Recommended: 30-50.
+  microbiome_identity_filter: 40
+  # microbiome_coverage_filter: Filter value of query coverage, only hits with higher values will be used. Recommended: 50-80.
+  microbiome_coverage_filter: 70
+  # foldseek_human: True if you want to use Foldseek to search for human off-targets. 
+  # NOTE: Requires both 'offtarget' AND 'structures' to be enabled.
   foldseek_human: False
 
 # ---- DEG ----
