@@ -385,7 +385,7 @@ def run_genbank2gff3(input, output):
     else:
         print(f"GenBank file '{input}' not found.", file=sys.stderr)
 
-def run_roary(work_dir:str, input:str, output:str, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count()):
+def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count()):
 
     """
     Runs the docker image sangerpathogens/roary, a pan genome pipeline. Default options.
@@ -415,7 +415,7 @@ def run_roary(work_dir:str, input:str, output:str, core_threshold=99, identity=9
     else:
         print(f"Directory '{input}' not found.", file=sys.stderr)
 
-def run_core_cruncher(corecruncher_dir:str, reference:str, core_threshold=99, identity=95):
+def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=95):
     """
     Runs CoreCruncher, a core genome tool. Default options.
     Runs the docker image mcpalumbo/corecruncher:1.
@@ -449,7 +449,7 @@ def run_core_cruncher(corecruncher_dir:str, reference:str, core_threshold=99, id
     else:
         print(f"Directory '{corecruncher_dir}' not found.", file=sys.stderr)
 
-def run_foldseek_create_index_db(structures_dir:str, DB_name:str):
+def run_foldseek_create_index_db(structures_dir, DB_name):
 
     """
     Creates a database and indexes it for Foldseek, a tool designed for efficient protein structure comparison.
@@ -497,7 +497,7 @@ def run_foldseek_create_index_db(structures_dir:str, DB_name:str):
     else:
         print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
 
-def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
+def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
 
     """
     Runs Foldseek easy-search, a tool designed for efficient protein structure comparison.
@@ -506,22 +506,28 @@ def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
 
     :param structures_dir: Folder containing the .pdb structures to search in the database.
     :param DB_dir: Folder containing the database.
-    :param DB_name: Name of the database to create.
+    :param DB_name: Name of the database.
     :param query: Query structure file name. Should be in structures_dir.
+    :param output_dir: Output directory path.
 
     """
   
-    if os.path.exists(structures_dir):
+    if os.path.exists(structures_dir) and os.path.exists(output_dir):
 
-        foldseek_results_path = os.path.join(structures_dir, 'foldseek_results')
-    
-        if not os.path.exists(foldseek_results_path):
-            os.makedirs(foldseek_results_path, exist_ok=True)
-        
-        results_tsv_file= os.path.join(foldseek_results_path, f'{query}_vs_{DB_name}_foldseek_results.tsv')
+        query_basename = query.split('.')[0]
 
-        if not files.file_check(results_tsv_file):
+        foldseek_results_tmp = os.path.join(structures_dir, f'{query_basename}_output_foldseek')
+        foldseek_results_final = os.path.join(output_dir, f'{query_basename}_output_foldseek')
+        results_tsv_file = os.path.join(foldseek_results_final, f'{query_basename}_vs_{DB_name}_foldseek_results.tsv')
+
+        if os.path.exists(foldseek_results_tmp):
+            shutil.rmtree(foldseek_results_tmp)
+
+        if not os.path.exists(foldseek_results_final) or not files.file_check(results_tsv_file):
             if os.path.exists(DB_dir):
+
+                if not os.path.exists(foldseek_results_tmp):
+                    os.makedirs(foldseek_results_tmp, exist_ok=True)
 
                 volumes = {
                     DB_dir: {'bind': '/data', 'mode': 'rw'},
@@ -530,7 +536,7 @@ def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
                 work_dir = structures_dir
                 bind_dir = '/media'
                 image_name = 'mcpalumbo/foldseek:1'
-                command = f'easy-search /media/{query} /data/{DB_name} /media/foldseek_results/{query}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
+                command = f'easy-search /media/{query} /data/{DB_name} /media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
 
                 try:
                     run_docker_container(
@@ -540,6 +546,12 @@ def run_foldseek_search(structures_dir:str, DB_dir:str, DB_name:str, query:str):
                         image_name=image_name,
                         command=command
                     )
+
+                    if os.path.exists(foldseek_results_final):
+                        shutil.rmtree(foldseek_results_final)
+                    # Move foldseek_results_tmp to output directory
+                    shutil.move(foldseek_results_tmp, output_dir)
+                    
                 except Exception as e:
                     print(f'Error running foldseek easy-search: {e}')
                     print(f"An error occurred: {e}")
