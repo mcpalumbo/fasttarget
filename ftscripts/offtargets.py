@@ -201,11 +201,15 @@ def microbiome_species_parse(base_path, organism_name, identity_filter, coverage
         print("Proceeding with available results...")
 
     microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget_counts.tsv')
+    microbiome_results_norm = os.path.join(offtarget_path, 'gut_microbiome_offtarget_norm.tsv')
+    microbiome_results_genomes = os.path.join(offtarget_path, 'gut_microbiome_genomes_analyzed.tsv')
 
     if files.file_check(microbiome_results):
         print('Microbiome species offtarget analysis already done, output file found')
         print(microbiome_results)
-        df_microbiome_counts = pd.read_csv(microbiome_results, sep='\t', header=0)
+        df_hit_totals = pd.read_csv(microbiome_results, sep='\t', header=0)
+        df_microbiome_norm = pd.read_csv(microbiome_results_norm, sep='\t', header=0)
+        df_total_genomes = pd.read_csv(microbiome_results_genomes, sep='\t', header=0)
 
     else:
         print(f"Parsing microbiome species BLAST results...")
