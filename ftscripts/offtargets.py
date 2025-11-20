@@ -127,41 +127,6 @@ def microbiome_offtarget_blast_allproteins (base_path, organism_name, cpus=multi
         cpus=cpus
     )
 
-def read_blast_output(file_path):
-    """
-    Read BLASTP output file and return a pandas DataFrame.
-
-    :param file_path: File path of blast output file.
-
-    :return: Pandas DataFrame with blast output.
-    """
-
-    if os.path.exists(file_path):
-        blast_output_df = pd.read_csv(file_path, sep='\t', header=None)
-
-        # Columns used for blastp
-        blast_output_df.columns = [
-        "qseqid",   # query or source (gene) sequence id
-        "sseqid",   # subject or target (reference genome) sequence id
-        "pident",   # percentage of identical positions
-        "length",   # alignment length (sequence overlap)
-        "mismatch", # number of mismatches
-        "gapopen",  # number of gap openings
-        "qstart",   # start of alignment in query
-        "qend",     # end of alignment in query
-        "sstart",   # start of alignment in subject
-        "send",     # end of alignment in subject
-        "evalue",   # expect value
-        "bitscore", # bit score
-        "qcovhsp",  # Query Coverage hsp
-        "qcovs"     # Query Coverage full
-        ]
-
-        return blast_output_df
-    
-    else:
-        print(f'File {file_path} not found.')
-
 def human_offtarget_parse (base_path, organism_name):
 
     """
@@ -183,7 +148,7 @@ def human_offtarget_parse (base_path, organism_name):
     human_results = os.path.join(offtarget_path, 'human_offtarget.tsv')
 
     if not files.file_check(human_results):
-        blast_output_df = read_blast_output(human_blast_output)
+        blast_output_df = files.read_blast_output(human_blast_output)
 
         highest_pident_values = {}
 
@@ -329,7 +294,7 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
 
     if not files.file_check(microbiome_results):
 
-        blast_output_df = read_blast_output(microbiome_blast_output)
+        blast_output_df = files.read_blast_output(microbiome_blast_output)
 
         #Filter % identity and coverage
         filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
