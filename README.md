@@ -61,18 +61,65 @@ After completing these steps, you will be able to run Docker commands without ne
 
 If you have Docker Desktop installed, this solution may not work and could result in errors, certain configurations with Docker Desktop can lead to issues.
 
-## Databases
+## Databases Setup
 
-This repository downloads and uses several key databases for analysis:
+**IMPORTANT:** You must download the required databases **BEFORE** running the FastTarget pipeline. The databases are not automatically downloaded during pipeline execution.
 
-1. **Human Proteome from UniProt (UP000005640)**: The complete *Homo sapiens* proteome will be downloaded from UniProt, including all annotated proteins for the organism.
-Human PDB and AlphaFold structures will be downloaded for use with Foldseek. **Note:** Please be aware that this may require over 80GB of storage space. Ensure that you have sufficient disk space available before proceeding with the download to avoid any interruptions.
+### Required Databases
 
-2. **Database of Essential Genes (DEG)**: This database contains essential bacterial genes and can be obtained from [DEG](http://origin.tubic.org/deg/public/index.php/download).
+This repository uses several key databases for analysis:
 
-3. **Unified Human Gastrointestinal Protein (UHGP) catalog (UHGP-90)**: The [UHGP](https://doi.org/10.1038/s41587-020-0603-3) catalog clustered at 90% amino acid sequence identity will be downloaded.  **Note:** This file is over 10 GB in size, so ensure you have enough disk space available.
+1. **Human Proteome from UniProt (UP000005640)**: The complete *Homo sapiens* proteome including all annotated proteins. Human PDB and AlphaFold structures for use with Foldseek. **Note:** Requires over 80GB of storage space.
 
-During pipeline execution, if structural data calculations are enabled, proteins from **PDB** and **AlphaFold** will also be downloaded, which may take up several GB depending on the size of the organism being analyzed.
+2. **Database of Essential Genes (DEG)**: Contains essential bacterial genes from [DEG](http://origin.tubic.org/deg/public/index.php/download). **Size:** ~500MB.
+
+3. **Unified Human Gastrointestinal Protein (UHGP) catalog (UHGP-90)**: The [UHGP](https://doi.org/10.1038/s41587-020-0603-3) catalog clustered at 90% amino acid sequence identity. **Size:** Over 10GB.
+
+**Total Storage Required:** ~90GB+ of free disk space.
+
+### Downloading Databases
+
+Use the `databases.py` script to download the required databases:
+
+**Download all databases (recommended):**
+```bash
+python databases.py --download all
+```
+
+**Download individual databases:**
+```bash
+# Only human proteome and structures
+python databases.py --download human
+
+# Only microbiome catalogue
+python databases.py --download microbiome
+
+# Only DEG database
+python databases.py --download deg
+```
+
+**Check database status:**
+```bash
+# Show status of all databases
+python databases.py --status
+
+# Verify databases are complete and indexed
+python databases.py --verify
+
+# Update existing databases
+python databases.py --update all
+
+# Clean incomplete downloads
+python databases.py --clean
+```
+
+**Which databases do you need?**
+- For **human offtarget analysis** → download `human`
+- For **microbiome offtarget analysis** → download `microbiome`
+- For **DEG essentiality analysis** → download `deg`
+- For **Foldseek structural comparison** → download `human` (includes structures)
+
+During pipeline execution, if structural data calculations are enabled, additional proteins from **PDB** and **AlphaFold** will be downloaded for your specific organism (several GB depending on genome size).
 
 
 ## Test Case
@@ -81,10 +128,27 @@ To test the pipeline, we provide the small genome of *Mycoplasma pneumoniae*.
 This dataset includes the GenBank (GBK) file, the proteome ID for structural data, and the SBML file for metabolism analysis. 
 You can find the test dataset in the `organism/test` folder.
 
+**Note:** The test suite requires the databases to be downloaded first. Make sure to run `python databases.py --download all` before testing.
+
 1. **Run the pipeline with the test dataset:**
    ```bash
    python tests.py
    ```
+
+### Testing Without Databases
+
+If you want to test the pipeline without downloading large databases (~90GB), you can disable database-dependent modules in your `config.yml`:
+
+```yaml
+structures: 
+  enabled: False
+offtarget:
+  enabled: False
+deg:
+  enabled: False
+```
+
+This allows you to test the **metabolism** and **core genome analysis** modules only.
 
       #### Example Files
 
