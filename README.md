@@ -215,9 +215,10 @@ After editing the `config.yml` file, you can use the `configuration.py` script t
 3. **View the Loaded Configuration:**
    - After validation, the script will print the loaded configuration details, allowing you to verify that everything is set up correctly.
 
+
 ## Running the FastTarget Pipeline
 
-Once you have set up the configuration file, you can run the FastTarget pipeline using the `fasttarget.py` script.
+Once you have downloaded the required databases and set up the configuration file, you can run the FastTarget pipeline using the `fasttarget.py` script.
 
 ### Steps:
 
@@ -229,9 +230,8 @@ Once you have set up the configuration file, you can run the FastTarget pipeline
 
    **Note:** If you want to run the pipeline with your own config file, you can use the following command:
    ```bash
-   python fasttarget.py --config_file mi_config.yml
+   python fasttarget.py --config_file my_config.yml
    ```
-
 
 The results are stored in a file called `results_table.tsv` in the folder of your organism. This file contains the following columns:
 
