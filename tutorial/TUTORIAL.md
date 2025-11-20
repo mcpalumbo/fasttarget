@@ -52,6 +52,6 @@ To find the taxonomy ID for your species:
 
 1. **Visit NCBI**: Go to the [NCBI Taxonomy Database](https://www.ncbi.nlm.nih.gov/taxonomy).
 
-2. **Search for Your Species**: Enter the name of your species in the search bar.
+2. **Search for Your Species**: Enter the name of your species or strain in the search bar.
 
-3. **Find the Tax ID**: Locate the taxonomy ID associated with your species.
+3. **Find the Tax ID**: Locate the taxonomy ID associated with your species and the ID of your strain.
