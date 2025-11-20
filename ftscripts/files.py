@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import pandas as pd
 
 def file_to_list(file_path):
     
@@ -142,3 +143,38 @@ def create_organism_subfolders(base_path, organism_name):
         if not os.path.exists(dir_path):
             os.makedirs(dir_path, exist_ok=True)
             print(f"Created directory: {dir_path}")
+
+def read_blast_output(file_path):
+    """
+    Read BLASTP output file and return a pandas DataFrame.
+
+    :param file_path: File path of blast output file.
+
+    :return: Pandas DataFrame with blast output.
+    """
+
+    if os.path.exists(file_path):
+        blast_output_df = pd.read_csv(file_path, sep='\t', header=None)
+
+        # Columns used for blastp
+        blast_output_df.columns = [
+        "qseqid",   # query or source (gene) sequence id
+        "sseqid",   # subject or target (reference genome) sequence id
+        "pident",   # percentage of identical positions
+        "length",   # alignment length (sequence overlap)
+        "mismatch", # number of mismatches
+        "gapopen",  # number of gap openings
+        "qstart",   # start of alignment in query
+        "qend",     # end of alignment in query
+        "sstart",   # start of alignment in subject
+        "send",     # end of alignment in subject
+        "evalue",   # expect value
+        "bitscore", # bit score
+        "qcovhsp",  # Query Coverage hsp
+        "qcovs"     # Query Coverage full
+        ]
+
+        return blast_output_df
+    
+    else:
+        print(f'File {file_path} not found.')
