@@ -98,18 +98,11 @@ def main(config, base_path):
             print_stylized('STRUCTURES')
             logging.info('Starting structures analysis')
 
-            proteome_uniprot = config.structures['proteome_uniprot']
-            logging.info(f'Proteome Uniprot: {proteome_uniprot}')
+            logging.info(f'Species Tax ID: {tax_id}')
+            logging.info(f'Strain Tax ID: {strain_taxid}')
             
-            # Get annotation information from UniProt proteome and links IDs with the genome locus_tags of the organism
-            uniprot_proteome_annotations, id_equivalences = structures.uniprot_proteome(base_path, organism_name, proteome_uniprot, cpus=8)
-            logging.info('Uniprot proteome annotations and ID equivalences obtained')
-            # Download PDB and AlphaFold structures
-            structures.structures (base_path, organism_name, proteome_uniprot, cpus=8)
-            logging.info('Structures downloaded')
-            # Find pockets using Fpocket. Keep the pockets with higher Druggability Score  
-            df_structures = structures.pockets (base_path, organism_name, id_equivalences, uniprot_proteome_annotations, cpus=8)
-            logging.info('Pockets searched and filtered')
+            # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
+            df_structures = structures.pipeline_structures(base_path, organism_name, tax_id, strain_taxid, cpus=cpus)
             logging.info('Structures analysis finished')
             tables.append(df_structures)
 
