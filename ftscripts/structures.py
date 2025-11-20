@@ -1763,7 +1763,14 @@ def fpocket_for_structure(pdb, output_path, pockets_dir):
         print(f'Running Fpocket for {pdb}')
         programs.run_fpocket(output_path, pdb)
 
-        shutil.move(os.path.join(output_path, fpocket_outdir), pockets_dir)
+        # Move the fpocket results to the pockets directory
+        source_path = os.path.join(output_path, fpocket_outdir)
+        
+        # Remove destination if it exists (handles race conditions)
+        if os.path.exists(results_path):
+            shutil.rmtree(results_path)
+        
+        shutil.move(source_path, pockets_dir)
 
         print(f'FPocket prediction for {pdb} completed.')
     else:
