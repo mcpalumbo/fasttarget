@@ -1,15 +1,6 @@
 import configuration
 import fasttarget
 import os
-import pandas as pd
-import argparse
-import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata
-from datetime import datetime
-import logging
-import sys
-from ftscripts.logger import logger 
-import shutil
 
 def run_test(test_config, base_path):
     try:
@@ -33,6 +24,7 @@ if __name__ == "__main__":
         "organism": {
             "name": "test",
             "tax_id": 2104,
+            "strain_taxid": 272634,
             "gbk_file": f'{test_path}/test.gbk'
         },
         "cpus": None,
