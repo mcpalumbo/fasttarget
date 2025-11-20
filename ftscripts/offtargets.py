@@ -351,207 +351,190 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
         
     return df_microbiome
 
+
 def run_foldseek_human_structures (base_path, organism_name):
 
     """
     Runs Foldseek easy-search for human proteome PDB and AlphaFold structures.
-    Returns a tsv file in databases/human_structures/PDB_files and databases/human_structures/AlphaFold_files for each structure.
+    Uses ONLY the reference structures for each locus_tag.
+    
+    Reference structures are obtained via structures.get_all_reference_structures():
+    - PDB reference structures: *_ref.pdb (extracted chains)
+    - AlphaFold models: AF_*.pdb (full predictions)
+    
+    Each reference structure is searched against both human PDB and AlphaFold databases.
 
-    :param base_path =  Base path of fasttarget folder.
-
+    :param base_path: Base path of fasttarget folder.
+    :param organism_name: Name of the organism.
+    :return: Dictionary with locus_tag as key and path to foldseek results file as value.
     """
+    foldseek_results_mapping = {}
+
+    print(f'\n{"="*80}')
+    print('FOLDSEEK HUMAN OFFTARGET ANALYSIS')
+    print(f'{"="*80}\n')
 
     # Human databases of PDB and AlphaFold structures
     db_human_PDB_path = os.path.join(base_path, 'databases', 'human_structures', 'PDB_files', 'DB_foldseek')
     db_human_AF_path = os.path.join(base_path, 'databases', 'human_structures', 'AlphaFold_files', 'DB_foldseek')
 
-    # Organism files of PDB and AlphaFold structures
-    structure_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'structures')
-
-    structures_PDB_path = os.path.join(structure_dir, 'PDB_files')
-    structures_AF_path = os.path.join(structure_dir, 'AlphaFold_files')
-
-    PDB_files = glob.glob(os.path.join(structures_PDB_path, '*.pdb'))
-    AF_files = glob.glob(os.path.join(structures_AF_path, '*.pdb'))
-
-    #Run Foldseek PDB structures
-    for pdb in PDB_files:
-        pdb_name = os.path.basename(pdb)
-        #Search with human PDB database
-        try:
-            programs.run_foldseek_search(structures_PDB_path, db_human_PDB_path, 'DB_human_PDB', pdb_name)
-        except Exception as e:
-            print(f'Error running Foldseek for PDB structure {pdb_name} with human PDB database: {e}')
-        #Search with human AlphaFold database
-        try:
-            programs.run_foldseek_search(structures_PDB_path, db_human_AF_path, 'DB_human_AF', pdb_name)
-        except Exception as e:
-            print(f'Error running Foldseek for PDB structure {pdb_name} with human AlphaFold database: {e}')
-
-    #Run Foldseek AlphaFold structures
-    for AF in AF_files:
-        AF_name = os.path.basename(AF)
-        #Search with human PDB database
-        try:
-            programs.run_foldseek_search(structures_AF_path, db_human_PDB_path, 'DB_human_PDB', AF_name)
-        except Exception as e:
-            print(f'Error running Foldseek for AlphaFold structure {AF_name} with human PDB database: {e}')
-        #Search with human AlphaFold database
-        try:
-            programs.run_foldseek_search(structures_AF_path, db_human_AF_path, 'DB_human_AF', AF_name)
-        except Exception as e:
-            print(f'Error running Foldseek for AlphaFold structure {AF_name} with human AlphaFold database: {e}')
-
-    #Check results
-    foldseek_pdb_files = glob.glob(os.path.join(structures_PDB_path, 'foldseek_results', '*foldseek_results.tsv'))
-    foldseek_AF_files = glob.glob(os.path.join(structures_AF_path, 'foldseek_results', '*foldseek_results.tsv'))
-
-    print(f'Of a total of {len(PDB_files)} PDB structures: number of Foldseek PDB results:', len(foldseek_pdb_files)/2)
-    print(f'Of a total of {len(AF_files)} AlphaFold structures: number of Foldseek AlphaFold results:', len(foldseek_AF_files)/2)
-
-    if len(PDB_files) == len(foldseek_pdb_files)/2:
-        print('Foldseek PDB search completed successfully.')
-    else:
-        print('Missing PDB Foldseek results.')
-
-    if len(AF_files) == len(foldseek_AF_files)/2:
-        print('Foldseek AlphaFold search completed successfully.')
-    else:
-        print('Missing AlphaFold Foldseek results.')
-
-def foldseek_human_parser (base_path, organism_name):
-
-    """
-    Parses Foldseek results for human proteome PDB and AlphaFold structures.
-    Returns a dictionary with the results.
-
-    :param base_path =  Base path of fasttarget folder.
+    # Get all reference structures using helper function
+    print('Getting reference structures for all locus_tags...')
+    reference_dict = structures.get_all_reference_structures(base_path, organism_name, path_mode=True)
     
-    :return: results_foldseek_dict = Dictionary with Foldseek results of search against human proteome structures.
+    # Filter out None values (locus_tags without structures)
+    reference_dict = {k: v for k, v in reference_dict.items() if v is not None}
+    
+    print(f'Found {len(reference_dict)} locus_tags with reference structures')
+    
+    if not reference_dict:
+        print('ERROR: No reference structures found. Make sure to run structures pipeline first.')
+        return
+    
+    # Offtarget path
+    offtarget_path = os.path.join(base_path, 'organism', organism_name, 'offtarget')
+    foldseek_results_path = os.path.join(offtarget_path, 'foldseek_results')
+
+    if not os.path.exists(foldseek_results_path):
+        os.makedirs(foldseek_results_path, exist_ok=True)
+
+    # Run Foldseek for each reference structure
+    success_count = 0
+    error_count = 0
+    skipped_count = 0
+    
+    for locus_tag, struct_path in reference_dict.items():
+        struct_name = os.path.basename(struct_path)
+        struct_dir = os.path.dirname(struct_path)
+        
+        print(f'\n[{locus_tag}] Processing {struct_name}')
+        
+        # Search with human PDB database
+        try:
+            programs.run_foldseek_search(struct_dir, db_human_PDB_path, 'DB_human_PDB', struct_name, foldseek_results_path)
+            print(f'  ✓ Foldseek vs human PDB completed')
+            success_count += 1
+            filename = f'{struct_name.split(".")[0]}_vs_DB_human_PDB_foldseek_results.tsv'
+            foldseek_results_mapping[locus_tag] = [os.path.join(foldseek_results_path, filename)]
+
+        except Exception as e:
+            print(f'  ✗ Error running Foldseek vs human PDB: {e}')
+            error_count += 1
+        
+        # Search with human AlphaFold database
+        try:
+            programs.run_foldseek_search(struct_dir, db_human_AF_path, 'DB_human_AF', struct_name, foldseek_results_path)
+            print(f'  ✓ Foldseek vs human AlphaFold completed')
+            success_count += 1
+            filename = f'{struct_name.split(".")[0]}_vs_DB_human_AF_foldseek_results.tsv'
+            foldseek_results_mapping[locus_tag].append(os.path.join(foldseek_results_path, filename))
+        except Exception as e:
+            print(f'  ✗ Error running Foldseek vs human AlphaFold: {e}')
+            error_count += 1
+    
+    print(f'\n{"="*80}')
+    print('FOLDSEEK SUMMARY')
+    print(f'{"="*80}')
+    print(f'Total locus_tags with structures: {len(reference_dict)}')
+    print(f'Successfully processed: {success_count}')
+    print(f'Errors: {error_count}')
+    print(f'{"="*80}\n')
+
+    return foldseek_results_mapping
+
+def foldseek_human_parser (base_path, organism_name, map_foldseek):
+
+    """
+    Parses Foldseek results for reference structures and maps them to locus_tags.
+    
+    For each locus_tag, selects the best match (highest probability) across
+    both human PDB and AlphaFold database searches.
+
+    :param base_path: Base path of fasttarget folder.
+    :param organism_name: Name of the organism.
+    :param map_locus_tag: Dictionary mapping locus_tag to foldseek result files.
+    
+    :return: Dictionary with locus_tag as key and best foldseek match.
     """
 
-    # Organism files of PDB and AlphaFold structures
-    structure_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'structures')
 
-    if not files.file_check(os.path.join(structure_dir, 'human_foldseek_dict.json')):
-  
-        # PDB structures
-        foldseek_pdb_results = glob.glob(os.path.join(structure_dir, 'PDB_files', 'foldseek_results', '*foldseek_results.tsv'))
+    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    foldseek_results_path = os.path.join(offtargets_dir, 'foldseek_results')
 
-        results_foldseek_dict = {}
+    foldseek_dict_file = os.path.join(foldseek_results_path, 'human_foldseek_dict.json')
 
-        queries_pdb = {}
-
-        #Parse PDB results
-        for pdb_res in foldseek_pdb_results:
-          
-            file_name = os.path.splitext(os.path.basename(pdb_res))[0]
-            query = file_name.split('_')[1].replace('.pdb','')
-
-            if query not in queries_pdb:
-                queries_pdb[query] = []
-            
-            queries_pdb[query].append(pdb_res)
-
-
-        for query, files_query in queries_pdb.items():
-            dfs = []
-            for file in files_query:
-                df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
-                if not df.empty:
-                    dfs.append(df)
-            
-            if len(dfs) > 0:
-                dfs_combined = pd.concat(dfs, ignore_index=True)
-                best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
-                pdb_id = best_row['query'].split('_')[1]
-
-                if pdb_id == query:
-                        
-                    results_foldseek_dict[query] = {
-                            'target_foldseek': best_row['target'],
-                            'rmsd_foldseek': best_row['rmsd'],
-                            'prob_foldseek': best_row['prob'],
-                            'pident_foldseek': best_row['pident']
-                        }
-            else:
-                results_foldseek_dict[query] = {
-                            'target_foldseek': None,
-                            'rmsd_foldseek': None,
-                            'prob_foldseek': None,
-                            'pident_foldseek': None
-                        }
-
-        # AlphaFold structures
-        structures_AF_path = os.path.join(structure_dir, 'AlphaFold_files')
-        foldseek_results_AF_path = os.path.join(structures_AF_path, 'foldseek_results')
-
-        foldseek_AF_results = glob.glob(os.path.join(foldseek_results_AF_path, '*foldseek_results.tsv'))
-
-        queries_AF = {}
-
-        #Parse AlphaFold results
-        for AF_res in foldseek_AF_results:
-             
-            file_name = os.path.splitext(os.path.basename(AF_res))[0]
-            query = file_name.split('_')[1].replace('.pdb','')
-
-            if query not in queries_AF:
-                queries_AF[query] = []
-
-            queries_AF[query].append(AF_res)
+    if not files.file_check(foldseek_dict_file):
         
-        for query, files_query in queries_AF.items():
+        print('\nParsing Foldseek results...')
+        results_foldseek_dict = {}
+        
+        # Parse results for each locus_tag
+        for locus_tag, result_files in map_foldseek.items():
             dfs = []
-            for file in files_query:
-                df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
-                if not df.empty:
-                    dfs.append(df)
             
+            # Read all result files for this locus_tag
+            for file in result_files:
+                if files.file_check(file):
+                    try:
+                        df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
+                        if not df.empty:
+                            dfs.append(df)
+                    except Exception as e:
+                        print(f'  Warning: Could not read {file}: {e}')
+            
+            # Get the best match across all result files for this locus_tag
             if len(dfs) > 0:
                 dfs_combined = pd.concat(dfs, ignore_index=True)
+                # Sort by probability (descending) and get the best match
                 best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
-                af_id = best_row['query'].split('_')[1]
-
-                if af_id == query and not query in results_foldseek_dict.keys():
-                        
-                    results_foldseek_dict[query] = {
-                            'target_foldseek': best_row['target'],
-                            'rmsd_foldseek': best_row['rmsd'],
-                            'prob_foldseek': best_row['prob'],
-                            'pident_foldseek': best_row['pident']
-                        }
-            elif len(dfs) == 0 and not query in results_foldseek_dict.keys():
-                results_foldseek_dict[query] = {
-                        'target_foldseek': None,
-                        'rmsd_foldseek': None,
-                        'prob_foldseek': None,
-                        'pident_foldseek': None
-                    }
-
-        files.dict_to_json(structure_dir, 'human_foldseek_dict.json', results_foldseek_dict)
+                
+                results_foldseek_dict[locus_tag] = {
+                    'query_structure': best_row['query'],
+                    'target_foldseek': best_row['target'],
+                    'rmsd_foldseek': best_row['rmsd'],
+                    'prob_foldseek': best_row['prob'],
+                    'pident_foldseek': best_row['pident']
+                }
+                print(f'  {locus_tag}: Best match = {best_row["target"]} (prob={best_row["prob"]:.3f})')
+            else:
+                # No results found for this locus_tag
+                results_foldseek_dict[locus_tag] = {
+                    'query_structure': None,
+                    'target_foldseek': None,
+                    'rmsd_foldseek': None,
+                    'prob_foldseek': None,
+                    'pident_foldseek': None
+                }
+                print(f'  {locus_tag}: No foldseek results found')
+        
+        # Save results
+        files.dict_to_json(foldseek_results_path, 'human_foldseek_dict.json', results_foldseek_dict)
+        print(f'\nFoldseek results saved to {foldseek_dict_file}')
+        print(f'Total locus_tags with matches: {len([v for v in results_foldseek_dict.values() if v["target_foldseek"] is not None])}')
     else:
-        results_foldseek_dict = files.json_to_dict(os.path.join(structure_dir, 'human_foldseek_dict.json'))
+        print(f'Loading existing foldseek results from {foldseek_dict_file}')
+        results_foldseek_dict = files.json_to_dict(foldseek_dict_file)
     
     return results_foldseek_dict
 
-def merge_foldseek_data (base_path, organism_name, id_equivalences, uniprot_proteome_annotations):
+def merge_foldseek_data (base_path, organism_name):
     """
-    Merge all the foldseek results in a single dictionary. For each locus_tag, the dictionary contains the human structure (PDB or AlphaFold) with the highest probability.
-    Saves the dictionary in a .json file named using the organism name followed by '_final_foldseek_results.json' in the 'structures' directory.
-    Returns a dictionary with the merged data.
-
+    Format foldseek results for final output table.
+    
+    With the new structure organization, foldseek results are already keyed by locus_tag,
+    so this function primarily reformats the data for the final table.
+    
     :param base_path: Base path where the repository data is stored.
     :param organism_name: Name of the organism.
-    :param id_equivalences: Dictionary with locus_tag and uniprot_id.
-    :param uniprot_proteome_annotations: Dictionary with annotations for the UniProt proteome ID.
+    :param id_equivalences: Dictionary with locus_tag and uniprot_id (for compatibility).
+    :param uniprot_proteome_annotations: Dictionary with annotations (for compatibility).
 
-    :return: Dictionary with the merged data.
+    :return: Dictionary with the merged data formatted for final table.
     """
 
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
-    foldseek_res_file = os.path.join(structure_dir, 'human_foldseek_dict.json')
-    foldseek_mapped_file = os.path.join(structure_dir, f'{organism_name}_final_foldseek_results.json')
+    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    foldseek_res_file = os.path.join(offtargets_dir, 'human_foldseek_dict.json')
+    foldseek_mapped_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.json')
 
     if not files.file_check(foldseek_mapped_file):
         if files.file_check(foldseek_res_file):  
@@ -560,64 +543,21 @@ def merge_foldseek_data (base_path, organism_name, id_equivalences, uniprot_prot
 
             mapped_dict = {}
 
-            # Parse the dictionaries and map the data
-            for locus_tag, uniprot_ids in id_equivalences.items():
-                mapped_dict[locus_tag] = {  'gene': locus_tag,
-                                            'structure': None,
-                                            'target': None,
-                                            'rmsd': None,
-                                            'prob': 0,
-                                            'pident': 0
-                                            }
+            # Results are already organized by locus_tag, just reformat
+            for locus_tag, foldseek_data in results_foldseek_dict.items():
+                mapped_dict[locus_tag] = {
+                    'gene': locus_tag,
+                    'query_structure': foldseek_data.get('query_structure'),
+                    'structure': foldseek_data.get('query_structure'),  # The reference structure used
+                    'target': foldseek_data.get('target_foldseek'),
+                    'rmsd': foldseek_data.get('rmsd_foldseek'),
+                    'prob': foldseek_data.get('prob_foldseek'),
+                    'pident': foldseek_data.get('pident_foldseek')
+                }
 
-                for uniprot_id in uniprot_ids:
-
-                    proteome_data = uniprot_proteome_annotations.get(uniprot_id, {})
-
-                    pdb_ids = []
-                    pdb_ids_dict = proteome_data.get('PDB_id', [])
-                    if pdb_ids_dict:
-                        for entry in pdb_ids_dict:
-                            pdb_ids.append(entry['ID'])
-                        pdb_ids = list(set(pdb_ids))
-
-                    if pdb_ids:
-                        for pdb_id in pdb_ids:
-                            if pdb_id in results_foldseek_dict:
-                                if results_foldseek_dict[pdb_id]['prob_foldseek']:
-                                    if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[pdb_id]['prob_foldseek']:
-                                        mapped_dict[locus_tag] = {
-                                                    'gene': locus_tag,
-                                                    'structure': pdb_id,
-                                                    'target': results_foldseek_dict[pdb_id]['target_foldseek'],
-                                                    'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
-                                                    'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
-                                                    'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
-                                                }
-                                    elif mapped_dict[locus_tag]['prob'] == results_foldseek_dict[pdb_id]['prob_foldseek'] and mapped_dict[locus_tag]['pident'] < results_foldseek_dict[pdb_id]['pident_foldseek']:
-                                        mapped_dict[locus_tag] = {
-                                                    'gene': locus_tag,
-                                                    'structure': pdb_id,
-                                                    'target': results_foldseek_dict[pdb_id]['target_foldseek'],
-                                                    'rmsd': results_foldseek_dict[pdb_id]['rmsd_foldseek'],
-                                                    'prob': results_foldseek_dict[pdb_id]['prob_foldseek'],
-                                                    'pident': results_foldseek_dict[pdb_id]['pident_foldseek']
-                                                }
-                        
-                    if uniprot_id in results_foldseek_dict:
-                        if results_foldseek_dict[uniprot_id]['prob_foldseek']:
-                            if mapped_dict[locus_tag]['prob'] < results_foldseek_dict[uniprot_id]['prob_foldseek']:
-                                mapped_dict[locus_tag] = {
-                                            'gene': locus_tag,
-                                            'structure': uniprot_id,
-                                            'target': results_foldseek_dict[uniprot_id]['target_foldseek'],
-                                            'rmsd': results_foldseek_dict[uniprot_id]['rmsd_foldseek'],
-                                            'prob': results_foldseek_dict[uniprot_id]['prob_foldseek'],
-                                            'pident': results_foldseek_dict[uniprot_id]['pident_foldseek']
-                                        }
-
-            files.dict_to_json(structure_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)                    
-            print(f'Foldseek results saved to {organism_name}_final_foldseek_results.json.')
+            files.dict_to_json(offtargets_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)
+            print(f'\nFoldseek data merged and saved to {foldseek_mapped_file}')
+            print(f'Total genes with foldseek results: {len([v for v in mapped_dict.values() if v["target"] is not None])}')
         else:
             print(f'File {foldseek_res_file} not found.')
     else:
@@ -639,12 +579,12 @@ def final_foldseek_structure_table (base_path, organism_name, mapped_dict):
     :return: DataFrame with the final results.
     """
     
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
 
     all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
     
     # Create a DataFrame with final results
-    final_foldseek_file = os.path.join(structure_dir, f'{organism_name}_final_foldseek_results.tsv')
+    final_foldseek_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.tsv')
 
     if not files.file_check(final_foldseek_file):
 
@@ -654,9 +594,10 @@ def final_foldseek_structure_table (base_path, organism_name, mapped_dict):
             if locus_tag in mapped_dict:
                 rows.append(mapped_dict[locus_tag])
             else:
-                rows.append({'gene': locus_tag, 'structure': 'No hit', 'target': None, 'rmsd': None, 'prob': None, 'pident': None })
+                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'rmsd': None, 'prob': None, 'pident': None })
 
         final_foldseek_df = pd.DataFrame(rows).rename(columns={
+            'query_structure': 'FS_query_structure',
             'structure': 'FS_organism_structure_query',
             'target': 'FS_human_structure_hit',
             'rmsd': 'FS_rmsd',
