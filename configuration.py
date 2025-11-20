@@ -60,7 +60,7 @@ def print_config(config):
         
     print("\n---- Structures ----")
     if config.structures:
-        print(f"Proteome Uniprot: {config.structures['proteome_uniprot']}")
+        print("Structures will be used in the analysis.")
     else:
         print(f"Structures Enabled: {config.structures}")
     
