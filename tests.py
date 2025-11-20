@@ -40,7 +40,9 @@ if __name__ == "__main__":
         "core": {
             "enabled": True,
             "roary": True,
-            "corecruncher": True
+            "corecruncher": True,
+            "min_identity": 95,
+            "min_core_freq": 99
         },
         "offtarget": {
             "enabled": True,
