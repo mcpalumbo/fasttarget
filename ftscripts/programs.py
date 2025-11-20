@@ -3,7 +3,7 @@ import docker
 import os
 import sys
 import multiprocessing
-from ftscripts import structures, files
+from ftscripts import files
 import SNDG
 import json
 import sys
@@ -183,7 +183,7 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None,
 def run_fpocket(work_dir, pdb_file):
 
     """
-    Run FPocket, using the docker image 'ezequieljsosa/fpocket'.
+    Run FPocket, using the docker image 'fpocket/fpocket'.
     
     :param work_dir:  Working directory path.
     :param pdb_file:  Structure file (.pdb) path.
@@ -191,31 +191,74 @@ def run_fpocket(work_dir, pdb_file):
     """
 
     if os.path.exists(pdb_file):
-        FPOCKET_image = "ezequieljsosa/fpocket"
+        FPOCKET_image = "fpocket/fpocket"
         FPOCKET_command = f"fpocket -f {pdb_file}"
 
         run_docker_container(work_dir, work_dir, FPOCKET_image, FPOCKET_command)
+
+        # rename output folder
+        pdb_basename = os.path.basename(os.path.splitext(pdb_file)[0])
+        original_outdir = os.path.join(work_dir, pdb_basename + "_out")
+        new_outdir = os.path.join(work_dir, pdb_basename + "_fpocket")
+        if os.path.exists(original_outdir):
+            os.rename(original_outdir, new_outdir)
     else:
         print(f"The file '{pdb_file}' not found.", file=sys.stderr)
 
-def run_fpocket2(work_dir, pdb_file):
+def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
+    """
+    Run P2Rank inside the Docker image 'mcpalumbo/p2rank:latest'.
+    Creates a folder for each pdb file with '_p2rank' suffix in work_dir.
 
-    """
-    Run FPocket, using the docker image 'ezequieljsosa/fpocket'.
-    
-    :param work_dir:  Working directory path.
+    :param work_dir:  Working directory path (mounted inside the container).
     :param pdb_file:  Structure file (.pdb) path.
+    :param cpus: Number of threads (CPUs) to use. 
+    :param alphafold: Boolean, if True adds '-c alphafold' to the command.
     """
+
+    #create output directory if not exists for my pdb
+    pdb_basename = os.path.basename(os.path.splitext(pdb_file)[0])+"_p2rank"
+    pdb_output_dir = os.path.join(work_dir, pdb_basename)
+
+    if not os.path.exists(pdb_output_dir):
+        os.makedirs(pdb_output_dir, exist_ok=True)
 
     if os.path.exists(pdb_file):
-        user = os.getuid()
+        P2RANK_image = "mcpalumbo/p2rank:latest"
+        base_cmd = "prank predict"
+        if alphafold:
+            base_cmd += " -c alphafold"
+        P2RANK_command = f"{base_cmd} -f {pdb_file} -o {pdb_output_dir} -threads {cpus}"
 
-        FPOCKET_BIN = f"docker run -v {work_dir}:{work_dir} -w {work_dir} --user {user}:{user} --rm ezequieljsosa/fpocket fpocket"
-        FPOCKET_COMMAND = f"{FPOCKET_BIN} -f {pdb_file}"
-
-        run_bash_command(FPOCKET_COMMAND)
+        run_docker_container(work_dir, work_dir, P2RANK_image, P2RANK_command)
     else:
-        print(f"The file '{pdb_file}' not found.", file=sys.stderr)
+        print(f"The file '{pdb_file}' not found.")
+        raise FileNotFoundError(f'{pdb_file} not found.')
+
+def run_cd_hit(input_fasta, output_fasta, identity=1.0, aln_coverage_short=0.9, aln_coverage_long=0.9, use_global_seq_identity=True, accurate_mode=True, cpus=multiprocessing.cpu_count()):
+
+    """
+    Runs CD-HIT command line.
+    
+    :param input_fasta: Input fasta file path.
+    :param output_fasta: Output fasta file path.
+    :param identity: Sequence identity threshold. Default 1.0 (100% of identical residues).
+    :param aln_coverage_short: Alignment coverage for the shorter sequence. Default 0.9.
+    :param aln_coverage_long: Alignment coverage for the longer sequence. Default 0.9.
+    :param use_global_seq_identity: Use global sequence identity. Default True.
+    :param accurate_mode: Use accurate mode. Default True.
+    :param cpus: Number of threads (CPUs) to use in cd-hit.
+    
+    """
+    if files.file_check(input_fasta):
+
+        global_flag = '-G 1' if use_global_seq_identity else '-G 0'
+        accurate_flag = '-g 1' if accurate_mode else '-g 0'
+
+        cd_hit_command = f'cd-hit -i {input_fasta} -o {output_fasta} -c {identity} -aS {aln_coverage_short} -aL {aln_coverage_long} {global_flag} {accurate_flag} -T {cpus}'
+        run_bash_command(cd_hit_command)
+    else:
+        print(f"Input fasta file '{input_fasta}' not found.", file=sys.stderr)
 
 def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', max_target_seqs='500',cpus=multiprocessing.cpu_count()):
 
