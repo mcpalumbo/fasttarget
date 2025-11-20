@@ -169,7 +169,6 @@ The `config.yml` file is the central configuration file for this repository. It 
 
 3. **Structures:**
    - `structures`: Set to `True` if structural data is to be used; otherwise, set to `False`.
-   - `proteome_uniprot`: If `structures` is enabled, provide the proteome ID from UniProt.
 
 4. **Core Genome Analysis:**
    - `core`: Set to `True` if core genome analysis is required; otherwise, set to `False`.
