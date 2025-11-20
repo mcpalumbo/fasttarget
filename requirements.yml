@@ -19,6 +19,7 @@ dependencies:
   - blast
   - diamond
   - pip
+  - cd-hit  
   - pip:
       - sndg-bio
       - docker
