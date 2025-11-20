@@ -35,8 +35,7 @@ if __name__ == "__main__":
             "smarttable_file": f'{test_path}/test_genes_smarttable.tsv'
         },
         "structures": {
-            "enabled": True,
-            "proteome_uniprot": "UP000000808"
+            "enabled": True
         },
         "core": {
             "enabled": True,
