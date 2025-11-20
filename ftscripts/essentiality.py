@@ -1,4 +1,5 @@
-from ftscripts import programs, metadata, offtargets, files
+
+from ftscripts import programs, metadata, files
 import os
 import pandas as pd
 import multiprocessing
@@ -59,7 +60,7 @@ def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
     deg_results = os.path.join(essentiality_path, 'hit_in_deg.tsv')
 
     if not files.file_check(deg_results):
-        blast_output_df = offtargets.read_blast_output(deg_blast_output)
+        blast_output_df = files.read_blast_output(deg_blast_output)
 
         #Filter % identity and coverage
         filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
