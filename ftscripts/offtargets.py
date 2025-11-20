@@ -40,7 +40,60 @@ def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_co
         cpus=cpus
     )
 
-def microbiome_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_count()):
+def microbiome_offtarget_blast_species (base_path, organism_name, cpus=multiprocessing.cpu_count()):
+    """
+    Runs Diamond BLASTP of the organism proteome against each genome in the microbiome species catalogue.
+    Each genome in the species catalogue is stored as a subdirectory under `databases/species_catalogue`,
+    containing its own .faa file and BLAST index.
+
+    For each genome, the BLAST output is stored in the 'offtarget' folder of the organism directory,
+    with one result file per genome. The process can be resumed if interrupted.
+
+    :param base_path: Base path where the repository data is stored.
+    :param organism_name: Name of the organism (folder name under 'organism').
+    :param cpus: Number of threads (CPUs) to use in the BLAST search.
+    """
+
+    # Path to species catalogue
+    databases_path = os.path.join(base_path, "databases", "species_catalogue")
+
+    # Path to organism proteome (.faa file)
+    organism_path = os.path.join(base_path, "organism", organism_name)
+    organism_prot_seq_path = os.path.join(organism_path, "genome", f"{organism_name}.faa")
+
+    # Output folder
+    offtarget_path = os.path.join(organism_path, "offtarget", "species_blast_results")
+    os.makedirs(offtarget_path, exist_ok=True)
+
+    # Iterate over each genome (subfolder with its own indexed faa)
+    for genome_dir in sorted(os.listdir(databases_path)):
+        genome_path = os.path.join(databases_path, genome_dir)
+        
+        if not os.path.isdir(genome_path):
+            continue
+
+        # Output file for this genome
+        blast_output_path = os.path.join(offtarget_path, f"{genome_dir}_offtarget.tsv")
+
+        # Skip if already exists (resume functionality)
+        if os.path.exists(blast_output_path):
+            print(f"✔️ Skipping {genome_dir}, result already exists")
+            continue
+
+        # Run Diamond BLASTP for this genome
+        print(f"🔹 Running Diamond BLAST against {genome_dir}")
+        genome_db = os.path.join(genome_path, f'{genome_dir}_DB')
+        
+        programs.run_diamond_blastp(
+            blastdb=genome_db,                  # index db                
+            query=organism_prot_seq_path,       # organism proteome
+            output=blast_output_path,           # result per genome
+            evalue="1e-5",
+            outfmt="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp",
+            cpus=cpus
+        )
+
+def microbiome_offtarget_blast_allproteins (base_path, organism_name, cpus=multiprocessing.cpu_count()):
 
     """
     Runs ncbi blastp against microbiome proteome.
@@ -55,7 +108,7 @@ def microbiome_offtarget_blast (base_path, organism_name, cpus=multiprocessing.c
     """
     
     #Database files
-    databases_path = os.path.join(base_path, 'databases')
+    databases_path = os.path.join(base_path, 'databases',  'species_catalogue')
     microbiome_index_path = os.path.join(databases_path, 'MICROBIOME_DB')
 
     #Organism files
@@ -65,13 +118,12 @@ def microbiome_offtarget_blast (base_path, organism_name, cpus=multiprocessing.c
     offtarget_path = os.path.join(organism_path, 'offtarget')
     blast_output_path = os.path.join(offtarget_path, 'microbiome_offtarget_blast.tsv')
 
-    programs.run_blastp(
+    programs.run_diamond_blastp(
         blastdb= microbiome_index_path,
         query= organism_prot_seq_path,
         output=blast_output_path,
         evalue= '1e-5',
         outfmt= '6 std qcovhsp qcovs',
-        max_target_seqs = '1000',
         cpus=cpus
     )
 
@@ -151,7 +203,109 @@ def human_offtarget_parse (base_path, organism_name):
 
     return df_human
 
-def microbiome_offtarget_parse (base_path, organism_name, identity_filter, coverage_filter):
+def microbiome_species_parse(base_path, organism_name, identity_filter, coverage_filter):
+    """
+    Parse Diamond BLASTP results against all genomes in the microbiome species catalogue.
+    Each genome has its own BLAST output file under 'offtarget' folder of the organism.
+
+    For each protein (qseqid) of the organism, this function determines in which genomes
+    it has at least one hit passing the identity and coverage filters.
+
+    Returns:
+        - df_microbiome_norm: DataFrame with one row per protein and a column with normalized counts
+        - df_microbiome_counts: DataFrame with one row per protein and a column with number of genomes with hits
+        - df_microbiome_total_genomes: DataFrame with one row per protein and a column with total number of genomes analyzed
+    """
+
+    offtarget_path = os.path.join(base_path, "organism", organism_name, "offtarget", "species_blast_results")
+
+    protein_hits = {}  # dict: protein_id -> set of genomes
+    genome_files = [f for f in os.listdir(offtarget_path) if f.endswith("_offtarget.tsv")]
+    total_outputs = len(genome_files)
+
+    species_path = os.path.join(base_path, "databases", "species_catalogue")
+    total_genomes = len([d for d in os.listdir(species_path) if os.path.isdir(os.path.join(species_path, d))])
+
+    if total_outputs == 0:
+        print(f"Error: No microbiome species BLAST results found in {offtarget_path}. Please run the microbiome_offtarget_blast_species function first.")
+        return pd.DataFrame()
+
+    if total_outputs < total_genomes:                                                                   
+        print(f"Warning: Only {total_outputs} out of {total_genomes} microbiome species BLAST results found in {offtarget_path}.")
+        print("Some genomes may be missing or the process was interrupted.")
+        print("Proceeding with available results...")
+
+    microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget_counts.tsv')
+
+    if files.file_check(microbiome_results):
+        print('Microbiome species offtarget analysis already done, output file found')
+        print(microbiome_results)
+        df_microbiome_counts = pd.read_csv(microbiome_results, sep='\t', header=0)
+
+    else:
+        print(f"Parsing microbiome species BLAST results...")
+        print(f"Total genomes in species catalogue: {total_genomes}")
+
+        for file in tqdm(sorted(genome_files), desc="Parsing microbiome species BLAST results"):
+            genome_name = file.replace("_offtarget.tsv", "")
+            blast_output_path = os.path.join(offtarget_path, file)
+
+            if os.stat(blast_output_path).st_size == 0:
+                continue
+
+            df = pd.read_csv(blast_output_path, sep="\t", header=None)
+
+            # Diamond outfmt: "6 std qcovhsp"
+            df.columns = [
+                "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
+                "qstart", "qend", "sstart", "send", "evalue", "bitscore",
+                "qcovhsp"
+            ]
+
+            filtered_df = df[(df["pident"] > identity_filter) & (df["qcovhsp"] > coverage_filter)]
+
+            for qseqid in filtered_df["qseqid"].unique():
+                protein_hits.setdefault(qseqid, set()).add(genome_name)
+
+        # Convert sets to sorted lists
+        protein_hits = {prot: sorted(list(genomes)) for prot, genomes in protein_hits.items()}
+
+        # Normalized counts: number of genomes with hits / total genomes
+        protein_hit_counts = {
+            prot: len(genomes) / total_genomes if total_genomes > 0 else 0
+            for prot, genomes in protein_hits.items()
+        }
+
+        # Number of genomes with hits
+        protein_hit_totals = {
+            prot: len(genomes)
+            for prot, genomes in protein_hits.items()
+        }
+
+        # Total number of genomes analyzed for each protein
+        protein_total_genomes = {
+            prot: total_genomes
+            for prot in protein_hits.keys()
+        }
+
+
+        # Build DataFrame 
+        df_microbiome = metadata.metadata_table_with_values(base_path, organism_name, protein_hits, 
+                                                'gut_microbiome_offtarget', offtarget_path, 'no_hit')
+
+        df_microbiome_norm = metadata.metadata_table_with_values(base_path, organism_name, protein_hit_counts,
+                                                'gut_microbiome_offtarget_norm', offtarget_path, 0)
+        
+        df_hit_totals = metadata.metadata_table_with_values(base_path, organism_name, protein_hit_totals,
+                                                'gut_microbiome_offtarget_counts', offtarget_path, 0)
+
+        df_total_genomes = metadata.metadata_table_with_values(base_path, organism_name, protein_total_genomes,
+                                                'gut_microbiome_genomes_analyzed', offtarget_path, total_genomes)
+
+    return df_microbiome_norm, df_hit_totals, df_total_genomes
+
+
+def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter, coverage_filter):
 
     """
     Parse NCBI BLASTP results against microbiome proteome, stored in the file 'microbiome_offtarget_blast.tsv'.
