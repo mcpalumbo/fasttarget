@@ -266,3 +266,44 @@ It is available on Docker to generate this interface locally at:
 https://github.com/sndg-arg/targetpathogenweb
 
 Visit the Target Pathogen website at [http://target.sbg.qb.fcen.uba.ar/patho/](http://target.sbg.qb.fcen.uba.ar/patho/).
+
+
+
+## Complete Workflow Summary
+
+Follow these steps in order to run the FastTarget pipeline:
+
+### 1. Environment Setup
+```bash
+# Clone repository
+git clone https://github.com/mcpalumbo/fasttarget.git
+cd fasttarget
+
+# Create and activate conda environment
+conda env create -f requirements.yml
+conda activate fasttarget
+
+# Setup Docker images
+bash setup_docker.sh
+```
+
+### 2. Download Databases (Required)
+```bash
+# Download all databases (this may take several hours)
+python databases.py --download all
+
+# Verify databases are ready
+python databases.py --verify
+```
+
+### 3. Configure Your Analysis
+Edit the `config.yml` file with your organism data and analysis preferences, then validate:
+```bash
+python configuration.py --config_file config.yml
+```
+
+### 4. Run the Pipeline
+```bash
+# Run with modified config.yml
+python fasttarget.py --config_file my_config.yml
+```
