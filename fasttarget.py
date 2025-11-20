@@ -217,8 +217,10 @@ def main(config, base_path):
                     microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
                     logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
                     logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
-                    df_microbiome = offtargets.microbiome_species_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
-                    tables.append(df_microbiome)
+                    df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
+                    tables.append(df_microbiome_norm)
+                    tables.append(df_microbiome_counts)
+                    tables.append(df_microbiome_total_genomes)
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
                             
