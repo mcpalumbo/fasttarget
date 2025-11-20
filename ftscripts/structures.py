@@ -409,7 +409,8 @@ def parse_uniprot_species_data(uniptot_file, specie_taxid, strain_taxid):
         raise FileNotFoundError(f'{uniptot_file} not found.')
     else:
         # Parse UniProt species data
-        uniprot_df = pd.read_csv(uniptot_file, sep='\t')
+        # Keep Entry and PDB columns as string to prevent scientific notation
+        uniprot_df = pd.read_csv(uniptot_file, sep='\t', dtype={'Entry': str, 'PDB': str})
 
         # 1) Obtain strain specific data
         strain_df = uniprot_df[uniprot_df['Organism (ID)'] == strain_taxid]
@@ -1213,6 +1214,8 @@ def create_summary_structure_file(base_path, organism_name, resolution_cutoff= 3
             
             summary_df = create_summary_structure_table(batch_annotations, map_results, locus_tag, resolution_cutoff)
             if not summary_df.empty:
+                # Ensure structure_id is stored as string to prevent scientific notation issues
+                summary_df['structure_id'] = summary_df['structure_id'].astype(str)
                 summary_df.to_csv(summary_table_path, sep='\t', index=False)
             else:
                 print(f'No structure data found for {locus_tag}, summary table not created.')
@@ -2364,7 +2367,8 @@ def final_structure_table(base_path, organism_name):
             structure_type = None
             
             if files.file_check(structure_summary_path):
-                struct_df = pd.read_csv(structure_summary_path, sep='\t')
+                # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
+                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str})
                 ref_rows = struct_df[struct_df['is_reference'] == True]
                 
                 if not ref_rows.empty:
@@ -2434,6 +2438,9 @@ def final_structure_table(base_path, organism_name):
             })
 
         final_df = pd.DataFrame(rows)
+        # Ensure structure column is stored as string to prevent scientific notation issues
+        if 'structure' in final_df.columns:
+            final_df['structure'] = final_df['structure'].astype(str)
         final_df.to_csv(final_table_file, sep='\t', index=False)
         print(f'\nFinal structure summary table saved to {final_table_file}')
         print(f'  Total genes: {len(final_df)}')
@@ -2443,7 +2450,8 @@ def final_structure_table(base_path, organism_name):
         return final_df
     
     else:
-        final_df = pd.read_csv(final_table_file, sep='\t')
+        # Read structure column as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
+        final_df = pd.read_csv(final_table_file, sep='\t', dtype={'structure': str})
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
