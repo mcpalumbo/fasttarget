@@ -1,8 +1,10 @@
-from ftscripts import programs, metadata, files
+
+from ftscripts import programs, metadata, files, structures
 import os
 import pandas as pd
 import multiprocessing
 import glob
+from tqdm import tqdm
 
 def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_count()):
 
