@@ -232,15 +232,14 @@ def main(config, base_path):
             if config.structures and config.offtarget['foldseek_human']:
                 try:
                     print_stylized('FOLDSEEK HUMAN OFFTARGET')
-
-                    # Get annotation information from UniProt proteome and links IDs with the genome locus_tags of the organism
-                    uniprot_proteome_annotations, id_equivalences = structures.uniprot_proteome(base_path, organism_name, proteome_uniprot, cpus=8)
+                   
                     # Run foldseek against human structures
-                    offtargets.run_foldseek_human_structures (base_path, organism_name)
+                    foldseek_mapping = offtargets.run_foldseek_human_structures (base_path, organism_name)
                     logging.info('Foldseek human offtarget search finished')
+                    
                     # Parse results
-                    results_foldseek_dict = offtargets.foldseek_human_parser (base_path, organism_name)
-                    mapped_dict_foldseek = offtargets.merge_foldseek_data (base_path, organism_name, id_equivalences, uniprot_proteome_annotations)
+                    results_foldseek_dict = offtargets.foldseek_human_parser (base_path, organism_name, foldseek_mapping)
+                    mapped_dict_foldseek = offtargets.merge_foldseek_data (base_path, organism_name)
                     final_foldseek_df = offtargets.final_foldseek_structure_table (base_path, organism_name, mapped_dict_foldseek)
                     tables.append(final_foldseek_df)
                     logging.info('Foldseek human offtarget analysis finished')
