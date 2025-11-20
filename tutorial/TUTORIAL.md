@@ -34,19 +34,7 @@ To obtain metabolic files, you can use the Pathway Tools program. Here's a brief
         - Once the Smartable is created, in `Smartable`, click on `Select Columns to Show` and make sure to select the `Reactions` column.
         - Then go to `Smartable > Export Smarttable > Tab-Delimited File`, and ensure that `Identifiers` are selected to include the IDs.
 
-## 3. Finding the Proteome ID
-
-To find the proteome ID for your organism:
-
-1. **Visit UniProt**: Go to the [UniProt website](https://www.uniprot.org/).
-
-2. **Change Database**: Before searching, make sure to select "Proteomes" from the dropdown menu in the search bar.
-
-3. **Search for Your Organism**: Enter the name of your organism in the search bar.
-
-4. **Obtain Proteome ID**: Locate the proteome ID in the search results that matches your organism. 
-
-## 4. Obtaining the Taxonomy ID
+## 3. Obtaining the Taxonomy ID
 
 To find the taxonomy ID for your species:
 
