@@ -36,10 +36,12 @@ def main(config, base_path):
 
     organism_name = config.organism['name']
     tax_id = config.organism['tax_id']
+    strain_taxid = config.organism['strain_taxid']
     gbk_file = config.organism['gbk_file']
     
     print(f'Organism name: {organism_name}')
-    print(f'Tax ID: {tax_id}')
+    print(f'Species Tax ID: {tax_id}')
+    print(f'Strain Tax ID: {strain_taxid}')
     print(f'Genome file: {gbk_file}')
 
     # Create organism subfolders
