@@ -395,26 +395,36 @@ def download_DEG(base_path):
     DOI: 10.1093/nar/gkaa917
 
     :param base_path =  Path to the directory where 'databases' folder is located.
-
+    :return: download_status = True if download was successful, False otherwise.
     """
     databases_path = os.path.join(base_path, 'databases')
     deg_path = os.path.join(databases_path, 'DEG10.aa.gz')
    
     url = 'http://tubic.org/deg/public/download/DEG10.aa.gz'
     
+    download_status = False
+
     print('Downloading DEG database.')
     download_with_wget(url, deg_path)
-    print('Finished.')
 
-    try: 
-        with gzip.open(deg_path, 'rb') as f_in:
-            deg_fasta = os.path.splitext(deg_path)[0] + ".faa"
-            with open(deg_fasta, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-                print(f'File {deg_fasta} downloaded and decompressed successfully.')
-        os.remove(deg_path)        
-    except Exception as e:
-        print(f"An error occurred while decompressing the DEG database: {e}")
+    if files.file_check(deg_path):
+        print('Finished.')
+    
+        try: 
+            with gzip.open(deg_path, 'rb') as f_in:
+                deg_fasta = os.path.splitext(deg_path)[0] + ".faa"
+                with open(deg_fasta, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                    print(f'File {deg_fasta} downloaded and decompressed successfully.')
+            os.remove(deg_path)
+            download_status = True
+        except Exception as e:
+            print(f"An error occurred while decompressing the DEG database: {e}")
+    else:
+        print(f'Failed to download DEG database from {url}.')
+        print('Please check if DEG database is available at the source URL.'
+              ' You can also try to download it manually and place it in the databases folder.')
+    return download_status
 
 def extract_microbiome_species_ids(base_path):
     """
@@ -1141,9 +1151,12 @@ def download_and_index_deg(databases_path):
     # Download and index DEG database
     print('----- 3. Downloading and indexing DEG database -----')
     if not files.file_check(os.path.join(databases_path, 'DEG10.aa.faa')):
-        download_DEG (base_path)
-        index_db_blast_deg (base_path)
-        print('DEG database downloaded and indexed')
+        download_status = download_DEG (base_path)
+        if download_status:
+            index_db_blast_deg (base_path)
+            print('DEG database downloaded and indexed')
+        else:
+            print('Failed to download DEG database.')
     else:
         print('DEG database already exists.')
         if not files.file_check(os.path.join(databases_path, 'DEG_DB.phr')):
