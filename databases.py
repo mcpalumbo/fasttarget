@@ -421,6 +421,7 @@ def download_DEG(base_path):
         except Exception as e:
             print(f"An error occurred while decompressing the DEG database: {e}")
     else:
+        os.remove(deg_path)
         print(f'Failed to download DEG database from {url}.')
         print('Please check if DEG database is available at the source URL.'
               ' You can also try to download it manually and place it in the databases folder.')
