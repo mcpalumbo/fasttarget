@@ -63,22 +63,23 @@ def main(config, base_path):
     tables = []
 
     # Run METABOLIC ANALYSIS
-    if config.metabolism:
+    if config.metabolism_pathwaytools:
         try:
             print_stylized('METABOLIC ANALYSIS')
+            print('Using Pathway Tools output files')
 
             logging.info('Starting metabolic analysis')
 
-            sbml_file =  config.metabolism['sbml_file']
-            chokepoint_file = config.metabolism['chokepoint_file']
-            smarttable_file = config.metabolism['smarttable_file']
+            sbml_file =  config.metabolism_pathwaytools['sbml_file']
+            chokepoint_file = config.metabolism_pathwaytools['chokepoint_file']
+            smarttable_file = config.metabolism_pathwaytools['smarttable_file']
 
             logging.info(f'SBML file: {sbml_file}')
             logging.info(f'Chokepoint file: {chokepoint_file}')
             logging.info(f'Smarttable file: {smarttable_file}')
 
             # Parse metabolic files, make network and calculate centrality
-            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
+            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
             tables.append(df_centrality)
             tables.append(df_edges)
             tables.append(producing_df)
@@ -90,7 +91,43 @@ def main(config, base_path):
         except Exception as e:
             logging.error(f'Error in metabolic analysis: {e}')        
     else:
-        logging.info('Metabolic analysis not enabled')
+        logging.info('Metabolic analysis with Pathway Tools files not enabled')
+    
+
+    if config.metabolism_sbml:
+        try:
+            print_stylized('METABOLIC ANALYSIS')
+            print('Using SBML file and MetaGraphTools')
+            
+            logging.info('Starting metabolic analysis')
+
+            sbml_file =  config.metabolism_sbml['sbml_file']
+            filter_file = config.metabolism_sbml.get('filter_file', None)
+            
+            # Handle empty string or None for filter_file
+            if filter_file == "" or filter_file is None:
+                filter_file = None
+
+            logging.info(f'SBML file: {sbml_file}')
+            if filter_file:
+                logging.info(f'Filter file: {filter_file}')
+            else:
+                logging.info('Filter file: Not provided (will use default frequency filter)')
+
+            # Parse metabolic files, make network and calculate centrality
+            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file)
+            tables.append(mgt_bc_df)
+            tables.append(mgt_degree_df)
+            tables.append(mgt_consumption_df)
+            tables.append(mgt_production_df)
+
+            logging.info('Metabolic analysis from SBML with MetaGraphTools finished')
+
+        except Exception as e:
+            logging.error(f'Error in metabolic analysis: {e}')
+    else:
+        logging.info('Metabolic analysis with SBML file not enabled')
+    
 
     # Run STRUCTURES
     if config.structures:
