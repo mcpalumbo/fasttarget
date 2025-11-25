@@ -1,4 +1,4 @@
-from ftscripts import programs, metadata
+from ftscripts import programs, metadata, files
 import os
 import shutil
 import sys
@@ -8,6 +8,8 @@ import pandas as pd
 import networkx as nx
 from networkx.algorithms.centrality.betweenness import betweenness_centrality
 from networkx.algorithms.components.connected import connected_components
+
+# Functions to process Pathway Tools output files
 
 def process_sbml(base_path, organism_name, sbml_file):
     """
@@ -263,7 +265,7 @@ def mapping_chokepoints(locus_reaction_dict, producing_ck, consuming_ck, both_ck
 
     return producing_chokepoint, consuming_chokepoint, both_chokepoint
 
-def run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file):
+def run_metabolism_ptools (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file):
     """
     Runs the metabolism pipeline. 
     It processes the SBML file, generates the Ubiquitous Compounds file, the network SIF file, and the gene-reaction mapping. 
@@ -311,11 +313,11 @@ def run_metabolism (base_path, organism_name, sbml_file, chokepoint_file, smartt
     print(f'---------- 6. Finished ----------')
 
     print(f'---------- 7. Generating results files ----------')
-    bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, bc_dict, "betweenness_centrality", metabolism_dir, 0)
-    edges_df = metadata.metadata_table_with_values(base_path, organism_name, edge_dict, "edges", metabolism_dir, 0)
-    producing_df = metadata.metadata_table_with_values(base_path, organism_name, producing_chokepoint, "producing_chokepoints", metabolism_dir, 'None')
-    consuming_df = metadata.metadata_table_with_values(base_path, organism_name, consuming_chokepoint, "consuming_chokepoints", metabolism_dir, 'None')
-    both_df = metadata.metadata_table_with_values(base_path, organism_name, both_chokepoint, "both_chokepoints", metabolism_dir, 'None')
+    bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, bc_dict, "PTOOLS_betweenness_centrality", metabolism_dir, 0)
+    edges_df = metadata.metadata_table_with_values(base_path, organism_name, edge_dict, "PTOOLS_edges", metabolism_dir, 0)
+    producing_df = metadata.metadata_table_with_values(base_path, organism_name, producing_chokepoint, "PTOOLS_producing_chokepoints", metabolism_dir, 'None')
+    consuming_df = metadata.metadata_table_with_values(base_path, organism_name, consuming_chokepoint, "PTOOLS_consuming_chokepoints", metabolism_dir, 'None')
+    both_df = metadata.metadata_table_with_values(base_path, organism_name, both_chokepoint, "PTOOLS_both_chokepoints", metabolism_dir, 'None')
     print(f'---------- 7. Finished ----------')
 
     return bcentrality_df, edges_df, producing_df, consuming_df, both_df
