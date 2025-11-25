@@ -176,10 +176,18 @@ The `config.yml` file is the central configuration file for this repository. It 
    - `corecruncher`: Enable CoreCruncher by setting this to `True`.
 
 5. **Metabolism:**
-   - `metabolism`: Set to `True` if metabolic data is to be analyzed; otherwise, set to `False`.
-   - Provide paths to your SBML file, chokepoint file, and smarttable file if metabolism is enabled.
-
-   **Note:** To get help on how to generate these files, please read the tutorials in the `tutorial` folder.
+   
+   **Option A: Using Pathway Tools files (metabolism-PathwayTools):**
+   - `metabolism-PathwayTools.enabled`: Set to `True` if you have Pathway Tools output files.
+   - Provide paths to your SBML file, chokepoint file, and smarttable file.
+   - **Note:** To get help on how to generate these files, please read the tutorials in the `tutorial` folder.
+   
+   **Option B: Using only SBML file (metabolism-SBML):**
+   - `metabolism-SBML.enabled`: Set to `True` if you only have an SBML file (no Pathway Tools files).
+   - Provide path to your SBML file.
+   - Optionally provide a filter file (TSV format) to exclude ubiquitous compounds from graph generation.
+   - Uses MetaGraphTools Docker container to analyze the metabolic network.
+   - **Note:** This is useful if you prefer to use an external SBML instead of a Pathway Tools automatically generated model.
 
 6. **Offtarget Analysis:**
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
