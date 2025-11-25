@@ -235,6 +235,61 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
         print(f"The file '{pdb_file}' not found.")
         raise FileNotFoundError(f'{pdb_file} not found.')
 
+def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True, graph=True):
+    
+    """
+    Run MetaGraphTools inside the Docker image 'mcpalumbo/metagraphtools:latest'.
+    Generates a folder MGT_results_<date> in the working directory.
+    
+    :param work_dir: Working directory where the data is located and results will be saved.
+    :param model_file: Path to the SBML model file.
+    :param filter_file: Path to the frequency filter file (TSV format). If no file provided, uses metabolites with a frequency higher than 20 in the model.
+    :param chokepoints: Whether to calculate chokepoints. Default True.
+    :param graph: Whether to generate graphs. Default True.
+    """
+    
+    # Ensure work_dir is absolute path
+    work_dir = os.path.abspath(work_dir)
+    
+    # Build the MetaGraphTools command arguments
+    mgt_args = [
+        'MetaGraphTools',
+        f'--model /data/{os.path.basename(model_file)}'
+    ]
+    
+    # Add optional flags
+    if chokepoints:
+        mgt_args.append('--chokepoints')
+    if graph:
+        mgt_args.append('--graph')
+    
+    # Add frequency filter file if provided
+    if filter_file:
+        mgt_args.append(f'--frequency_filter_file /data/{os.path.basename(filter_file)}')
+    
+    # Build the complete docker command
+    docker_cmd = [
+        'docker', 'run', '--rm',
+        '-v', f'{work_dir}:/data',
+        'mcpalumbo/metagraphtools:latest'
+    ] + mgt_args
+    
+    # Convert to string for execution
+    docker_cmd_str = ' '.join(docker_cmd)
+    
+    print(f'Running MetaGraphTools in Docker...')
+    print(f'Command: {docker_cmd_str}')
+    
+    try:
+        result = run_bash_command(docker_cmd_str)
+        print('MetaGraphTools completed successfully.')
+        return result
+    except Exception as e:
+        print(f'Error running MetaGraphTools: {e}', file=sys.stderr)
+        raise
+
+
+
 def run_cd_hit(input_fasta, output_fasta, identity=1.0, aln_coverage_short=0.9, aln_coverage_long=0.9, use_global_seq_identity=True, accurate_mode=True, cpus=multiprocessing.cpu_count()):
 
     """
