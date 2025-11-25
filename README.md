@@ -188,6 +188,7 @@ The `config.yml` file is the central configuration file for this repository. It 
    - Optionally provide a filter file (TSV format) to exclude ubiquitous compounds from graph generation.
    - Uses MetaGraphTools Docker container to analyze the metabolic network.
    - **Note:** This is useful if you prefer to use an external SBML instead of a Pathway Tools automatically generated model.
+   - ⚠️ **IMPORTANT:** Gene IDs in your SBML file must match the locus tags in your GenBank file for correct mapping. Inconsistent gene identifiers will result in failed mapping and missing data in the final results.
 
 6. **Offtarget Analysis:**
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
