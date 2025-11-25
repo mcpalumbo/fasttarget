@@ -8,5 +8,6 @@ docker pull mcpalumbo/corecruncher:1
 docker pull mcpalumbo/bioperl:1
 docker pull mcpalumbo/foldseek:1
 docker pull mcpalumbo/p2rank:latest
+docker pull mcpalumbo/metagraphtools:latest
 
 echo "Docker images setup completed."
