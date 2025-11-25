@@ -37,11 +37,16 @@ if __name__ == "__main__":
             "gbk_file": f'{test_path}/test.gbk'
         },
         "cpus": None,
-        "metabolism": {
+        "metabolism-PathwayTools": {
             "enabled": True,
             "sbml_file": f'{test_path}/test.sbml',
             "chokepoint_file": f'{test_path}/test_chokepoints.txt',
             "smarttable_file": f'{test_path}/test_genes_smarttable.tsv'
+        },
+        "metabolism-SBML": {
+            "enabled": False,
+            "sbml_file": f'{test_path}/test.sbml',
+            "filter_file": ""
         },
         "structures": {
             "enabled": True
