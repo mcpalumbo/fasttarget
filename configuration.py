@@ -7,7 +7,8 @@ class Config:
         self.organism = config['organism']
         self.cpus = config['cpus']
         self.structures = config['structures'] if config['structures']['enabled'] else False
-        self.metabolism = config['metabolism'] if config['metabolism']['enabled'] else False
+        self.metabolism_pathwaytools = config['metabolism-PathwayTools'] if config['metabolism-PathwayTools']['enabled'] else False
+        self.metabolism_sbml = config['metabolism-SBML'] if config['metabolism-SBML']['enabled'] else False
         self.core = config['core'] if config['core']['enabled'] else False
         self.metadata = config['metadata'] if config['metadata']['enabled'] else False
         self.offtarget = config['offtarget'] if config['offtarget']['enabled'] else False
@@ -33,7 +34,7 @@ def validate_config(config):
     :param config: Configuration dictionary.
     """
     required_keys = [
-        'organism', 'structures', 'metabolism', 
+        'organism', 'structures', 'metabolism-PathwayTools', 'metabolism-SBML',
         'core', 'metadata', 'offtarget', 'deg', 'psortb'
     ]
     for key in required_keys:
@@ -65,12 +66,20 @@ def print_config(config):
         print(f"Structures Enabled: {config.structures}")
     
     print("\n---- Metabolism ----")
-    if config.metabolism:
-        print(f"SBML File: {config.metabolism['sbml_file']}")
-        print(f"Chokepoint File: {config.metabolism['chokepoint_file']}")
-        print(f"Smarttable File: {config.metabolism['smarttable_file']}")
+    if config.metabolism_pathwaytools:
+        print("PathwayTools Metabolism analysis will be used.")
+        print(f"SBML File: {config.metabolism_pathwaytools['sbml_file']}")
+        print(f"Chokepoint File: {config.metabolism_pathwaytools['chokepoint_file']}")
+        print(f"Smarttable File: {config.metabolism_pathwaytools['smarttable_file']}")
     else:
-        print(f"Metabolism Enabled: {config.metabolism}")
+        print(f"Metabolism PathwayTools Enabled: {config.metabolism_pathwaytools}")
+
+    if config.metabolism_sbml:
+        print("SBML Metabolism analysis will be used.")
+        print(f"SBML File: {config.metabolism_sbml['sbml_file']}")
+        print(f"Filter File: {config.metabolism_sbml['filter_file']}")
+    else:
+        print(f"Metabolism SBML Enabled: {config.metabolism_sbml}")
 
     print("\n---- Core ----")
     
@@ -124,7 +133,7 @@ def print_config(config):
     print("CONFIGURATION SUMMARY")
     print("="*50)
     enabled_modules = []
-    if config.metabolism: enabled_modules.append("Metabolism")
+    if config.metabolism_pathwaytools or config.metabolism_sbml: enabled_modules.append("Metabolism")
     if config.structures: enabled_modules.append("Structures") 
     if config.core: enabled_modules.append("Core Analysis")
     if config.offtarget: enabled_modules.append("Off-target")
