@@ -205,6 +205,18 @@ The `config.yml` file is the central configuration file for this repository. It 
 9. **Metadata:**
    - `metadata`: Set to `True` if you have additional metadata tables to include.
    - Provide a list of paths to your metadata tables under `meta_tables`.
+   - **Format requirements:**
+     - Files must be in TSV (tab-separated) or CSV (comma-separated) format
+     - Must contain a header row with column names
+     - **REQUIRED:** First column must be named `gene` and contain locus tags that match those in your GenBank file
+     - Additional columns can contain any metadata you want to include (e.g., gene names, annotations, expression values, functional categories)
+     - Example:
+       ```
+       gene            gene_name    function
+       MPN_RS02380     alaS         Alanine--tRNA ligase
+       MPN_RS02220     apt          Adenine phosphoribosyltransferase
+       ```
+   - All metadata tables will be merged with the main results table by the `gene` column
 
 ### Validating and Viewing the Configuration
 
