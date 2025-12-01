@@ -337,7 +337,7 @@ def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', 
     else:
         print(f"Query file '{query}' not found.", file=sys.stderr)
 
-def run_makeblastdb(input, output, title, dbtype):
+def run_makeblastdb(input, output, title, dbtype, taxid=None):
 
     """
     Creates a BLAST database from command line.
@@ -346,11 +346,14 @@ def run_makeblastdb(input, output, title, dbtype):
     :param output: Output file path.
     :param title: Name of database.
     :param dbtype:  Molecule type of target db. Values: 'nucl' or 'prot'.
+    :param taxid: Taxonomy ID for the database.
         
     """
     
     if files.file_check(input):
             makeblast_command = f'makeblastdb -in {input} -title {title} -out {output} -parse_seqids -dbtype {dbtype}'
+            if taxid is not None:
+                makeblast_command += f' -taxid {taxid}'
             run_bash_command(makeblast_command)
     else:
         print(f"Blast database file '{input}' not found.", file=sys.stderr)
