@@ -178,7 +178,7 @@ def main(config, base_path):
                     genome.core_genome_programs(base_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'])
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
-                    df_roary = genome.roary_output(base_path, organism_name)
+                    df_roary = genome.roary_output(base_path, organism_name, core_threshold=min_core_freq/100)
                     tables.append(df_roary)
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
