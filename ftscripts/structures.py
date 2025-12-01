@@ -2506,90 +2506,96 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
     print(f'\n{"─"*80}')
     print(f'STAGE 1: UNIPROT PROTEOME ACQUISITION AND MAPPING')
     print(f'{"─"*80}')
-    
-    try:
-        print(f'\n[1.1] Downloading UniProt species data (TaxID: {specie_taxid})...')
-        download_species_uniprot_data(base_path, organism_name, specie_taxid)
-        
-        print(f'\n[1.2] Parsing UniProt data into FASTA files...')
-        uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
-        uniprot_file = os.path.join(uniprot_dir, f"uniprot_specie_taxid_{specie_taxid}_data.tsv")
-        parse_uniprot_species_data(uniprot_file, specie_taxid, strain_taxid)
-        
-        print(f'\n[1.3] Clustering species proteome with CD-HIT...')
-        cluster_uniprot_specie(base_path, organism_name, specie_taxid)
-        
-        print(f'\n[1.4] Creating BLAST databases...')
-        create_uniprot_blast_db(base_path, organism_name, specie_taxid, strain_taxid)
-        
-        print(f'\n[1.5] Running BLAST searches against UniProt databases...')
-        uniprot_proteome_blast(base_path, organism_name, specie_taxid, strain_taxid, cpus=cpus)
-        
-        print(f'\n[1.6] Mapping organism genes to UniProt IDs...')
-        mapping_dict = uniprot_proteome_mapping(base_path, organism_name, specie_taxid, strain_taxid)
-        print(f'    ✓ Mapped {len(mapping_dict)} genes to UniProt IDs')
-        
-    except Exception as e:
-        print(f'\n    ✗ ERROR in Stage 1: {e}')
-        raise
-    
-    # ========== STAGE 2: Structure Acquisition ==========
-    print(f'\n{"─"*80}')
-    print(f'STAGE 2: STRUCTURE DOWNLOAD AND ORGANIZATION')
-    print(f'{"─"*80}')
-    
-    try:
-        print(f'\n[2.1] Creating directory structure for each gene...')
-        create_subfolder_structures(base_path, organism_name)
-        
-        print(f'\n[2.2] Generating structure summary tables...')
-        create_summary_structure_file(base_path, organism_name, resolution_cutoff=resolution_cutoff)
-        
-        print(f'\n[2.3] Downloading PDB and AlphaFold structures...')
-        download_structures(base_path, organism_name)
-        
-        print(f'\n[2.4] Extracting reference structure chains...')
-        get_chain_reference_structure(base_path, organism_name)
-        
-    except Exception as e:
-        print(f'\n    ✗ ERROR in Stage 2: {e}')
-        raise
-    
-    # ========== STAGE 3: Pocket Detection ==========
-    print(f'\n{"─"*80}')
-    print(f'STAGE 3: DRUGGABLE POCKET DETECTION')
-    print(f'{"─"*80}')
-    
-    try:
-        print(f'\n[3.1] Running FPocket for all structures...')
-        structures_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
-        pockets_finder_for_all_loci(base_path, organism_name)
-        
-        print(f'\n[3.2] Running P2Rank for all structures...')
-        p2rank_finder_for_all_loci(base_path, organism_name, cpus)
-        
-        print(f'\n[3.3] Merging structure and pocket data...')
-        merged_data = merge_structure_data(base_path, organism_name)
-        print(f'    ✓ Processed {len(merged_data)} genes')
-        
-        print(f'\n[3.4] Creating final summary table...')
-        final_df = final_structure_table(base_path, organism_name)
-        
-    except Exception as e:
-        print(f'\n    ✗ ERROR in Stage 3: {e}')
-        raise
-    
-    # ========== Pipeline Complete ==========
-    print(f'\n{"="*80}')
-    print(f'Pipeline finished')
-    print(f'{"="*80}')
-    
+
     structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
     final_table_path = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
     
-    print(f'\nResults saved to: {final_table_path}')
-    print(f'Structure data: {os.path.join(structure_dir, f"{organism_name}_structure_data.json")}')
+    if not files.file_check(final_table_path):
     
+        try:
+            print(f'\n[1.1] Downloading UniProt species data (TaxID: {specie_taxid})...')
+            download_species_uniprot_data(base_path, organism_name, specie_taxid)
+            
+            print(f'\n[1.2] Parsing UniProt data into FASTA files...')
+            uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
+            uniprot_file = os.path.join(uniprot_dir, f"uniprot_specie_taxid_{specie_taxid}_data.tsv")
+            parse_uniprot_species_data(uniprot_file, specie_taxid, strain_taxid)
+            
+            print(f'\n[1.3] Clustering species proteome with CD-HIT...')
+            cluster_uniprot_specie(base_path, organism_name, specie_taxid)
+            
+            print(f'\n[1.4] Creating BLAST databases...')
+            create_uniprot_blast_db(base_path, organism_name, specie_taxid, strain_taxid)
+            
+            print(f'\n[1.5] Running BLAST searches against UniProt databases...')
+            uniprot_proteome_blast(base_path, organism_name, specie_taxid, strain_taxid, cpus=cpus)
+            
+            print(f'\n[1.6] Mapping organism genes to UniProt IDs...')
+            mapping_dict = uniprot_proteome_mapping(base_path, organism_name, specie_taxid, strain_taxid)
+            print(f'    ✓ Mapped {len(mapping_dict)} genes to UniProt IDs')
+            
+        except Exception as e:
+            print(f'\n    ✗ ERROR in Stage 1: {e}')
+            raise
+        
+        # ========== STAGE 2: Structure Acquisition ==========
+        print(f'\n{"─"*80}')
+        print(f'STAGE 2: STRUCTURE DOWNLOAD AND ORGANIZATION')
+        print(f'{"─"*80}')
+        
+        try:
+            print(f'\n[2.1] Creating directory structure for each gene...')
+            create_subfolder_structures(base_path, organism_name)
+            
+            print(f'\n[2.2] Generating structure summary tables...')
+            create_summary_structure_file(base_path, organism_name, resolution_cutoff=resolution_cutoff)
+            
+            print(f'\n[2.3] Downloading PDB and AlphaFold structures...')
+            download_structures(base_path, organism_name)
+            
+            print(f'\n[2.4] Extracting reference structure chains...')
+            get_chain_reference_structure(base_path, organism_name)
+            
+        except Exception as e:
+            print(f'\n    ✗ ERROR in Stage 2: {e}')
+            raise
+        
+        # ========== STAGE 3: Pocket Detection ==========
+        print(f'\n{"─"*80}')
+        print(f'STAGE 3: DRUGGABLE POCKET DETECTION')
+        print(f'{"─"*80}')
+        
+        try:
+            print(f'\n[3.1] Running FPocket for all structures...')
+            structures_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+            pockets_finder_for_all_loci(base_path, organism_name)
+            
+            print(f'\n[3.2] Running P2Rank for all structures...')
+            p2rank_finder_for_all_loci(base_path, organism_name, cpus)
+            
+            print(f'\n[3.3] Merging structure and pocket data...')
+            merged_data = merge_structure_data(base_path, organism_name)
+            print(f'    ✓ Processed {len(merged_data)} genes')
+            
+            print(f'\n[3.4] Creating final summary table...')
+            final_df = final_structure_table(base_path, organism_name)
+            
+        except Exception as e:
+            print(f'\n    ✗ ERROR in Stage 3: {e}')
+            raise
+        
+        # ========== Pipeline Complete ==========
+        print(f'\n{"="*80}')
+        print(f'Pipeline finished')
+        print(f'{"="*80}')
+        
+        print(f'\nResults saved to: {final_table_path}')
+        print(f'Structure data: {os.path.join(structure_dir, f"{organism_name}_structure_data.json")}')
+    
+    else:
+        print(f'Final structure summary table already exists at {final_table_path}, loading existing data.')
+        final_df = pd.read_csv(final_table_path, sep='\t', dtype={'structure': str})
+
     return final_df
 
 
