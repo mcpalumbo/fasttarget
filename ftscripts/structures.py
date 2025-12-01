@@ -1236,37 +1236,41 @@ def get_structure_PDB (output_path, PDB_id):
     res = False
     file_path = os.path.join(output_path, f"PDB_{PDB_id}.pdb")
 
-    pdb_url = f"https://files.rcsb.org/download/{PDB_id}.pdb"
+    if not os.path.exists(file_path):
 
-    for attempt in range(3):
-        try:
-            response = requests.get(pdb_url, timeout=30)
-            if response.status_code == 200:
-                # Verify we got content
-                if len(response.content) > 0:
-                    with open(file_path, 'wb') as file:
-                        file.write(response.content)
-                    # Verify file was written successfully
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                        print(f"Downloaded {PDB_id}.pdb.")
-                        res = True
-                        break
+        pdb_url = f"https://files.rcsb.org/download/{PDB_id}.pdb"
+
+        for attempt in range(3):
+            try:
+                response = requests.get(pdb_url, timeout=30)
+                if response.status_code == 200:
+                    # Verify we got content
+                    if len(response.content) > 0:
+                        with open(file_path, 'wb') as file:
+                            file.write(response.content)
+                        # Verify file was written successfully
+                        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                            print(f"Downloaded {PDB_id}.pdb.")
+                            res = True
+                            break
+                        else:
+                            print(f"Warning: File {file_path} not written correctly, retrying...")
                     else:
-                        print(f"Warning: File {file_path} not written correctly, retrying...")
+                        print(f"Warning: Empty content received for {PDB_id}.pdb")
+                elif response.status_code == 404:
+                    # 404 means PDB format doesn't exist, no point retrying
+                    print(f"PDB format not available for {PDB_id} (404).")
+                    break
                 else:
-                    print(f"Warning: Empty content received for {PDB_id}.pdb")
-            elif response.status_code == 404:
-                # 404 means PDB format doesn't exist, no point retrying
-                print(f"PDB format not available for {PDB_id} (404).")
-                break
-            else:
-                print(f"Failed to download .pdb for {PDB_id}, status code: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f'Failed to download .pdb for {PDB_id}, attempt {attempt + 1}/3: {e}')
-        
-        if attempt == 2 and not res:
-            print(f"Failed to download .pdb for {PDB_id} after 3 attempts.")
-    
+                    print(f"Failed to download .pdb for {PDB_id}, status code: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f'Failed to download .pdb for {PDB_id}, attempt {attempt + 1}/3: {e}')
+            
+            if attempt == 2 and not res:
+                print(f"Failed to download .pdb for {PDB_id} after 3 attempts.")
+    else:
+        print(f"PDB file {file_path} already exists.")
+        res = True
     return res
 
 def get_structure_CIF (output_path, PDB_id):
@@ -1281,37 +1285,42 @@ def get_structure_CIF (output_path, PDB_id):
     res = False
     file_path = os.path.join(output_path, f"PDB_{PDB_id}.cif")
 
-    pdb_url = f"https://files.rcsb.org/download/{PDB_id}.cif"
+    if not files.file_check(file_path):
 
-    for attempt in range(3):
-        try:
-            response = requests.get(pdb_url, timeout=30)
-            if response.status_code == 200:
-                # Verify we got content
-                if len(response.content) > 0:
-                    with open(file_path, 'wb') as file:
-                        file.write(response.content)
-                    # Verify file was written successfully
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                        print(f"Downloaded {PDB_id}.cif.")
-                        res = True
-                        break
+        pdb_url = f"https://files.rcsb.org/download/{PDB_id}.cif"
+
+        for attempt in range(3):
+            try:
+                response = requests.get(pdb_url, timeout=30)
+                if response.status_code == 200:
+                    # Verify we got content
+                    if len(response.content) > 0:
+                        with open(file_path, 'wb') as file:
+                            file.write(response.content)
+                        # Verify file was written successfully
+                        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                            print(f"Downloaded {PDB_id}.cif.")
+                            res = True
+                            break
+                        else:
+                            print(f"Warning: File {file_path} not written correctly, retrying...")
                     else:
-                        print(f"Warning: File {file_path} not written correctly, retrying...")
+                        print(f"Warning: Empty content received for {PDB_id}.cif")
+                elif response.status_code == 404:
+                    # 404 means structure doesn't exist at all
+                    print(f"Structure {PDB_id} not found (404).")
+                    break
                 else:
-                    print(f"Warning: Empty content received for {PDB_id}.cif")
-            elif response.status_code == 404:
-                # 404 means structure doesn't exist at all
-                print(f"Structure {PDB_id} not found (404).")
-                break
-            else:
-                print(f"Failed to download .cif for {PDB_id}, status code: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f'Failed to download .cif for {PDB_id}, attempt {attempt + 1}/3: {e}')
-        
-        if attempt == 2 and not res:
-            print(f"Failed to download .cif for {PDB_id} after 3 attempts.")
-    
+                    print(f"Failed to download .cif for {PDB_id}, status code: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f'Failed to download .cif for {PDB_id}, attempt {attempt + 1}/3: {e}')
+            
+            if attempt == 2 and not res:
+                print(f"Failed to download .cif for {PDB_id} after 3 attempts.")
+    else:
+        print(f"CIF file {file_path} already exists.")
+        res = True
+
     return res
 
 def get_structure_alphafold(output_path, uniprot_id):
@@ -1327,37 +1336,41 @@ def get_structure_alphafold(output_path, uniprot_id):
     res = False
     file_path = os.path.join(output_path, f"AF_{uniprot_id}.pdb")
 
-    alphafold_url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v6.pdb"
+    if not files.file_check(file_path):
 
-    for attempt in range(3):
-        try: 
-            response = requests.get(alphafold_url, timeout=30)
-            if response.status_code == 200:
-                # Verify we got content
-                if len(response.content) > 0:
-                    with open(file_path, 'wb') as file:
-                        file.write(response.content)
-                    # Verify file was written successfully
-                    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                        print(f"Downloaded AlphaFold model {uniprot_id}.")
-                        res = True
-                        break
+        alphafold_url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v6.pdb"
+
+        for attempt in range(3):
+            try: 
+                response = requests.get(alphafold_url, timeout=30)
+                if response.status_code == 200:
+                    # Verify we got content
+                    if len(response.content) > 0:
+                        with open(file_path, 'wb') as file:
+                            file.write(response.content)
+                        # Verify file was written successfully
+                        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                            print(f"Downloaded AlphaFold model {uniprot_id}.")
+                            res = True
+                            break
+                        else:
+                            print(f"Warning: File {file_path} not written correctly, retrying...")
                     else:
-                        print(f"Warning: File {file_path} not written correctly, retrying...")
+                        print(f"Warning: Empty content received for AlphaFold {uniprot_id}")
+                elif response.status_code == 404:
+                    # 404 means AlphaFold prediction doesn't exist for this UniProt ID
+                    print(f"AlphaFold prediction not available for {uniprot_id} (404).")
+                    break
                 else:
-                    print(f"Warning: Empty content received for AlphaFold {uniprot_id}")
-            elif response.status_code == 404:
-                # 404 means AlphaFold prediction doesn't exist for this UniProt ID
-                print(f"AlphaFold prediction not available for {uniprot_id} (404).")
-                break
-            else:
-                print(f"Failed to download AlphaFold for {uniprot_id}, status code: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to download AlphaFold prediction for {uniprot_id}, attempt {attempt + 1}/3: {e}")
-        
-        if attempt == 2 and not res:
-            print(f"Failed to download AlphaFold prediction for {uniprot_id} after 3 attempts.")
-   
+                    print(f"Failed to download AlphaFold for {uniprot_id}, status code: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f"Failed to download AlphaFold prediction for {uniprot_id}, attempt {attempt + 1}/3: {e}")
+            
+            if attempt == 2 and not res:
+                print(f"Failed to download AlphaFold prediction for {uniprot_id} after 3 attempts.")
+    else:
+        print(f"AlphaFold file {file_path} already exists.")
+        res = True
     return res
 
 def download_structures(base_path, organism_name):
