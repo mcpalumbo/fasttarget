@@ -368,6 +368,10 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
     try:    
         programs.run_metagraphtools(output_path, sbml_file_destination, filter_file_destination, chokepoints=True, graph=True) 
         print(f'MetaGraphTools processing completed. Results are in {output_path}.')
+        try:
+            programs.change_permission_user_dir(output_path)
+        except Exception as e:
+            print(f"Error changing file permissions: {e}", file=sys.stderr)
     except Exception as e:
         print(f"Error running MetaGraphTools: {e}", file=sys.stderr)
 
@@ -380,6 +384,7 @@ def parse_mgt_results(mgt_results_dir):
     :return: Tuple of dictionaries (consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict).
     
     """
+    programs.change_permission_user_dir(mgt_results_dir)
 
     chokepoint_file = os.path.join(mgt_results_dir, 'chokepoint_genes.tsv')
     betweenness_centrality_file = os.path.join(mgt_results_dir, 'betweenness_centrality.tsv')
