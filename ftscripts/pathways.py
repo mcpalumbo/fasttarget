@@ -446,7 +446,85 @@ def parse_mgt_results(mgt_results_dir):
     
     return consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict
 
+def pick_mgt_results_dir(metabolism_dir):
+    """
+    Pick the MetaGraphTools results directory from the metabolism directory.
+    Removes incomplete or older duplicate directories, keeping only the most recent valid one.
+    
+    :param metabolism_dir: Path to the metabolism directory.
+    :return: Path to the MetaGraphTools results directory if found, None otherwise.
+    """
 
+    def check_mgt_output_files(mgt_results_dir):
+        """
+        Check if all expected MetaGraphTools output files are present.
+        :param mgt_results_dir: Path to the MetaGraphTools results directory.
+        :return: True if all expected files are present, False otherwise.
+        """
+        expected_files = [
+            "all_metabolite_frequencies.tsv",
+            "betweenness_centrality.tsv",
+            "chokepoint_genes.tsv",
+            "chokepoint_reactions.tsv",
+            "metabolic_network_filter.html",
+            "metabolic_network_filter.sif",
+            "metabolic_network.html",
+            "metabolic_network.sif",
+            "metabolite_reactant_product.tsv"
+        ]
+
+        missing_files = []
+        for filename in expected_files:
+            file_path = os.path.join(mgt_results_dir, filename)
+            if not os.path.exists(file_path):
+                missing_files.append(filename)
+        
+        if missing_files:
+            print(f'Missing MetaGraphTools output files in {mgt_results_dir}: {", ".join(missing_files)}', file=sys.stderr)
+            return False
+        return True
+
+    # Find all MGT_results directories
+    mgt_dirs = [
+        os.path.join(metabolism_dir, d)
+        for d in os.listdir(metabolism_dir)
+        if d.startswith("MGT_results") and os.path.isdir(os.path.join(metabolism_dir, d))
+    ]
+
+    if not mgt_dirs:
+        print("No MGT_results folders found.")
+        return None
+
+    # Sort by modification time (oldest → newest)
+    mgt_dirs.sort(key=lambda d: os.path.getmtime(d))
+
+    # Check each folder and keep track of valid ones
+    valid_dirs = []
+    for d in mgt_dirs:
+        if check_mgt_output_files(d):
+            valid_dirs.append(d)
+        else:
+            try:
+                programs.change_permission_user_dir(d)
+                shutil.rmtree(d)
+                print(f"Removed incomplete MGT_results folder: {d}")
+            except Exception as e:
+                print(f"Error removing folder {d}: {e}", file=sys.stderr)
+
+    if not valid_dirs:
+        print("No valid MGT_results folders found.")
+        return None
+
+    # If multiple valid folders exist, keep only the newest
+    if len(valid_dirs) > 1:
+        for d in valid_dirs[:-1]:  # Remove all but the last (most recent)
+            try:
+                shutil.rmtree(d)
+                print(f"Removed older valid MGT_results folder: {d}")
+            except Exception as e:
+                print(f"Error removing folder {d}: {e}", file=sys.stderr)
+        
+    return valid_dirs[-1]  # Return the most recent valid directory
 
 def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
 
@@ -454,41 +532,25 @@ def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
 
     print(f'---------- Processing external SBML file with MetaGraphTools ----------')
 
-    # Find MGT_results* folder in metabolism_dir and remove it
+    mgt_results_dir = pick_mgt_results_dir(metabolism_dir)
 
-    for item in os.listdir(metabolism_dir):
-        if item.startswith('MGT_results'):
-            mgt_results_dir = os.path.join(metabolism_dir, item)
-            if os.path.isdir(mgt_results_dir):
-                shutil.rmtree(mgt_results_dir)
-                print(f'Removed existing MGT_results folder: {mgt_results_dir}')
+    if not mgt_results_dir:   
+        try:
+            process_external_sbml(sbml_file, metabolism_dir, filter_file)
+        except Exception as e:
+            print(f'Error processing external SBML file: {e}', file=sys.stderr)
+            return None, None, None, None
+    else:
+        consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
+
+        bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, 0)
+        degree_df = metadata.metadata_table_with_values(base_path, organism_name, degree_dict, "MGT_edges", metabolism_dir, 0)
+        consumption_df = metadata.metadata_table_with_values(base_path, organism_name, consumption_chokepoint_dict, "MGT_consuming_chokepoints", metabolism_dir, 'False')
+        production_df = metadata.metadata_table_with_values(base_path, organism_name, production_chokepoint_dict, "MGT_producing_chokepoints", metabolism_dir, 'False')                                                                
+
+        print(f'---------- Finished processing external SBML file ----------')
+
+        return bcentrality_df, degree_df, consumption_df, production_df
     
-    try:
-        process_external_sbml(sbml_file, metabolism_dir, filter_file)
-        counter = 0
-        for item in os.listdir(metabolism_dir):
-            if item.startswith('MGT_results'):
-                counter += 1
-                mgt_results_dir = os.path.join(metabolism_dir, item)
-        if counter == 0:
-            print('MetaGraphTools results folder not found.', file=sys.stderr)
-            return
-        elif counter > 1:
-            print('Multiple MetaGraphTools results folders found. Please ensure only one exists.', file=sys.stderr)
-            return
-        else:
-            consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
-
-            bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, 0)
-            degree_df = metadata.metadata_table_with_values(base_path, organism_name, degree_dict, "MGT_edges", metabolism_dir, 0)
-            consumption_df = metadata.metadata_table_with_values(base_path, organism_name, consumption_chokepoint_dict, "MGT_consuming_chokepoints", metabolism_dir, 'False')
-            production_df = metadata.metadata_table_with_values(base_path, organism_name, production_chokepoint_dict, "MGT_producing_chokepoints", metabolism_dir, 'False')                                                                
-
-            print(f'---------- Finished processing external SBML file ----------')
-    
-            return bcentrality_df, degree_df, consumption_df, production_df
-        
-    except Exception as e:
-        print(f'Error processing external SBML file: {e}', file=sys.stderr)
-
+ 
     
