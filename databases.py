@@ -1019,12 +1019,11 @@ def index_db_blast_deg (base_path):
 
 
 
-def download_and_index_human(databases_path, force=False):
+def download_and_index_human(databases_path):
     """
     Downloads and indexes Human proteome.
 
     :param databases_path =  Path to the 'databases' folder.
-    :param force = Force re-download even if files exist.
 
     """
     
@@ -1035,7 +1034,7 @@ def download_and_index_human(databases_path, force=False):
     human_structures_path = os.path.join(databases_path, 'human_structures')
     downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
 
-    if force or not files.file_check(humanprot_path) or not files.file_check(downloaded_files_path):
+    if not files.file_check(humanprot_path) or not files.file_check(downloaded_files_path):
         try:
             check = download_human(base_path)
             print('Human proteome downloaded')
@@ -1054,7 +1053,7 @@ def download_and_index_human(databases_path, force=False):
             print(f'Error downloading human proteome: {e}')  
     else:
         print('Human proteome already exists.')
-        if force or not files.file_check(os.path.join(databases_path, 'HUMAN_DB.phr')):
+        if not files.file_check(os.path.join(databases_path, 'HUMAN_DB.phr')):
             print('Indexing human proteome')
             index_db_blast_human(base_path)
             print('Human proteome indexed')
@@ -1170,11 +1169,9 @@ def download_and_index_deg(databases_path):
 
 
 
-def main_download(base_path, selected_databases, force=False, parallel=4):
+def main_download(base_path, selected_databases):
     """Main download function with enhanced options"""
     print(f"📥 Downloading databases: {', '.join(selected_databases)}")
-    if force:
-        print("🔄 Force mode: Will re-download existing databases")
     
     databases_path = os.path.join(base_path, 'databases')
     if not os.path.exists(databases_path):
@@ -1213,10 +1210,9 @@ if __name__ == '__main__':
         Examples:
         python databases.py --download all          # Download all databases
         python databases.py --download human        # Download only human proteome
-        python databases.py --update microbiome     # Update microbiome database
+        python databases.py --download microbiome     # Update microbiome database
         python databases.py --verify                # Check all databases
         python databases.py --status                # Show database status
-        python databases.py --clean                 # Clean incomplete downloads
                 """
         )
     
@@ -1227,19 +1223,16 @@ if __name__ == '__main__':
                       help="Update specified database(s)")
     group.add_argument('--verify', action='store_true',
                       help="Verify all databases are complete and indexed")
-    parser.add_argument('--force', action='store_true',
-                       help="Force re-download even if database exists")
-    parser.add_argument('--parallel', type=int, default=4,
-                       help="Number of parallel downloads (default: 4)")
+
 
     args = parser.parse_args()
 
     # Determine databases to process
     if hasattr(args, 'download') and args.download:
         databases_to_process = ['human', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
-        main_download(base_path, databases_to_process, force=args.force, parallel=args.parallel)
+        main_download(base_path, databases_to_process)
     elif hasattr(args, 'update') and args.update:
         databases_to_process = ['human', 'microbiome', 'deg'] if args.update == 'all' else [args.update]
-        main_update(base_path, databases_to_process, parallel=args.parallel)
+        main_update(base_path, databases_to_process)
     elif args.verify:
         verify_databases(base_path)
