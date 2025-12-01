@@ -165,6 +165,7 @@ def gbk_locus_strain_host(gbk_file):
                 strain = strain.replace("(", "_")
                 strain = strain.replace(")", "_")
                 strain = strain.replace(":", "_")
+                strain = strain.replace(";", "_")
 
                 if 'host' in feature.qualifiers:
                     host = feature.qualifiers['host'][0]
