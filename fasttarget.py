@@ -385,7 +385,7 @@ def main(config, base_path):
         combined_df = tables[0]
         for df in tables[1:]:
             if df is not None:
-                combined_df = pd.merge(combined_df, df, on='gene')
+                combined_df = pd.merge(combined_df, df, on='gene', how='left')
         
         combined_df.to_csv(results_table_path, sep='\t', index=False)
         
