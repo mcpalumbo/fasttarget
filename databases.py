@@ -816,7 +816,7 @@ def download_human(base_path, cpus=multiprocessing.cpu_count()):
 
     if not os.path.exists(humanprot_path):
     
-        url = 'ftp://rest.uniprot.org/uniprotkb/stream?format=fasta&query=%28%28proteome%3AUP000005640%29%29'
+        url = 'https://rest.uniprot.org/uniprotkb/stream?format=fasta&query=%28%28proteome%3AUP000005640%29%29'
         
         print('Downloading human proteome: fasta sequences.')
         download_with_wget(url, humanprot_path)
