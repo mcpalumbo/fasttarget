@@ -46,7 +46,7 @@ if __name__ == "__main__":
         "metabolism-SBML": {
             "enabled": False,
             "sbml_file": f'{test_path}/test.sbml',
-            "filter_file": ""
+            "filter_file": f'{test_path}/test_ubiquitous.txt'
         },
         "structures": {
             "enabled": True
