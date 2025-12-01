@@ -894,7 +894,8 @@ def index_db_blast_human (base_path):
         input= humanprot_path,
         output= humanprot_index_path,
         title= 'HUMAN_DB',
-        dbtype= 'prot'
+        dbtype= 'prot',
+        taxid=9606
         )
     except Exception as e:
         print('Error indexing Human database:', e)
