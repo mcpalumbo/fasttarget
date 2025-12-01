@@ -356,6 +356,8 @@ def main(config, base_path):
                         sep = '\t'
                     elif ',' in first_line:
                         sep = ','
+                    elif ';' in first_line:
+                        sep = ';'
                     else:
                         raise ValueError('Invalid file format. Only CSV and TSV metadata files are supported.')
 
