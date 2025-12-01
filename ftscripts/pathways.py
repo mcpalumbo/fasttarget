@@ -433,9 +433,10 @@ def parse_mgt_results(mgt_results_dir):
                 betweenness_df['Degree'] = betweenness_df['Degree'].astype(int)
             
             # Create dictionaries with Gene as key
-            betweenness_centrality_dict = dict(zip(betweenness_df['Gene'], betweenness_df['Betweenness_Centrality']))
-            degree_dict = dict(zip(betweenness_df['Gene'], betweenness_df['Degree']))
-            
+
+            betweenness_centrality_dict = betweenness_df.groupby('Gene')['Betweenness_Centrality'].max().to_dict()
+            degree_dict = betweenness_df.groupby('Gene')['Degree'].max().to_dict()
+
             print(f'Parsed {len(betweenness_df)} betweenness centrality entries.')
             
         except Exception as e:
