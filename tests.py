@@ -62,14 +62,14 @@ if __name__ == "__main__":
             "enabled": True,
             "human": True,
             "microbiome": True,
-            "microbiome_identity_filter": 40,
-            "microbiome_coverage_filter": 30,
+            "microbiome_identity_filter": 50,
+            "microbiome_coverage_filter": 70,
             "foldseek_human": True
         },
         "deg": {
             "enabled": True,
-            "deg_identity_filter": 40,
-            "deg_coverage_filter": 30
+            "deg_identity_filter": 50,
+            "deg_coverage_filter": 70
         },
         "psortb": {
             "enabled": True,
