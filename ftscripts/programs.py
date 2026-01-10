@@ -28,7 +28,7 @@ def change_permission_user_file(file_path):
     gid = grp.getgrnam(groupname).gr_gid
 
     try:
-        os.chmod(file_path, 0o777)
+        os.chmod(file_path, 0o644)
         os.chown(file_path, uid, gid)
         print(f"Permissions changed for file {file_path}.")
     except Exception as e:
@@ -50,7 +50,7 @@ def change_permission_user_dir(directory_path):
         for dir_name in dirs:
             dir_path = os.path.join(root, dir_name)
             try:
-                os.chmod(dir_path, 0o777)
+                os.chmod(dir_path, 0o755)
                 os.chown(dir_path, uid, gid)
                 #print(f"Permissions changed for directory {dir_path}.")
             except Exception as e:
@@ -59,7 +59,7 @@ def change_permission_user_dir(directory_path):
         for file_name in files:
             file_path = os.path.join(root, file_name)
             try:
-                os.chmod(file_path, 0o777)
+                os.chmod(file_path, 0o644)
                 os.chown(file_path, uid, gid)
                 #print(f"Permissions changed for file {file_path}.")
             except Exception as e:
