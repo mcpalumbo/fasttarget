@@ -218,7 +218,7 @@ def run_fpocket(work_dir, pdb_file):
 
     if os.path.exists(pdb_file):
         FPOCKET_image = "fpocket/fpocket"
-        FPOCKET_command = f"fpocket -f {pdb_file}"
+        FPOCKET_command = ["fpocket", "-f", pdb_file]
 
         run_docker_container(work_dir, work_dir, FPOCKET_image, FPOCKET_command)
 
@@ -251,10 +251,9 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
 
     if os.path.exists(pdb_file):
         P2RANK_image = "mcpalumbo/p2rank:latest"
-        base_cmd = "prank predict"
+        P2RANK_command = ["prank", "predict", "-f", pdb_file, "-o", pdb_output_dir, "-threads", str(cpus)]
         if alphafold:
-            base_cmd += " -c alphafold"
-        P2RANK_command = f"{base_cmd} -f {pdb_file} -o {pdb_output_dir} -threads {cpus}"
+            P2RANK_command.extend(["-c", "alphafold"])
 
         run_docker_container(work_dir, work_dir, P2RANK_image, P2RANK_command)
     else:
@@ -466,7 +465,7 @@ def run_genbank2gff3(input, output):
     work_dir = os.path.dirname(input)
     bind_dir = '/data'
     image_name = 'mcpalumbo/bioperl:1'
-    command = f'bp_genbank2gff3 {os.path.basename(input)}'
+    command = ["bp_genbank2gff3", os.path.basename(input)]
 
     if files.file_check(input):
         try:
@@ -520,10 +519,16 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
         gff_files = glob.glob(os.path.join(input, '*.gff'))
         if not gff_files:
             raise Exception(f"No .gff files found in {input}")
-        gff_files_str = " ".join(gff_files)
 
         ROARY_image = "sangerpathogens/roary"
-        ROARY_command = f"roary -p {cpus} -g {cluster_number} -cd {core_threshold} -i {identity} -f {output} {gff_files_str}"
+        ROARY_command = [
+            "roary",
+            "-p", str(cpus),
+            "-g", str(cluster_number),
+            "-cd", str(core_threshold),
+            "-i", str(identity),
+            "-f", output
+        ] + gff_files
 
         run_docker_container(work_dir, work_dir, ROARY_image, ROARY_command)
     else:
@@ -547,7 +552,14 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
             work_dir = corecruncher_dir
             bind_dir = '/data'
             image_name = 'mcpalumbo/corecruncher:1'
-            command = f'/CoreCruncher/corecruncher_master.py -in faa/ -out /data -freq {core_threshold} -score {identity} -ref {reference}'  
+            command = [
+                '/CoreCruncher/corecruncher_master.py',
+                '-in', 'faa/',
+                '-out', '/data',
+                '-freq', str(core_threshold),
+                '-score', str(identity),
+                '-ref', reference
+            ]  
             try:
                 run_docker_container(
                     work_dir=work_dir,
@@ -585,8 +597,8 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
         work_dir = structures_dir
         bind_dir = '/data'
         image_name = 'mcpalumbo/foldseek:1'
-        command_create = f'createdb /data /data/DB_foldseek/{DB_name}'
-        command_index = f'createindex /data/DB_foldseek/{DB_name} /data/DB_foldseek/tmp'
+        command_create = ["createdb", "/data", f"/data/DB_foldseek/{DB_name}"]
+        command_index = ["createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
 
         try:
             run_docker_container(
@@ -650,7 +662,16 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
                 work_dir = structures_dir
                 bind_dir = '/media'
                 image_name = 'mcpalumbo/foldseek:1'
-                command = f'easy-search /media/{query} /data/{DB_name} /media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv /data/tmp --exhaustive-search 1 --format-mode 4 --format-output query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob'
+                command = [
+                    "easy-search",
+                    f"/media/{query}",
+                    f"/data/{DB_name}",
+                    f"/media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv",
+                    "/data/tmp",
+                    "--exhaustive-search", "1",
+                    "--format-mode", "4",
+                    "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
+                ]
 
                 try:
                     run_docker_container(
@@ -897,7 +918,12 @@ def run_psort(input, organism_type, output_dir, output_format='terse'):
             file_name = os.path.basename(input)
 
             image_name = 'brinkmanlab/psortb_commandline:1.0.2'
-            psortb_command = f'/usr/local/psortb/bin/psort -{organism_type} -o {output_format} -i /tmp/results/{file_name}'
+            psortb_command = [
+                '/usr/local/psortb/bin/psort',
+                f'-{organism_type}',
+                '-o', output_format,
+                '-i', f'/tmp/results/{file_name}'
+            ]
             env_vars = {'MOUNT': output_dir}
 
             run_docker_container(output_dir, '/tmp/results', image_name, psortb_command, env_vars)
