@@ -144,8 +144,8 @@ def download_with_wget(url, filepath, max_retries=5):
     while attempt < max_retries and not success:
         try:
             # Use wget with resume and progress reporting
-            command = f'wget -c --progress=dot:mega -O {filepath} "{url}"'
-            programs.run_bash_command(command)
+            wget_command = ['wget', '-c', '--progress=dot:mega', '-O', filepath, url]
+            programs.run_bash_command(wget_command)
             print('Download complete.')
             success = True  # Mark success if wget completes
         except Exception as e:

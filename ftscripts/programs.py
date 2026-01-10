@@ -1,4 +1,5 @@
 import subprocess
+import shlex
 import docker
 import os
 import sys
@@ -76,45 +77,44 @@ def load_config(base_path):
         config = json.load(file)
     return config
 
-def run_bash_command_with_retries(command, retries=3, delay=5):
+def run_bash_command_with_retries(cmd_list, retries=3, delay=5):
     """
     Run a bash command with retry logic.
 
-    :param command: The command to run.
+    :param cmd_list: List of command arguments [program, arg1, arg2, ...]
     :param retries: Number of retries if the command fails. Default is 3.
     :param delay: Delay (in seconds) between retries. Default is 5 seconds.
     """
     attempt = 0
     while attempt < retries:
         try:
-            print(f'Running (attempt {attempt+1}/{retries}): {command}')
-            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            print(f'Running (attempt {attempt+1}/{retries}):', " ".join(repr(a) for a in cmd_list))
+            result = subprocess.run(
+                cmd_list,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            print(f"STDOUT:\n{result.stdout}")
+            if result.stderr:
+                print(f"STDERR:\n{result.stderr}")
+            print("Command executed successfully.")
+            return result.stdout
 
-            stdout, stderr = process.communicate()
-            print(f"STDOUT:\n{stdout}")  # Always print stdout
-            print(f"STDERR:\n{stderr}")
-
-            if process.returncode == 0:
-                print("Command executed successfully.")
-                return stdout  # Return stdout if successful
-            else:
-                print(f"Command failed with return code {process.returncode}.")
-                if stderr:
-                    print(f"STDERR:\n{stderr}")
-                raise Exception(f"Command failed with return code {process.returncode}.")
-
-        except Exception as e:
-            print(f"Error: {str(e)}")
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed with return code {e.returncode}.")
+            print(f"STDERR:\n{e.stderr}")
             attempt += 1
             if attempt < retries:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 print("Max retries reached. Command failed.")
-                raise  # Raise the last exception after max retries
+                raise
 
     return None
 
+'''
 def run_bash_command(command):
     """
     Run a bash command.
@@ -143,6 +143,32 @@ def run_bash_command(command):
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+'''
+
+def run_bash_command(cmd_list, capture_output=True):
+    """
+    Run a bash command.
+    
+    :param cmd_list: List of command arguments [program, arg1, arg2, ...]
+    :param capture_output: Whether to capture stdout/stderr
+    """
+    try:
+        print("Running:", " ".join(repr(a) for a in cmd_list))
+        result = subprocess.run(
+            cmd_list,  # List, not string
+            check=True,  # Raises CalledProcessError on failure
+            capture_output=capture_output,
+            text=True
+        )
+        print(f"STDOUT:\n{result.stdout}")
+        if result.stderr:
+            print(f"STDERR:\n{result.stderr}")
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed with return code {e.returncode}")
+        print(f"STDERR:\n{e.stderr}")
+        raise
+
 
 def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None):
     """
@@ -274,14 +300,10 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
         'mcpalumbo/metagraphtools:latest'
     ] + mgt_args
     
-    # Convert to string for execution
-    docker_cmd_str = ' '.join(docker_cmd)
-    
     print(f'Running MetaGraphTools in Docker...')
-    print(f'Command: {docker_cmd_str}')
     
     try:
-        result = run_bash_command(docker_cmd_str)
+        result = run_bash_command(docker_cmd)
         print('MetaGraphTools completed successfully.')
         return result
     except Exception as e:
@@ -307,10 +329,17 @@ def run_cd_hit(input_fasta, output_fasta, identity=1.0, aln_coverage_short=0.9, 
     """
     if files.file_check(input_fasta):
 
-        global_flag = '-G 1' if use_global_seq_identity else '-G 0'
-        accurate_flag = '-g 1' if accurate_mode else '-g 0'
-
-        cd_hit_command = f'cd-hit -i {input_fasta} -o {output_fasta} -c {identity} -aS {aln_coverage_short} -aL {aln_coverage_long} {global_flag} {accurate_flag} -T {cpus}'
+        cd_hit_command = [
+            'cd-hit',
+            '-i', input_fasta,
+            '-o', output_fasta,
+            '-c', str(identity),
+            '-aS', str(aln_coverage_short),
+            '-aL', str(aln_coverage_long),
+            '-G', '1' if use_global_seq_identity else '0',
+            '-g', '1' if accurate_mode else '0',
+            '-T', str(cpus)
+        ]
         run_bash_command(cd_hit_command)
     else:
         print(f"Input fasta file '{input_fasta}' not found.", file=sys.stderr)
@@ -332,7 +361,17 @@ def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', 
     """
     if files.file_check(query):
 
-        blastp_command = f'blastp -evalue {evalue} -max_hsps {max_hsps} -outfmt "{outfmt}" -db {blastdb} -query {query} -num_threads {cpus} -max_target_seqs {max_target_seqs} > {output}'
+        blastp_command = [
+            'blastp',
+            '-evalue', str(evalue),
+            '-max_hsps', str(max_hsps),
+            '-outfmt', str(outfmt),
+            '-db', blastdb,
+            '-query', query,
+            '-num_threads', str(cpus),
+            '-max_target_seqs', str(max_target_seqs),
+            '-out', output
+        ]
         run_bash_command(blastp_command)
     else:
         print(f"Query file '{query}' not found.", file=sys.stderr)
@@ -351,9 +390,16 @@ def run_makeblastdb(input, output, title, dbtype, taxid=None):
     """
     
     if files.file_check(input):
-            makeblast_command = f'makeblastdb -in {input} -title {title} -out {output} -parse_seqids -dbtype {dbtype}'
+            makeblast_command = [
+                'makeblastdb',
+                '-in', input,
+                '-title', title,
+                '-out', output,
+                '-parse_seqids',
+                '-dbtype', dbtype
+            ]
             if taxid is not None:
-                makeblast_command += f' -taxid {taxid}'
+                makeblast_command.extend(['-taxid', str(taxid)])
             run_bash_command(makeblast_command)
     else:
         print(f"Blast database file '{input}' not found.", file=sys.stderr)
@@ -375,7 +421,16 @@ def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outf
     """
     if files.file_check(query):
 
-        diamond_blastp_command = f'diamond blastp --evalue {evalue} --max-hsps {max_hsps} --outfmt {outfmt} --db {blastdb} --query {query} --threads {cpus} --out {output}'
+        diamond_blastp_command = [
+            'diamond', 'blastp',
+            '--evalue', str(evalue),
+            '--max-hsps', str(max_hsps),
+            '--outfmt', str(outfmt),
+            '--db', blastdb,
+            '--query', query,
+            '--threads', str(cpus),
+            '--out', output
+        ]
         run_bash_command(diamond_blastp_command)
     else:
         print(f"Query file '{query}' not found.", file=sys.stderr)
@@ -392,7 +447,7 @@ def run_makediamonddb(input, output):
     """
     
     if files.file_check(input):
-            makediamond_command = f'diamond makedb --in {input} --db {output}'
+            makediamond_command = ['diamond', 'makedb', '--in', input, '--db', output]
             run_bash_command(makediamond_command)
     else:
         print(f"Diamond Blast database file '{input}' not found.", file=sys.stderr)
@@ -460,10 +515,11 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
 
     if os.path.exists(input):
 
-        result = subprocess.run([f'ls {input}/*.gff'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-        if result.returncode != 0:
-            raise Exception(f"Error listing .gff files: {result.stderr.decode('utf-8')}")
-        gff_files = result.stdout.decode('utf-8').strip().split()
+        # Use glob to list .gff files safely
+        
+        gff_files = glob.glob(os.path.join(input, '*.gff'))
+        if not gff_files:
+            raise Exception(f"No .gff files found in {input}")
         gff_files_str = " ".join(gff_files)
 
         ROARY_image = "sangerpathogens/roary"
@@ -635,7 +691,7 @@ def run_panx(panx_script, input, species_name, cpus=multiprocessing.cpu_count())
    
     if os.path.exists(panx_script):
         if os.path.exists(input):            
-            panx_command = f'{panx_script} -fn {input}/ -sl {species_name} -t {cpus}'
+            panx_command = [panx_script, '-fn', f'{input}/', '-sl', species_name, '-t', str(cpus)]
             run_bash_command(panx_command)
 
         else:
@@ -654,7 +710,7 @@ def run_unzip(input_file, output_dir):
 
     if os.path.exists(input_file):
         if os.path.exists(output_dir):            
-            unzip_command = f'unzip {input_file} -d {output_dir}'
+            unzip_command = ['unzip', input_file, '-d', output_dir]
             run_bash_command(unzip_command)
             print(f'Unzip {input_file} in {output_dir}')
         else:
@@ -685,7 +741,16 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
 
     if not files.file_check(checkpoint_file):
         if not os.path.exists(dehydrated_file):
-            datasets_command = f"datasets download genome taxon {tax_id} --assembly-level complete --annotated --assembly-source 'RefSeq' --include gbff,gff3 --exclude-atypical --dehydrated  --filename {dehydrated_file}"
+            datasets_command = [
+                'datasets', 'download', 'genome', 'taxon', str(tax_id),
+                '--assembly-level', 'complete',
+                '--annotated',
+                '--assembly-source', 'RefSeq',
+                '--include', 'gbff,gff3',
+                '--exclude-atypical',
+                '--dehydrated',
+                '--filename', dehydrated_file
+            ]
             run_bash_command(datasets_command)
             print(f'Download a dehydrated data package in {dehydrated_file}')
         else:
@@ -699,7 +764,7 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
         else:
             print(f'Dehydrated data package in {dehydrated_dir}')
         
-        rehydrate_command = f'datasets rehydrate --directory {dehydrated_dir}'
+        rehydrate_command = ['datasets', 'rehydrate', '--directory', dehydrated_dir]
         run_bash_command_with_retries(rehydrate_command)
         print(f'Rehydrated complete')
         
@@ -727,17 +792,30 @@ def run_ncbi_accession(accession, output_dir):
 
         file_download = os.path.join(output_dir, f'{accession}.zip')
 
-        datasets_command = f'datasets download genome accession {accession} --include gbff,gff3 --filename {file_download}'
+        datasets_command = ['datasets', 'download', 'genome', 'accession', accession, '--include', 'gbff,gff3', '--filename', file_download]
         run_bash_command(datasets_command)
         run_unzip(file_download, output_dir)
-        run_bash_command(f'rm {file_download} {output_dir}/README.md')
+        
+        # Remove downloaded zip and README
+        readme_path = os.path.join(output_dir, 'README.md')
+        if os.path.exists(file_download):
+            os.remove(file_download)
+        if os.path.exists(readme_path):
+            os.remove(readme_path)
 
         old_accesion_dir = os.path.join(output_dir, accession)
         if os.path.exists(old_accesion_dir):
-            run_bash_command(f'rm -r {old_accesion_dir}')
+            shutil.rmtree(old_accesion_dir)
 
-        run_bash_command(f'mv {output_dir}/ncbi_dataset/data/{accession} {output_dir}')
-        run_bash_command(f'rm -r {output_dir}/ncbi_dataset')
+        # Move accession data to output_dir
+        src_path = os.path.join(output_dir, 'ncbi_dataset', 'data', accession)
+        if os.path.exists(src_path):
+            shutil.move(src_path, output_dir)
+        
+        # Remove ncbi_dataset directory
+        ncbi_dataset_dir = os.path.join(output_dir, 'ncbi_dataset')
+        if os.path.exists(ncbi_dataset_dir):
+            shutil.rmtree(ncbi_dataset_dir)
 
     else:
         print(f"Directory '{output_dir}' not found.", file=sys.stderr)
@@ -756,8 +834,8 @@ def run_ubiquitous(sbml_file, out_dir):
     if os.path.exists(sbml_file):
         if os.path.exists(out_dir):
             try:
-                ubiq_command = f'python3 -m "SNDG.Network.SBMLProcessor" -i {sbml_file} -o {out_dir}/'
-                run_bash_command(ubiq_command)
+                ubiquitous_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/']
+                run_bash_command(ubiquitous_command)
                 print(f'Ubiquitous compounds file generated.')
             except Exception as e:
                 print(f"An error occurred: {e}")
@@ -780,7 +858,7 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
         if os.path.exists(ubiquitous_file):
             if os.path.exists(out_dir):
                 try:
-                    sif_command = f'python3 -m "SNDG.Network.SBMLProcessor" -i {sbml_file} -o {out_dir}/ -f {ubiquitous_file}'
+                    sif_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/', '-f', ubiquitous_file]
                     run_bash_command(sif_command)
                     print(f'Sif file generated.')
                 except Exception as e:
