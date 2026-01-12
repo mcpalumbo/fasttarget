@@ -33,7 +33,7 @@ def change_permission_user_file(file_path):
         os.chown(file_path, uid, gid)
         print(f"Permissions changed for file {file_path}.")
     except Exception as e:
-        print(f"Failed to change permissions for file {file_path}: {e}")
+        logging.exception(f"Failed to change permissions for file {file_path}: {e}")
 
 def change_permission_user_dir(directory_path):
     """
@@ -55,7 +55,7 @@ def change_permission_user_dir(directory_path):
                 os.chown(dir_path, uid, gid)
                 #print(f"Permissions changed for directory {dir_path}.")
             except Exception as e:
-                print(f"Failed to change permissions for directory {dir_path}: {e}")
+                logging.exception(f"Failed to change permissions for directory {dir_path}: {e}")
         
         for file_name in files:
             file_path = os.path.join(root, file_name)
@@ -64,7 +64,7 @@ def change_permission_user_dir(directory_path):
                 os.chown(file_path, uid, gid)
                 #print(f"Permissions changed for file {file_path}.")
             except Exception as e:
-                print(f"Failed to change permissions for file {file_path}: {e}")
+                logging.exception(f"Failed to change permissions for file {file_path}: {e}")
 
 def load_config(base_path):
     """
@@ -307,7 +307,7 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
         print('MetaGraphTools completed successfully.')
         return result
     except Exception as e:
-        logging.error(f'Error running MetaGraphTools: {e}')
+        logging.exception(f'Error running MetaGraphTools: {e}')
         raise
 
 
@@ -493,8 +493,7 @@ def run_genbank2gff3(input, output):
                     print(f'Gff3 file saved in {output}')
 
         except Exception as e:
-            print(f'Error running bp_genbank2gff3.pl: {e}')
-            print(f"An error occurred: {e}")
+            logging.exception(f'Error running bp_genbank2gff3.pl: {e}')
     else:
         logging.error(f"GenBank file '{input}' not found.")
 
@@ -569,8 +568,7 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
                     command=command
                 )
             except Exception as e:
-                print(f'Error running corecruncher: {e}')
-                print(f"An error occurred: {e}")
+                logging.exception(f'Error running corecruncher: {e}')
         else:
             logging.error(f"Directory '{os.path.join(corecruncher_dir, 'faa')}' not found.")
     else:
@@ -616,11 +614,9 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
                     command=command_index
                 )
             except Exception as e:
-                print(f'Error running foldseek createindex: {e}')
-                print(f"An error occurred: {e}")
+                logging.exception(f'Error running foldseek createindex: {e}')
         except Exception as e:
-            print(f'Error running foldseek createdb: {e}')
-            print(f"An error occurred: {e}")
+            logging.exception(f'Error running foldseek createdb: {e}')
     else:
         logging.error(f"Directory '{structures_dir}' not found.")
 
@@ -689,8 +685,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
                     shutil.move(foldseek_results_tmp, output_dir)
                     
                 except Exception as e:
-                    print(f'Error running foldseek easy-search: {e}')
-                    print(f"An error occurred: {e}")
+                    logging.exception(f'Error running foldseek easy-search: {e}')
             else:
                 logging.error(f"Directory '{DB_dir}' not found. Please make the DB again.")
         else:
@@ -860,7 +855,7 @@ def run_ubiquitous(sbml_file, out_dir):
                 run_bash_command(ubiquitous_command)
                 print(f'Ubiquitous compounds file generated.')
             except Exception as e:
-                print(f"An error occurred: {e}")
+                logging.exception(f"Error generating ubiquitous compounds file: {e}")
         else:
             logging.error(f"Directory '{out_dir}' not found.")
     else:
@@ -884,7 +879,7 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
                     run_bash_command(sif_command)
                     print(f'Sif file generated.')
                 except Exception as e:
-                    print(f"An error occurred: {e}")
+                    logging.exception(f"Error generating SIF file: {e}")
             else:
                 logging.error(f"Directory '{out_dir}' not found.")
         else:

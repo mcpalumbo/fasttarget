@@ -89,7 +89,7 @@ def main(config, base_path):
             logging.info('Metabolic analysis finished')
 
         except Exception as e:
-            logging.error(f'Error in metabolic analysis: {e}')        
+            logging.exception(f'Error in metabolic analysis: {e}')        
     else:
         logging.info('Metabolic analysis with Pathway Tools files not enabled')
     
@@ -124,7 +124,7 @@ def main(config, base_path):
             logging.info('Metabolic analysis from SBML with MetaGraphTools finished')
 
         except Exception as e:
-            logging.error(f'Error in metabolic analysis: {e}')
+            logging.exception(f'Error in metabolic analysis: {e}')
     else:
         logging.info('Metabolic analysis with SBML file not enabled')
     
@@ -144,7 +144,7 @@ def main(config, base_path):
             tables.append(df_structures)
 
         except Exception as e:
-            logging.error(f'Error in structures analysis: {e}')
+            logging.exception(f'Error in structures analysis: {e}')
     else:
         logging.info('Structures analysis not enabled')
 
@@ -183,7 +183,7 @@ def main(config, base_path):
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
-                    logging.error(f'Error in Roary analysis: {e}')
+                    logging.exception(f'Error in Roary analysis: {e}')
             else:
                 logging.info('Roary not enabled')
 
@@ -200,11 +200,11 @@ def main(config, base_path):
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
-                    logging.error(f'Error in CoreCruncher analysis: {e}')
+                    logging.exception(f'Error in CoreCruncher analysis: {e}')
             else:
                 logging.info('CoreCruncher not enabled')
         except Exception as e:
-            logging.error(f'Error in core analysis: {e}')
+            logging.exception(f'Error in core analysis: {e}')
     else:
         logging.info('Core analysis not enabled')
 
@@ -235,7 +235,7 @@ def main(config, base_path):
                     logging.info('Human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
-                    logging.error(f'Error in human offtarget analysis: {e}')
+                    logging.exception(f'Error in human offtarget analysis: {e}')
             else:
                 logging.info('Human offtarget analysis not enabled')
 
@@ -262,7 +262,7 @@ def main(config, base_path):
                     print('----- Finished -----')
                             
                 except Exception as e:
-                    logging.error(f'Error in microbiome offtarget analysis: {e}')
+                    logging.exception(f'Error in microbiome offtarget analysis: {e}')
             else:
                 logging.info('Microbiome offtarget analysis not enabled')
             
@@ -282,12 +282,12 @@ def main(config, base_path):
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
-                    logging.error(f'Error in foldseek human offtarget analysis: {e}')
+                    logging.exception(f'Error in foldseek human offtarget analysis: {e}')
             else:
                 logging.info('Foldseek human offtarget analysis not enabled')           
 
         except Exception as e:
-            logging.error(f'Error in offtarget analysis: {e}')
+            logging.exception(f'Error in offtarget analysis: {e}')
     else:
         logging.info('Offtarget analysis not enabled')
 
@@ -320,7 +320,7 @@ def main(config, base_path):
             print('----- Finished -----')
 
         except Exception as e:
-            logging.error(f'Error in essentiality analysis: {e}')
+            logging.exception(f'Error in essentiality analysis: {e}')
     else:
         logging.info('Essentiality analysis not enabled')
 
@@ -339,7 +339,7 @@ def main(config, base_path):
             logging.info('Psortb analysis finished')
             print('----- Finished -----')
         except Exception as e:
-            logging.error(f'Error in localization analysis: {e}')
+            logging.exception(f'Error in localization analysis: {e}')
     else:
         logging.info('Localization analysis not enabled')
 
@@ -366,7 +366,7 @@ def main(config, base_path):
                 logging.info(f'Metadata table {table} loaded')
                 print('----- Finished -----')
         except Exception as e:
-            logging.error(f'Error in metadata analysis: {e}')
+            logging.exception(f'Error in metadata analysis: {e}')
     else:
         logging.info('Metadata analysis not enabled')
 

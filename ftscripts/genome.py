@@ -106,7 +106,7 @@ def gbk_to_gff3(gbk_file, gff_dir):
 
                 write_gff3(gff_file, records)
             except Exception as e:
-                print(e)
+                logging.exception(f"An error occurred during GBK to GFF3 conversion: {e}")
         else:
             logging.error(f"GBK file '{gbk_file}' not found.")
     else:
@@ -254,7 +254,7 @@ def ref_genome_files (gbk_file, base_path, organism_name):
                     print(f'Gff3 file saved in {genome_dir}')
                     
             except Exception as e:
-                print(f'Unexpected error in run_genbank2gff3: {e}')
+                logging.exception(f"An error occurred during run_genbank2gff3: {e}")
                 gbk_to_gff3(ref_gbk, genome_dir)
                 print(f'Gff3 file saved on {genome_dir}')
         else:
@@ -471,7 +471,7 @@ def core_files(base_path, organism_name):
                                 programs.run_genbank2gff3(new_gbk, gff_dir)
                                 print(f"Processed {new_name}.gff")
                             except Exception as e:
-                                print(f'Error in run_genbank2gff3: {e}')
+                                logging.exception(f"Error in run_genbank2gff3: {e}")
                                 add_sequences_to_gff3(gff_files[0], new_gbk)
                                 shutil.copy(gff_files[0], new_gff)                 
                                 print(f"Processed {new_name}.gff")

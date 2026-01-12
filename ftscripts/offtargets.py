@@ -5,6 +5,7 @@ import pandas as pd
 import multiprocessing
 import glob
 from tqdm import tqdm
+import logging
 
 def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_count()):
 
@@ -387,7 +388,7 @@ def run_foldseek_human_structures (base_path, organism_name):
             foldseek_results_mapping[locus_tag] = [os.path.join(foldseek_results_path, filename)]
 
         except Exception as e:
-            print(f'  ✗ Error running Foldseek vs human PDB: {e}')
+            logging.exception(f'Error running Foldseek vs human PDB: {e}')
             error_count += 1
         
         # Search with human AlphaFold database
@@ -398,7 +399,7 @@ def run_foldseek_human_structures (base_path, organism_name):
             filename = f'{struct_name.split(".")[0]}_vs_DB_human_AF_foldseek_results.tsv'
             foldseek_results_mapping[locus_tag].append(os.path.join(foldseek_results_path, filename))
         except Exception as e:
-            print(f'  ✗ Error running Foldseek vs human AlphaFold: {e}')
+            logging.exception(f'Error running Foldseek vs human AlphaFold: {e}')
             error_count += 1
     
     print(f'\n{"="*80}')
@@ -449,7 +450,7 @@ def foldseek_human_parser (base_path, organism_name, map_foldseek):
                         if not df.empty:
                             dfs.append(df)
                     except Exception as e:
-                        print(f'  Warning: Could not read {file}: {e}')
+                        logging.exception(f'Could not read {file}: {e}')
             
             # Get the best match across all result files for this locus_tag
             if len(dfs) > 0:

@@ -24,7 +24,7 @@ def file_to_list(file_path):
     except FileNotFoundError:
         print(f"Error: The file {file_path} was not found.")
     except Exception as e:
-        print(f"An error occurred: {e}")       
+        logging.exception(f"An unexpected error occurred while reading the file: {e}")
 
 def list_to_file(file_path, my_list):
 

@@ -15,7 +15,7 @@ import tarfile
 import shutil
 import os
 import time
-from ftscripts import programs,files, structures,logger
+from ftscripts import programs,files, structures
 import tqdm
 import requests
 import multiprocessing
@@ -25,6 +25,7 @@ import re
 import glob
 import json
 import zlib
+import logging
 from urllib.parse import urlparse, parse_qs, urlencode
 from requests.adapters import HTTPAdapter, Retry
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
@@ -78,14 +79,14 @@ def retry_with_backoff(max_retries=5, initial_delay=2, backoff_factor=2, max_del
                     last_exception = e
                     if attempt < max_retries - 1:
                         sleep_time = min(delay, max_delay)
-                        logger.logger.warning(
+                        logging.warning(
                             f"Attempt {attempt + 1}/{max_retries} failed for {func.__name__}: {str(e)}. "
                             f"Retrying in {sleep_time}s..."
                         )
                         time.sleep(sleep_time)
                         delay *= backoff_factor
                     else:
-                        logger.logger.error(
+                        logging.error(
                             f"All {max_retries} attempts failed for {func.__name__}: {str(e)}"
                         )
             
@@ -1202,6 +1203,12 @@ def main_download(base_path, selected_databases):
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO, 
+        format='%(levelname)s: %(message)s',
+        handlers=[logging.StreamHandler()]  # Console output
+    )
+    
     base_path = os.path.dirname(os.path.abspath(__file__))
 
     parser = argparse.ArgumentParser(

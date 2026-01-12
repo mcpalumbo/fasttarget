@@ -35,18 +35,23 @@ os.makedirs(log_dir, exist_ok=True)
 current_date = datetime.now().strftime('%Y-%m-%d-%H-%M')
 log_file_path = os.path.join(log_dir, f'fasttarget_{current_date}.log')
 
-# Create a named logger instead of using the root logger
-logger = logging.getLogger('my_logger')
+# Configure the root logger so that logging.error(), logging.info(), etc. work everywhere
+logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# File handler (only logs to file, not console)
+# File handler (logs everything to file)
 file_handler = logging.FileHandler(log_file_path, mode='w')
-# Customize the log format to remove 'INFO:root:' and include only the timestamp and message
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+file_handler.setLevel(logging.INFO)
+# Customize the log format to include timestamp and message
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
 
-# Remove any other handlers to ensure no duplicates
-logger.handlers = [file_handler]
+# Console handler (only shows warnings and errors on console)
+console_handler = logging.StreamHandler(sys.__stdout__)
+console_handler.setLevel(logging.WARNING)
+# User-friendly format for console (no timestamp, just level and message)
+console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+logger.addHandler(console_handler)
 
 # Redirect stdout and stderr to the logger
 print_logger = PrintLogger(logger)

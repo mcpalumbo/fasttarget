@@ -20,7 +20,7 @@ def run_test(test_config, base_path):
         return result
         
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception(f"An error occurred during the test run: {e}")
         raise
 
 

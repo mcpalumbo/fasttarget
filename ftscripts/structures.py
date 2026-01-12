@@ -9,7 +9,7 @@ from Bio import SeqIO
 import multiprocessing
 from pathlib import Path
 from Bio.PDB import PDBParser, PDBIO, Select
-from ftscripts import programs, files, metadata, logger
+from ftscripts import programs, files, metadata
 import databases
 import glob
 import shutil
@@ -90,7 +90,7 @@ def fetch_uniprot_batch_xml(uniprot_ids):
         'Accept': 'application/xml'
     }
     
-    logger.logger.info(f"Fetching batch of {len(uniprot_ids)} UniProt entries...")
+    logging.info(f"Fetching batch of {len(uniprot_ids)} UniProt entries...")
     response = requests.get(uniprot_url, headers=headers, timeout=60)
     response.raise_for_status()
     
@@ -112,7 +112,7 @@ def parse_uniprot_entry_xml(entry_element):
         # Extract accession number
         accession_elem = entry_element.find('up:accession', namespaces)
         if accession_elem is None:
-            logger.logger.warning("No accession found in entry")
+            logging.warning("No accession found in entry")
             return None
         
         accession = accession_elem.text
@@ -189,7 +189,7 @@ def parse_uniprot_entry_xml(entry_element):
         return result
         
     except Exception as e:
-        logger.logger.error(f"Failed to parse UniProt entry: {e}")
+        logging.exception(f"Failed to parse UniProt entry: {e}")
         return None
 
 def uniprot_protein_annotations(uniprot_id):
@@ -214,7 +214,7 @@ def uniprot_protein_annotations(uniprot_id):
         dataset = root.find('up:entry', namespaces).attrib['dataset']
 
         if accession != uniprot_id:
-            logger.logger.warning(f"Accession mismatch: requested {uniprot_id}, got {accession}")
+            logging.warning(f"Accession mismatch: requested {uniprot_id}, got {accession}")
             return None
 
         result = {accession: {'Version': version, 'Dataset': dataset}}
@@ -302,7 +302,7 @@ def uniprot_protein_annotations(uniprot_id):
         return result
         
     except Exception as e:
-        logger.logger.error(f"Failed to fetch annotations for {uniprot_id} after all retries: {e}")
+        logging.exception(f"Failed to fetch annotations for {uniprot_id} after all retries: {e}")
         return None
 
 def uniprot_protein_annotations_batch(uniprot_ids, batch_size=500):
@@ -322,13 +322,13 @@ def uniprot_protein_annotations_batch(uniprot_ids, batch_size=500):
     all_annotations = {}
     total_batches = (len(uniprot_ids) + batch_size - 1) // batch_size
     
-    logger.logger.info(f"Fetching annotations for {len(uniprot_ids)} UniProt IDs in {total_batches} batch(es)...")
+    logging.info(f"Fetching annotations for {len(uniprot_ids)} UniProt IDs in {total_batches} batch(es)...")
     
     for i in range(0, len(uniprot_ids), batch_size):
         batch = uniprot_ids[i:i + batch_size]
         batch_num = (i // batch_size) + 1
         
-        logger.logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} entries)...")
+        logging.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} entries)...")
         
         try:
             # Fetch batch XML
@@ -340,7 +340,7 @@ def uniprot_protein_annotations_batch(uniprot_ids, batch_size=500):
             
             # Find all entry elements in batch response
             entries = root.findall('up:entry', namespaces)
-            logger.logger.info(f"  Found {len(entries)} entries in batch response")
+            logging.info(f"  Found {len(entries)} entries in batch response")
             
             # Parse each entry
             for entry in entries:
@@ -349,24 +349,24 @@ def uniprot_protein_annotations_batch(uniprot_ids, batch_size=500):
                     all_annotations.update(entry_result)
             
             # Log batch progress
-            logger.logger.info(f"  ✓ Batch {batch_num} complete: {len(all_annotations)}/{len(uniprot_ids)} total annotations retrieved")
+            logging.info(f"  ✓ Batch {batch_num} complete: {len(all_annotations)}/{len(uniprot_ids)} total annotations retrieved")
             
             # Small delay between batches to be respectful to API
             if i + batch_size < len(uniprot_ids):
                 time.sleep(2)
                 
         except Exception as e:
-            logger.logger.error(f"Failed to process batch {batch_num}: {e}")
+            logging.exception(f"Failed to process batch {batch_num}: {e}")
             continue
     
     # Summary
     success_rate = (len(all_annotations) / len(uniprot_ids)) * 100 if uniprot_ids else 0
-    logger.logger.info(f"Batch fetch complete: {len(all_annotations)}/{len(uniprot_ids)} annotations retrieved ({success_rate:.1f}%)")
+    logging.info(f"Batch fetch complete: {len(all_annotations)}/{len(uniprot_ids)} annotations retrieved ({success_rate:.1f}%)")
     
     # Log missing IDs
     missing_ids = set(uniprot_ids) - set(all_annotations.keys())
     if missing_ids:
-        logger.logger.warning(f"Missing annotations for {len(missing_ids)} IDs: {list(missing_ids)[:10]}{'...' if len(missing_ids) > 10 else ''}")
+        logging.warning(f"Missing annotations for {len(missing_ids)} IDs: {list(missing_ids)[:10]}{'...' if len(missing_ids) > 10 else ''}")
     
     return all_annotations
 
@@ -472,7 +472,7 @@ def cluster_uniprot_specie(base_path, organism_name, specie_taxid):
             cpus= multiprocessing.cpu_count()
         )
     except Exception as e:
-        print(f"Failed to run CD-HIT on file {uniprot_species_rest_faa}: {e}")
+        logging.exception(f"Failed to run CD-HIT on file {uniprot_species_rest_faa}: {e}")
 
 def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxid):
     
@@ -511,7 +511,7 @@ def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxi
             )
             print(f'Index built for strain uniprot proteome: uniprot_strain_taxid_{strain_taxid}')
         except Exception as e:
-            print(f"Failed to run makeblastdb to file {uniprot_strain_faa}: {e}")
+            logging.exception(f"Failed to run makeblastdb to file {uniprot_strain_faa}: {e}")
     else:
         print(f'Index already exists for strain uniprot proteome: uniprot_strain_taxid_{strain_taxid}')
 
@@ -534,7 +534,7 @@ def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxi
             )
             print(f'Index built for PDB uniprot proteome: uniprot_PDB_structures_specie_taxid_{specie_taxid}')
         except Exception as e:
-            print(f"Failed to run makeblastdb to file {uniprot_pdb_faa}: {e}")
+            logging.exception(f"Failed to run makeblastdb to file {uniprot_pdb_faa}: {e}")
     else:
         print(f'Index already exists for PDB uniprot proteome: uniprot_PDB_structures_specie_taxid_{specie_taxid}')
     
@@ -557,7 +557,7 @@ def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxi
             )
             print(f'Index finished for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest')
         except Exception as e:
-            print(f"Failed to run makeblastdb to file {uniprot_species_rest_faa}: {e}")
+            logging.exception(f"Failed to run makeblastdb to file {uniprot_species_rest_faa}: {e}")
     else:
         print(f'Index already exists for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest')   
 
@@ -603,7 +603,7 @@ def uniprot_proteome_blast (base_path, organism_name, specie_taxid, strain_taxid
             print(f'Blastp results saved in {blast_output_strain_path}.')
 
         except Exception as e:
-            print(f"Failed to run blastp to file {uniprot_strain_index_path}: {e}")
+            logging.exception(f"Failed to run blastp to file {uniprot_strain_index_path}: {e}")
     else:
         print(f'Blastp results in {blast_output_strain_path}.')
     
@@ -628,7 +628,7 @@ def uniprot_proteome_blast (base_path, organism_name, specie_taxid, strain_taxid
             print(f'Blastp results saved in {blast_output_pdb_path}.')
 
         except Exception as e:
-            print(f"Failed to run blastp to file {uniprot_pdb_index_path}: {e}")
+            logging.exception(f"Failed to run blastp to file {uniprot_pdb_index_path}: {e}")
     else:
         print(f'Blastp results in {blast_output_pdb_path}.')
 
@@ -654,7 +654,7 @@ def uniprot_proteome_blast (base_path, organism_name, specie_taxid, strain_taxid
             print(f'Blastp results saved in {blast_output_species_rest_path}.')
 
         except Exception as e:
-            print(f"Failed to run blastp to file {uniprot_species_rest_index_path}: {e}")
+            logging.exception(f"Failed to run blastp to file {uniprot_species_rest_index_path}: {e}")
     else:
         print(f'Blastp results in {blast_output_species_rest_path}.')
 
@@ -1695,7 +1695,7 @@ def get_chain_reference_structure(base_path, organism_name):
                         try:
                             extract_chain_from_pdb(pdb_file_path, chain_ids, output_chain_file)
                         except Exception as e:
-                            print(f'  ERROR: Failed to extract chain(s) {chain_ids} from {pdb_file_path}: {e}')
+                            logging.exception(f'Failed to extract chain(s) {chain_ids} from {pdb_file_path}: {e}')
                     else:
                         print(f'  Chain file already exists: {output_chain_file}')
                 elif cif_valid:
@@ -1705,7 +1705,7 @@ def get_chain_reference_structure(base_path, organism_name):
                         try:
                             extract_chain_from_cif(cif_file_path, chain_ids, output_chain_file)
                         except Exception as e:
-                            print(f'  ERROR: Failed to extract chain(s) {chain_ids} from {cif_file_path}: {e}')
+                            logging.exception(f'Failed to extract chain(s) {chain_ids} from {cif_file_path}: {e}')
                     else:
                         print(f'  Chain file already exists: {output_chain_file}')
                 else:
@@ -2049,7 +2049,7 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False):
             shutil.move(p2rank_output_dir_tmp, p2rank_dir)
             print(f'P2Rank prediction for {pdb} completed.')
         except Exception as e:
-            print(f'Error running P2Rank for {pdb}: {e}')
+            logging.exception(f'Error running P2Rank for {pdb}: {e}')
     else:
         print(f'P2Rank results directory for {pdb} already present.')
 
@@ -2157,7 +2157,7 @@ def p2rank_parse_predictions(csv_file):
         return pockets_dict
         
     except Exception as e:
-        print(f"Error parsing P2Rank predictions file {csv_file}: {e}")
+        logging.exception(f"Error parsing P2Rank predictions file {csv_file}: {e}")
         return 'No_pockets'
 
 
@@ -2536,7 +2536,7 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
             print(f'    ✓ Mapped {len(mapping_dict)} genes to UniProt IDs')
             
         except Exception as e:
-            print(f'\n    ✗ ERROR in Stage 1: {e}')
+            logging.exception(f'\n    ✗ ERROR in Stage 1: {e}')
             raise
         
         # ========== STAGE 2: Structure Acquisition ==========
@@ -2558,7 +2558,7 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
             get_chain_reference_structure(base_path, organism_name)
             
         except Exception as e:
-            print(f'\n    ✗ ERROR in Stage 2: {e}')
+            logging.exception(f'\n    ✗ ERROR in Stage 2: {e}')
             raise
         
         # ========== STAGE 3: Pocket Detection ==========
@@ -2582,7 +2582,7 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
             final_df = final_structure_table(base_path, organism_name)
             
         except Exception as e:
-            print(f'\n    ✗ ERROR in Stage 3: {e}')
+            logging.exception(f'\n    ✗ ERROR in Stage 3: {e}')
             raise
         
         # ========== Pipeline Complete ==========

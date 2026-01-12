@@ -372,9 +372,9 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
         try:
             programs.change_permission_user_dir(output_path)
         except Exception as e:
-            logging.error(f"Error changing file permissions: {e}")
+            logging.exception(f"Error changing file permissions: {e}")
     except Exception as e:
-        logging.error(f"Error running MetaGraphTools: {e}")
+        logging.exception(f"Error running MetaGraphTools: {e}")
 
 def parse_mgt_results(mgt_results_dir):
     """
@@ -418,7 +418,7 @@ def parse_mgt_results(mgt_results_dir):
             print(f'Production chokepoints: {len(production_chokepoint_dict)}')
             
         except Exception as e:
-            logging.error(f'Error parsing chokepoint genes file: {e}')
+            logging.exception(f'Error parsing chokepoint genes file: {e}')
     else:
         logging.error(f'Chokepoint genes file not found: {chokepoint_file}')
     
@@ -441,7 +441,7 @@ def parse_mgt_results(mgt_results_dir):
             print(f'Parsed {len(betweenness_df)} betweenness centrality entries.')
             
         except Exception as e:
-            logging.error(f'Error parsing betweenness centrality file: {e}')
+            logging.exception(f'Error parsing betweenness centrality file: {e}')
     else:
         logging.error(f'Betweenness centrality file not found: {betweenness_centrality_file}')
     
@@ -510,7 +510,7 @@ def pick_mgt_results_dir(metabolism_dir):
                 shutil.rmtree(d)
                 print(f"Removed incomplete MGT_results folder: {d}")
             except Exception as e:
-                logging.error(f"Error removing folder {d}: {e}")
+                logging.exception(f"Error removing folder {d}: {e}")
 
     if not valid_dirs:
         print("No valid MGT_results folders found.")
@@ -523,7 +523,7 @@ def pick_mgt_results_dir(metabolism_dir):
                 shutil.rmtree(d)
                 print(f"Removed older valid MGT_results folder: {d}")
             except Exception as e:
-                logging.error(f"Error removing folder {d}: {e}")
+                logging.exception(f"Error removing folder {d}: {e}")
         
     return valid_dirs[-1]  # Return the most recent valid directory
 
@@ -539,7 +539,7 @@ def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
         try:
             process_external_sbml(sbml_file, metabolism_dir, filter_file)
         except Exception as e:
-            logging.error(f'Error processing external SBML file: {e}')
+            logging.exception(f'Error processing external SBML file: {e}')
             return None, None, None, None
     else:
         consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
