@@ -9,7 +9,6 @@ It also includes functions to create BLAST and FOLDSEEK databases.
 """
 
 
-import urllib.request
 import gzip
 import tarfile
 import shutil
