@@ -386,7 +386,7 @@ def batch_uniprot_mapping(source, dest, ids, max_retries=5, sleep_time=5):
 
     return dict_proteome, ids_not_mapped
 
-def download_DEG(base_path):
+def download_DEG(database_path):
 
     """
     Downloads DEG Bacteria database. 
@@ -394,11 +394,10 @@ def download_DEG(base_path):
     https://tubic.org/deg/public/index.php
     DOI: 10.1093/nar/gkaa917
 
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
     :return: download_status = True if download was successful, False otherwise.
     """
-    databases_path = os.path.join(base_path, 'databases')
-    deg_path = os.path.join(databases_path, 'DEG10.aa.gz')
+    deg_path = os.path.join(database_path, 'DEG10.aa.gz')
    
     url = 'http://tubic.org/deg/public/download/DEG10.aa.gz'
     
@@ -427,14 +426,14 @@ def download_DEG(base_path):
               ' You can also try to download it manually and place it in the databases folder.')
     return download_status
 
-def extract_microbiome_species_ids(base_path):
+def extract_microbiome_species_ids(database_path):
     """
     Extracts unique species IDs from the Human Gut Microbiome Species Catalogue metadata file.
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
     :return: species_ids = List of unique species IDs.
     """
 
-    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
 
     if  os.path.exists(meta_path):
@@ -445,7 +444,7 @@ def extract_microbiome_species_ids(base_path):
         raise FileNotFoundError(f"Metadata file not found: {meta_path}")
 
 
-def download_microbiome_species_catalogue(base_path):
+def download_microbiome_species_catalogue(database_path):
 
     """
     Downloads the Human Gut Microbiome Species Catalogue from the EBI Metagenomics (MGnify) database, 
@@ -454,12 +453,11 @@ def download_microbiome_species_catalogue(base_path):
     https://www.ebi.ac.uk/metagenomics/genome-catalogues/human-gut-v2-0-2
     DOI: 10.1093/nar/gkz1035
 
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    databases_path = os.path.join(base_path, 'databases')  
-    species_path = os.path.join(databases_path, 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     os.makedirs(species_path, exist_ok=True)
 
     # Download README file
@@ -476,7 +474,7 @@ def download_microbiome_species_catalogue(base_path):
 
     check_file = os.path.join(species_path, "download_check.txt")
 
-    # Check if download was ssuccessfully completed before
+    # Check if download was successfully completed before
     
     success_file = False
     if os.path.exists(check_file):
@@ -488,7 +486,7 @@ def download_microbiome_species_catalogue(base_path):
             else:
                 os.remove(check_file)
 
-    success_check = check_microbiome_species_catalogue_download(base_path)
+    success_check = check_microbiome_species_catalogue_download(database_path)
 
     if success_file and success_check:
         print("Species catalogue download was already completed successfully.")
@@ -549,18 +547,17 @@ def download_microbiome_species_catalogue(base_path):
             else:
                 f.write("All files downloaded successfully!\n")
 
-def check_microbiome_species_catalogue_download(base_path):
+def check_microbiome_species_catalogue_download(database_path):
     """
     Checks if all .faa files from the species catalogue have been downloaded.
     The concatenated fasta file is located in "databases/species_catalogue" folder.
 
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
-
-    species_ids = extract_microbiome_species_ids(base_path)
+    species_path = os.path.join(database_path, 'species_catalogue')
+    species_ids = extract_microbiome_species_ids(database_path)
 
     for id in species_ids:
         faa_file = os.path.join(species_path, id, f"{id}.faa")
@@ -568,16 +565,16 @@ def check_microbiome_species_catalogue_download(base_path):
             print(f"Missing file: {faa_file}")
             return False
 
-def concat_microbiome_species_catalogue(base_path):
+def concat_microbiome_species_catalogue(database_path):
     """
     Concatenates all .faa files from the species catalogue into a single FASTA file.
     The concatenated fasta file is located in "databases/species_catalogue" folder.
 
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     output_faa = os.path.join(species_path, 'species_catalogue.faa')
 
     if not os.path.exists(output_faa):
@@ -588,7 +585,7 @@ def concat_microbiome_species_catalogue(base_path):
         print(f'{output_faa} already exists.')
 
     
-def download_microbiome_protein_catalogue(base_path):
+def download_microbiome_protein_catalogue(database_path):
 
     """
     Downloads Human-gut protein catalogue from EBI Metagenomics (MGnify) clustered at 90% aa identity. 
@@ -596,20 +593,19 @@ def download_microbiome_protein_catalogue(base_path):
     https://www.ebi.ac.uk/metagenomics/genome-catalogues/human-gut-v2-0-2
     DOI: 10.1093/nar/gkz1035
 
-    :param base_path =  Path to the directory where 'databases' folder is located.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    databases_path = os.path.join(base_path, 'databases')
-    extracted_dir = os.path.join(databases_path, 'uhgp-90')
+    extracted_dir = os.path.join(database_path, 'uhgp-90')
     faa_file_path = os.path.join(extracted_dir, 'uhgp-90.faa')
 
-    info_path = os.path.join(databases_path, 'README_uhgp_v2.0.2.txt')
+    info_path = os.path.join(database_path, 'README_uhgp_v2.0.2.txt')
     info_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
     download_with_wget(info_url, info_path)
 
-    if not files.file_check(os.path.join(databases_path, 'uhgp-90.faa')):
-        uhgp_path = os.path.join(databases_path, 'uhgp-90.tar.gz')
+    if not files.file_check(os.path.join(database_path, 'uhgp-90.faa')):
+        uhgp_path = os.path.join(database_path, 'uhgp-90.tar.gz')
         uhgp_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/protein_catalogue/uhgp-90.tar.gz'
         
         print('Downloading UHGP database.')
@@ -617,10 +613,10 @@ def download_microbiome_protein_catalogue(base_path):
         print('Finished.')
 
         with tarfile.open(uhgp_path, 'r:gz') as tar:
-            tar.extractall(path=databases_path)
+            tar.extractall(path=database_path)
 
         if os.path.exists(faa_file_path):
-            shutil.move(faa_file_path, databases_path)
+            shutil.move(faa_file_path, database_path)
         
         shutil.rmtree(extracted_dir)
 
@@ -628,14 +624,14 @@ def download_microbiome_protein_catalogue(base_path):
     else:
         print(f'{faa_file_path} already exists.')
 
-def download_human_PDB (base_path, cpus=multiprocessing.cpu_count()):
+def download_human_PDB (database_path, cpus=multiprocessing.cpu_count()):
     """
     Downloads Human PDB structures.
     The PDB files are located in "databases/human_structures/PDB_files" folder.
     The list of PDB IDs is saved in "databases/human_structures/PDB_files/Human_PDB_ids.txt".
     The IDs that could not be downloaded are saved in "databases/human_structures/PDB_files/Failed_Human_PDB_ids.txt".
 
-    :param base_path =  Path to the directory where 'fasttarget' folder is located.
+    :param database_path =  Path to the databases folder.
     :param cpus = Number of CPUs to use for downloading.
 
     :return: all_pdb_ids = List with all PDB IDs.
@@ -643,7 +639,7 @@ def download_human_PDB (base_path, cpus=multiprocessing.cpu_count()):
 
     """
 
-    human_structures_pdb_path = os.path.join(base_path, 'databases', 'human_structures', 'PDB_files')
+    human_structures_pdb_path = os.path.join(database_path, 'human_structures', 'PDB_files')
     os.makedirs(human_structures_pdb_path, exist_ok=True)
     os.makedirs(os.path.join(human_structures_pdb_path, 'DB_foldseek'), exist_ok=True)
 
@@ -727,18 +723,18 @@ def download_human_PDB (base_path, cpus=multiprocessing.cpu_count()):
     return all_pdb_ids, final_failed_pdb
 
 
-def download_human_AF (base_path):
+def download_human_AF (database_path):
     """
     Downloads Human AlphaFold structures.
     The PDB files are located in "databases/human_structures/AlphaFold_files" folder.
     The list of AlphaFold IDs is saved in "databases/human_structures/AlphaFold_files/Human_AF_ids.txt".
 
-    :param base_path =  Path to the directory where 'fasttarget' folder is located.
+    :param database_path =  Path to the databases folder.
 
     :return: AF_models = List with AlphaFold IDs.
 
     """
-    human_structures_AF_path = os.path.join(base_path, 'databases', 'human_structures', 'AlphaFold_files')
+    human_structures_AF_path = os.path.join(database_path, 'human_structures', 'AlphaFold_files')
     os.makedirs(human_structures_AF_path, exist_ok=True)
     os.makedirs(os.path.join(human_structures_AF_path, 'DB_foldseek'), exist_ok=True)
 
@@ -796,14 +792,14 @@ def download_human_AF (base_path):
     return AF_models
     
 
-def download_human(base_path, cpus=multiprocessing.cpu_count()):
+def download_human(database_path, cpus=multiprocessing.cpu_count()):
     """
     Downloads Human proteome form Uniprot (UP000005640). 
     Obtains fasta sequences and structures from AlphaFold and PDB.
     The fasta file and annotations are located in "databases" folder.
     The structures are located in "databases/human_structures" folder.
 
-    :param base_path =  Path to the directory where 'fasttarget' repository is located.
+    :param database_path =  Path to the databases folder.
 
     :return: human_ann_dict = Dictionary with Uniprot annotations for human proteome.
     :return: human_failed_pdb = List with PDB IDs that failed to download.
@@ -811,8 +807,7 @@ def download_human(base_path, cpus=multiprocessing.cpu_count()):
 
     """
     #Download fasta sequences
-    databases_path = os.path.join(base_path, 'databases')
-    humanprot_path = os.path.join(databases_path, 'human_uniprot_UP000005640.faa')
+    humanprot_path = os.path.join(database_path, 'human_uniprot_UP000005640.faa')
 
     if not os.path.exists(humanprot_path):
     
@@ -827,18 +822,18 @@ def download_human(base_path, cpus=multiprocessing.cpu_count()):
         print(f'{humanprot_path} already exists.')
 
     #Download structures
-    human_structures_path = os.path.join(databases_path, 'human_structures')
+    human_structures_path = os.path.join(database_path, 'human_structures')
 
     try:
         print('Downloading human PDB structures.')
-        human_pdb_ids, human_failed_pdb = retry_on_timeout(download_human_PDB, base_path, cpus)
+        human_pdb_ids, human_failed_pdb = retry_on_timeout(download_human_PDB, database_path, cpus)
         print('PDB structures downloaded.')
     except Exception as e:
         print(f'Error downloading human PDB structures: {e}')
 
     try:
         print('Downloading AlphaFold structures.')
-        human_alphafold_ids = retry_on_timeout(download_human_AF, base_path)
+        human_alphafold_ids = retry_on_timeout(download_human_AF, database_path)
         print('AlphaFold structures downloaded.')
     except Exception as e:
         print(f'Error downloading AlphaFold structures: {e}')
@@ -874,20 +869,18 @@ def download_human(base_path, cpus=multiprocessing.cpu_count()):
 
     return check
 
-def index_db_blast_human (base_path):
+def index_db_blast_human (database_path):
 
     """
     Makes a BLAST db for human proteome. 
 
-    :param base_path =  Base path of fasttarget folder.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    databases_path = os.path.join(base_path, 'databases')
-
     #Human
-    humanprot_path = os.path.join(databases_path, 'human_uniprot_UP000005640.faa')
-    humanprot_index_path = os.path.join(databases_path, 'HUMAN_DB')
+    humanprot_path = os.path.join(database_path, 'human_uniprot_UP000005640.faa')
+    humanprot_index_path = os.path.join(database_path, 'HUMAN_DB')
 
     try:
         programs.run_makeblastdb(
@@ -900,16 +893,16 @@ def index_db_blast_human (base_path):
     except Exception as e:
         print('Error indexing Human database:', e)
 
-def index_db_foldseek_human_structures (base_path):
+def index_db_foldseek_human_structures (database_path):
 
     """
     Makes a FOLDSEEK db for human proteome PDB and AlphaFold structures. 
 
-    :param base_path =  Base path of fasttarget folder.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    human_structures_path = os.path.join(base_path, 'databases', 'human_structures')
+    human_structures_path = os.path.join(database_path, 'human_structures')
     human_PDB_path = os.path.join(human_structures_path, 'PDB_files')
     human_AF_path = os.path.join(human_structures_path, 'AlphaFold_files')
 
@@ -928,20 +921,18 @@ def index_db_foldseek_human_structures (base_path):
         print('Error indexing human AlphaFold structures for Foldseek.', e)
 
 
-def index_db_blast_microbiome_protein_catalogue (base_path):
+def index_db_blast_microbiome_protein_catalogue (database_path):
 
     """
     Makes a BLAST db for gut microbiome protein catalogue. 
 
-    :param base_path =  Base path of fasttarget folder.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    databases_path = os.path.join(base_path, 'databases')
-
     #Gut Microbiome
-    microbiome_path = os.path.join(databases_path, 'uhgp-90.faa')
-    microbiome_index_path = os.path.join(databases_path, 'MICROBIOME_DB')
+    microbiome_path = os.path.join(database_path, 'uhgp-90.faa')
+    microbiome_index_path = os.path.join(database_path, 'MICROBIOME_DB')
 
     try:
         programs.run_makeblastdb(
@@ -954,18 +945,18 @@ def index_db_blast_microbiome_protein_catalogue (base_path):
         print('Error indexing Microbiome database:', e)
 
 
-def index_db_blast_microbiome_species_catalogue (base_path, specific_file=None):
+def index_db_blast_microbiome_species_catalogue (database_path, specific_file=None):
 
     """
     Makes a Diamond BLAST db for gut microbiome species catalogue. 
 
-    :param base_path =  Base path of fasttarget folder.
+    :param database_path =  Path to the databases folder.
     :param specific_file =  Specific .faa file to index. If None, all .faa files in the
     species_catalogue folder will be indexed.
 
     """
 
-    species_path = os.path.join(base_path, 'databases', 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     faa_files = glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
 
     if specific_file is None:
@@ -993,20 +984,18 @@ def index_db_blast_microbiome_species_catalogue (base_path, specific_file=None):
             except Exception as e:
                 print(f'Error indexing {specific_file} for Diamond DB:', e)
 
-def index_db_blast_deg (base_path):
+def index_db_blast_deg (database_path):
 
     """
     Makes a BLAST db for DEG. 
 
-    :param base_path =  Base path of fasttarget folder.
+    :param database_path =  Path to the databases folder.
 
     """
 
-    databases_path = os.path.join(base_path, 'databases')
-
     #DEG
-    deg_path = os.path.join(databases_path, 'DEG10.aa.faa')
-    deg_index_path = os.path.join(databases_path, 'DEG_DB')
+    deg_path = os.path.join(database_path, 'DEG10.aa.faa')
+    deg_index_path = os.path.join(database_path, 'DEG_DB')
 
     try:
         programs.run_makeblastdb(
@@ -1020,24 +1009,24 @@ def index_db_blast_deg (base_path):
 
 
 
-def download_and_index_human(databases_path):
+def download_and_index_human(database_path):
     """
     Downloads and indexes Human proteome.
 
-    :param databases_path =  Path to the 'databases' folder.
+    :param database_path =  Path to the 'databases' folder.
 
     """
     
     # Download and index Human proteome
     print('----- 1. Downloading and indexing human proteome -----')
     
-    humanprot_path = os.path.join(databases_path, 'human_uniprot_UP000005640.faa')
-    human_structures_path = os.path.join(databases_path, 'human_structures')
+    humanprot_path = os.path.join(database_path, 'human_uniprot_UP000005640.faa')
+    human_structures_path = os.path.join(database_path, 'human_structures')
     downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
 
     if not files.file_check(humanprot_path) or not files.file_check(downloaded_files_path):
         try:
-            check = download_human(base_path)
+            check = download_human(database_path)
             print('Human proteome downloaded')
 
             if check:
@@ -1045,18 +1034,18 @@ def download_and_index_human(databases_path):
             else:
                 print('Error downloading human proteome. Check the failed files.')
             # Index human proteome
-            index_db_blast_human(base_path)
+            index_db_blast_human(database_path)
             print('Human blast db created')
-            index_db_foldseek_human_structures(base_path)
+            index_db_foldseek_human_structures(database_path)
             print('Human foldseek db created')
             print('Human proteome downloaded and indexed')
         except Exception as e:
             print(f'Error downloading human proteome: {e}')  
     else:
         print('Human proteome already exists.')
-        if not files.file_check(os.path.join(databases_path, 'HUMAN_DB.phr')):
+        if not files.file_check(os.path.join(database_path, 'HUMAN_DB.phr')):
             print('Indexing human proteome')
-            index_db_blast_human(base_path)
+            index_db_blast_human(database_path)
             print('Human proteome indexed')
         else:
             print('Human proteome already indexed')
@@ -1066,56 +1055,55 @@ def download_and_index_human(databases_path):
 
         if force or not os.path.exists(human_PDB_db) or not os.path.exists(human_AF_db):
             print('Indexing human proteome for Foldseek')
-            index_db_foldseek_human_structures(base_path)
+            index_db_foldseek_human_structures(database_path)
             print('Human foldseek db created')
         else:
             print('Human foldseek db already created')
 
     print('----- 1. Finished -----')
 
-def download_and_index_microbiome(databases_path):
+def download_and_index_microbiome(database_path):
     """
     Downloads and indexes Microbiome database.
 
-    :param databases_path =  Path to the 'databases' folder.
-
+    :param database_path =  Path to the 'databases' folder.
     """
 
     # Download and index Microbiome database
     print('----- 2. Downloading and indexing microbiome database -----')
-    species_path = os.path.join(databases_path, 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     check_file = os.path.join(species_path, 'download_check.txt')
 
     if not files.file_check(check_file):
-        download_microbiome_species_catalogue (base_path)
-        index_db_blast_microbiome_species_catalogue (base_path)
+        download_microbiome_species_catalogue (database_path)
+        index_db_blast_microbiome_species_catalogue (database_path)
         print('Microbiome database downloaded and indexed')
     else:
         with open(check_file) as f:
             content = f.read()
             if "List of missing files:" in content:
                 print('Some files are missing in the species catalogue. Please check download_check.txt file.')                     
-                download_microbiome_species_catalogue (base_path)
-                index_db_blast_microbiome_species_catalogue (base_path)
+                download_microbiome_species_catalogue (database_path)
+                index_db_blast_microbiome_species_catalogue (database_path)
             else:
                 print('Microbiome sequences already exists.')
 
         # Check if all .faa files have been indexed
-        check = check_microbiome_species_catalogue_downloaded(databases_path)
+        check = check_microbiome_species_catalogue_downloaded(database_path)
         if len(check) > 0:
             for faa_path in check:
-                index_db_blast_microbiome_species_catalogue(base_path, specific_file=faa_path)
+                index_db_blast_microbiome_species_catalogue(database_path, specific_file=faa_path)
 
     print('----- 2. Finished -----')
 
-def check_microbiome_species_catalogue_downloaded(databases_path):
+def check_microbiome_species_catalogue_downloaded(database_path):
     """
     Check if all species in the microbiome species catalogue have been indexed.
     
-    :param databases_path =  Path to the 'databases' folder.
+    :param database_path =  Path to the 'databases' folder.
     """
 
-    species_path = os.path.join(databases_path, 'species_catalogue')
+    species_path = os.path.join(database_path, 'species_catalogue')
     required_extensions = {".dmnd"}
 
     check = []
@@ -1141,28 +1129,28 @@ def check_microbiome_species_catalogue_downloaded(databases_path):
     return check
 
 
-def download_and_index_deg(databases_path):
+def download_and_index_deg(database_path):
     """
     Downloads and indexes DEG database.
 
-    :param databases_path =  Path to the 'databases' folder.
+    :param database_path =  Path to the 'databases' folder.
 
     """
 
     # Download and index DEG database
     print('----- 3. Downloading and indexing DEG database -----')
-    if not files.file_check(os.path.join(databases_path, 'DEG10.aa.faa')):
-        download_status = download_DEG (base_path)
+    if not files.file_check(os.path.join(database_path, 'DEG10.aa.faa')):
+        download_status = download_DEG (database_path)
         if download_status:
-            index_db_blast_deg (base_path)
+            index_db_blast_deg (database_path)
             print('DEG database downloaded and indexed')
         else:
             print('Failed to download DEG database.')
     else:
         print('DEG database already exists.')
-        if not files.file_check(os.path.join(databases_path, 'DEG_DB.phr')):
+        if not files.file_check(os.path.join(database_path, 'DEG_DB.phr')):
             print('Indexing DEG database')
-            index_db_blast_deg (base_path)
+            index_db_blast_deg (database_path)
             print('DEG database indexed')
         else:
             print('DEG database already indexed')
@@ -1170,13 +1158,13 @@ def download_and_index_deg(databases_path):
 
 
 
-def main_download(base_path, selected_databases):
-    """Main download function with enhanced options"""
+def main_download(database_path, selected_databases):
+    """Main download function"""
+
     print(f"📥 Downloading databases: {', '.join(selected_databases)}")
     
-    databases_path = os.path.join(base_path, 'databases')
-    if not os.path.exists(databases_path):
-        os.makedirs(databases_path)
+    if not os.path.exists(database_path):
+        os.makedirs(database_path)
     
     success_count = 0
     for db_name in selected_databases:
@@ -1184,15 +1172,15 @@ def main_download(base_path, selected_databases):
             print(f"\n{'='*20} {db_name.upper()} {'='*20}")
             
             if db_name == 'human':
-                download_and_index_human(databases_path)
+                download_and_index_human(database_path)
                 success_count += 1
                     
             elif db_name == 'microbiome':
-                download_and_index_microbiome(databases_path)
+                download_and_index_microbiome(database_path)
                 success_count += 1
                     
             elif db_name == 'deg':
-                download_and_index_deg(databases_path)
+                download_and_index_deg(database_path)
                 success_count += 1
                     
         except Exception as e:
@@ -1208,7 +1196,7 @@ if __name__ == '__main__':
         handlers=[logging.StreamHandler()]  # Console output
     )
     
-    base_path = os.path.dirname(os.path.abspath(__file__))
+    default_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'databases')
 
     parser = argparse.ArgumentParser(
         description="FastTarget Database Management",
@@ -1216,10 +1204,9 @@ if __name__ == '__main__':
         epilog="""
         Examples:
         python databases.py --download all          # Download all databases
-        python databases.py --download human        # Download only human proteome
-        python databases.py --download microbiome     # Update microbiome database
+        python databases.py --download human --database-path /home/fasttarget/databases   # Download only human proteome
+        python databases.py --download microbiome     # Download microbiome database
         python databases.py --verify                # Check all databases
-        python databases.py --status                # Show database status
                 """
         )
     
@@ -1230,16 +1217,20 @@ if __name__ == '__main__':
                       help="Update specified database(s)")
     group.add_argument('--verify', action='store_true',
                       help="Verify all databases are complete and indexed")
-
+    parser.add_argument('--database-path', type=str, default=default_base_path,
+                       help="Path to the database folder (default: ./databases)")
 
     args = parser.parse_args()
+    
+    database_path = args.database_path
+    print(f"Using database path: {database_path}")
 
     # Determine databases to process
     if hasattr(args, 'download') and args.download:
         databases_to_process = ['human', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
-        main_download(base_path, databases_to_process)
+        main_download(database_path, databases_to_process)
     elif hasattr(args, 'update') and args.update:
         databases_to_process = ['human', 'microbiome', 'deg'] if args.update == 'all' else [args.update]
-        main_update(base_path, databases_to_process)
+        main_update(database_path, databases_to_process)
     elif args.verify:
-        verify_databases(base_path)
+        verify_databases(database_path)
