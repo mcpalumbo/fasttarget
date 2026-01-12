@@ -11,6 +11,7 @@ import pandas as pd
 from BCBio import GFF
 import sys
 import subprocess
+import logging
 
 
 def gbk_to_gff3(gbk_file, gff_dir):
@@ -107,9 +108,9 @@ def gbk_to_gff3(gbk_file, gff_dir):
             except Exception as e:
                 print(e)
         else:
-            print(f"GBK file '{gbk_file}' not found.", file=sys.stderr)
+            logging.error(f"GBK file '{gbk_file}' not found.")
     else:
-        print(f"Gff dir '{gff_dir}' not found.", file=sys.stderr)
+        logging.error(f"Gff dir '{gff_dir}' not found.")
 
 def add_sequences_to_gff3(gff_file, gbk_file):
     """
@@ -641,16 +642,16 @@ def roary_output(base_path, organism_name, core_threshold=0.99):
                     print(f'Reading {gff_file}')
                     core_locus_tag = id_to_locustag_gff(gff_file, gbk_ids)
                 else:
-                    print(f'{organism_name}.gff not found.', file=sys.stderr)
+                    logging.error(f'{organism_name}.gff not found.')
 
                 roary_table = metadata.metadata_table_bool(base_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
             else:
                 print(f'Roary output file already exists: {roary_results_table}.')
                 roary_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
         else:
-            print('No roary "gene_presence_absence.csv" file found.', file=sys.stderr)
+            logging.error('No roary "gene_presence_absence.csv" file found.')
     else:
-        print(f'No roary output found in {roary_out_dir}.', file=sys.stderr)
+        logging.error(f'No roary output found in {roary_out_dir}.')
 
 
     return roary_table
@@ -687,7 +688,7 @@ def corecruncher_output(base_path, organism_name):
                         if isinstance(value, str) and value.startswith(ref_genome):
                             core_locus_tag.append(value.split('&')[1])
         else:
-            print(f"Corecruncher output file '{cc_output_file}' not found.", file=sys.stderr)
+            logging.error(f"Corecruncher output file '{cc_output_file}' not found.")
 
         print(f'CoreCruncher total core genes (> 90% strains): {core_total}')
         print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')

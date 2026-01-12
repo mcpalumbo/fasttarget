@@ -2,6 +2,7 @@ import os
 import json
 import sys
 import pandas as pd
+import logging
 
 def file_to_list(file_path):
     
@@ -79,7 +80,7 @@ def json_to_dict (file_path):
         with open(file_path, 'r') as file:
             loaded_dict = json.load(file)
     else:
-        print(f"The file '{file_path}' not found.", file=sys.stderr)
+        logging.error(f"The file '{file_path}' not found.")
         loaded_dict = None
     return loaded_dict
 
@@ -98,7 +99,7 @@ def jsonl_to_dict(file_path):
             for line in file:
                 loaded_dicts.append(json.loads(line.strip()))
     else:
-        print(f"The file '{file_path}' not found.", file=sys.stderr)
+        logging.error(f"The file '{file_path}' not found.")
         loaded_dicts = None
     return loaded_dicts
 

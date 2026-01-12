@@ -13,6 +13,7 @@ from ftscripts import programs, files, metadata, logger
 import databases
 import glob
 import shutil
+import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import requests
 import xml.etree.ElementTree as ET
@@ -1754,7 +1755,7 @@ def FPocket_models(directory):
                             pockets_dict = pockets_data_to_dict(fpocket_outdir)
                             pockets_filter(pockets_dict)
     else:
-        print(f"The directory '{directory}' not found.", file=sys.stderr)
+        logging.error(f"The directory '{directory}' not found.")
 
 def fpocket_for_structure(pdb, output_path, pockets_dir):
     """
@@ -1870,7 +1871,7 @@ def pockets_finder_for_locus(locus_dir):
         fpocket_for_structure(pdb_file, pdb_parent_dir, pockets_dir)
 
     else:
-        print(f"The directory '{locus_dir}' was not found.", file=sys.stderr)
+        logging.error(f"The directory '{locus_dir}' was not found.")
 
 
 def pockets_finder_for_all_loci(base_path, organism_name):
@@ -1885,7 +1886,7 @@ def pockets_finder_for_all_loci(base_path, organism_name):
     structures_dir = os.path.join(base_path, 'organism', organism_name, "structures")
     
     if not os.path.exists(structures_dir):
-        print(f"The directory '{structures_dir}' was not found.", file=sys.stderr)
+        logging.error(f"The directory '{structures_dir}' was not found.")
         return
 
     all_locus = metadata.ref_gbk_locus(base_path, organism_name)
@@ -2089,7 +2090,7 @@ def p2rank_finder_for_locus(locus_dir, cpus):
         p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold)
 
     else:
-        print(f"The directory '{locus_dir}' was not found.", file=sys.stderr)
+        logging.error(f"The directory '{locus_dir}' was not found.")
 
 def p2rank_finder_for_all_loci(base_path, organism_name, cpus):
     """
@@ -2103,7 +2104,7 @@ def p2rank_finder_for_all_loci(base_path, organism_name, cpus):
     structures_dir = os.path.join(base_path, 'organism', organism_name, "structures")
     
     if not os.path.exists(structures_dir):
-        print(f"The directory '{structures_dir}' was not found.", file=sys.stderr)
+        logging.error(f"The directory '{structures_dir}' was not found.")
         return
 
     all_locus = metadata.ref_gbk_locus(base_path, organism_name)

@@ -5,6 +5,7 @@ import sys
 import re
 import numpy
 import pandas as pd
+import logging
 import networkx as nx
 from networkx.algorithms.centrality.betweenness import betweenness_centrality
 from networkx.algorithms.components.connected import connected_components
@@ -34,7 +35,7 @@ def process_sbml(base_path, organism_name, sbml_file):
         print(f'List of Ubiquitous Compounds saved to {metabolism_dir}/ubiquitous_compounds.txt.')
  
     else:
-        print(f"SBML file '{sbml_file}' not found.", file=sys.stderr)
+        logging.error(f"SBML file '{sbml_file}' not found.")
 
 def ubiquitous_checker(base_path, organism_name):
     """
@@ -95,7 +96,7 @@ def process_chokepoint_ptools(base_path, organism_name, chokepoint_file):
     if os.path.exists(chokepoint_file):
         shutil.copy(chokepoint_file, chokepoint_path)
     else:
-        print(f"Chokepoint file '{chokepoint_file}' not found.", file=sys.stderr)
+        logging.error(f"Chokepoint file '{chokepoint_file}' not found.")
 
     with open(chokepoint_path, 'r') as file:
         text = file.read()
@@ -158,7 +159,7 @@ def process_genes_smarttable(base_path, organism_name, smarttable_file):
     if os.path.exists(smarttable_file):
         shutil.copy(smarttable_file, smarttable_path)
     else:
-        print(f"Smarttable file '{smarttable_file}' not found.", file=sys.stderr)
+        logging.error(f"Smarttable file '{smarttable_file}' not found.")
 
     df_genes = pd.read_csv(smarttable_path, delimiter='\t', usecols=['ID', 'Reactions'])
     df_genes = df_genes.dropna(subset=['Reactions'], how='all')
@@ -344,7 +345,7 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
         if files.file_check(sbml_file):
             shutil.copy2(sbml_file, sbml_file_destination)
         else:
-            print(f"SBML file '{sbml_file}' not found.", file=sys.stderr)
+            logging.error(f"SBML file '{sbml_file}' not found.")
             return
     else:
         print(f"SBML file '{sbml_file_destination}' already exists in the output directory.")
@@ -357,7 +358,7 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
             if files.file_check(filter_file):
                 shutil.copy2(filter_file, filter_file_destination)
             else:
-                print(f"Filter file '{filter_file}' not found.", file=sys.stderr)
+                logging.warning(f"Filter file '{filter_file}' not found.")
                 print(f'Proceeding without filter file.')
                 filter_file_destination = None
         else:
@@ -371,9 +372,9 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
         try:
             programs.change_permission_user_dir(output_path)
         except Exception as e:
-            print(f"Error changing file permissions: {e}", file=sys.stderr)
+            logging.error(f"Error changing file permissions: {e}")
     except Exception as e:
-        print(f"Error running MetaGraphTools: {e}", file=sys.stderr)
+        logging.error(f"Error running MetaGraphTools: {e}")
 
 def parse_mgt_results(mgt_results_dir):
     """
@@ -417,9 +418,9 @@ def parse_mgt_results(mgt_results_dir):
             print(f'Production chokepoints: {len(production_chokepoint_dict)}')
             
         except Exception as e:
-            print(f'Error parsing chokepoint genes file: {e}', file=sys.stderr)
+            logging.error(f'Error parsing chokepoint genes file: {e}')
     else:
-        print(f'Chokepoint genes file not found: {chokepoint_file}', file=sys.stderr)
+        logging.error(f'Chokepoint genes file not found: {chokepoint_file}')
     
     # Parse betweenness centrality file
     if os.path.exists(betweenness_centrality_file):
@@ -440,9 +441,9 @@ def parse_mgt_results(mgt_results_dir):
             print(f'Parsed {len(betweenness_df)} betweenness centrality entries.')
             
         except Exception as e:
-            print(f'Error parsing betweenness centrality file: {e}', file=sys.stderr)
+            logging.error(f'Error parsing betweenness centrality file: {e}')
     else:
-        print(f'Betweenness centrality file not found: {betweenness_centrality_file}', file=sys.stderr)
+        logging.error(f'Betweenness centrality file not found: {betweenness_centrality_file}')
     
     return consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict
 
@@ -480,7 +481,7 @@ def pick_mgt_results_dir(metabolism_dir):
                 missing_files.append(filename)
         
         if missing_files:
-            print(f'Missing MetaGraphTools output files in {mgt_results_dir}: {", ".join(missing_files)}', file=sys.stderr)
+            logging.warning(f'Missing MetaGraphTools output files in {mgt_results_dir}: {", ".join(missing_files)}')
             return False
         return True
 
@@ -509,7 +510,7 @@ def pick_mgt_results_dir(metabolism_dir):
                 shutil.rmtree(d)
                 print(f"Removed incomplete MGT_results folder: {d}")
             except Exception as e:
-                print(f"Error removing folder {d}: {e}", file=sys.stderr)
+                logging.error(f"Error removing folder {d}: {e}")
 
     if not valid_dirs:
         print("No valid MGT_results folders found.")
@@ -522,7 +523,7 @@ def pick_mgt_results_dir(metabolism_dir):
                 shutil.rmtree(d)
                 print(f"Removed older valid MGT_results folder: {d}")
             except Exception as e:
-                print(f"Error removing folder {d}: {e}", file=sys.stderr)
+                logging.error(f"Error removing folder {d}: {e}")
         
     return valid_dirs[-1]  # Return the most recent valid directory
 
@@ -538,7 +539,7 @@ def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
         try:
             process_external_sbml(sbml_file, metabolism_dir, filter_file)
         except Exception as e:
-            print(f'Error processing external SBML file: {e}', file=sys.stderr)
+            logging.error(f'Error processing external SBML file: {e}')
             return None, None, None, None
     else:
         consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)

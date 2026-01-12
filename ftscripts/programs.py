@@ -14,6 +14,7 @@ import grp
 import time
 from pathlib import Path
 import shutil
+import logging
 
 def change_permission_user_file(file_path):
     """
@@ -229,7 +230,7 @@ def run_fpocket(work_dir, pdb_file):
         if os.path.exists(original_outdir):
             os.rename(original_outdir, new_outdir)
     else:
-        print(f"The file '{pdb_file}' not found.", file=sys.stderr)
+        logging.error(f"The file '{pdb_file}' not found.")
 
 def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
     """
@@ -306,7 +307,7 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
         print('MetaGraphTools completed successfully.')
         return result
     except Exception as e:
-        print(f'Error running MetaGraphTools: {e}', file=sys.stderr)
+        logging.error(f'Error running MetaGraphTools: {e}')
         raise
 
 
@@ -341,7 +342,7 @@ def run_cd_hit(input_fasta, output_fasta, identity=1.0, aln_coverage_short=0.9, 
         ]
         run_bash_command(cd_hit_command)
     else:
-        print(f"Input fasta file '{input_fasta}' not found.", file=sys.stderr)
+        logging.error(f"Input fasta file '{input_fasta}' not found.")
 
 def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', max_target_seqs='500',cpus=multiprocessing.cpu_count()):
 
@@ -373,7 +374,7 @@ def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', 
         ]
         run_bash_command(blastp_command)
     else:
-        print(f"Query file '{query}' not found.", file=sys.stderr)
+        logging.error(f"Query file '{query}' not found.")
 
 def run_makeblastdb(input, output, title, dbtype, taxid=None):
 
@@ -401,7 +402,7 @@ def run_makeblastdb(input, output, title, dbtype, taxid=None):
                 makeblast_command.extend(['-taxid', str(taxid)])
             run_bash_command(makeblast_command)
     else:
-        print(f"Blast database file '{input}' not found.", file=sys.stderr)
+        logging.error(f"Blast database file '{input}' not found.")
 
 
 def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6',cpus=multiprocessing.cpu_count()):
@@ -432,7 +433,7 @@ def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outf
         ]
         run_bash_command(diamond_blastp_command)
     else:
-        print(f"Query file '{query}' not found.", file=sys.stderr)
+        logging.error(f"Query file '{query}' not found.")
 
 
 def run_makediamonddb(input, output):
@@ -449,7 +450,7 @@ def run_makediamonddb(input, output):
             makediamond_command = ['diamond', 'makedb', '--in', input, '--db', output]
             run_bash_command(makediamond_command)
     else:
-        print(f"Diamond Blast database file '{input}' not found.", file=sys.stderr)
+        logging.error(f"Diamond Blast database file '{input}' not found.")
 
 
 def run_genbank2gff3(input, output):
@@ -495,7 +496,7 @@ def run_genbank2gff3(input, output):
             print(f'Error running bp_genbank2gff3.pl: {e}')
             print(f"An error occurred: {e}")
     else:
-        print(f"GenBank file '{input}' not found.", file=sys.stderr)
+        logging.error(f"GenBank file '{input}' not found.")
 
 def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count()):
 
@@ -532,7 +533,7 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
 
         run_docker_container(work_dir, work_dir, ROARY_image, ROARY_command)
     else:
-        print(f"Directory '{input}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{input}' not found.")
 
 def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=95):
     """
@@ -571,9 +572,9 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
                 print(f'Error running corecruncher: {e}')
                 print(f"An error occurred: {e}")
         else:
-            print(f"Directory '{os.path.join(corecruncher_dir, 'faa')}' not found.", file=sys.stderr)
+            logging.error(f"Directory '{os.path.join(corecruncher_dir, 'faa')}' not found.")
     else:
-        print(f"Directory '{corecruncher_dir}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{corecruncher_dir}' not found.")
 
 def run_foldseek_create_index_db(structures_dir, DB_name):
 
@@ -621,7 +622,7 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
             print(f'Error running foldseek createdb: {e}')
             print(f"An error occurred: {e}")
     else:
-        print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{structures_dir}' not found.")
 
 def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
 
@@ -691,11 +692,11 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
                     print(f'Error running foldseek easy-search: {e}')
                     print(f"An error occurred: {e}")
             else:
-                print(f"Directory '{DB_dir}' not found. Please make the DB again.", file=sys.stderr)
+                logging.error(f"Directory '{DB_dir}' not found. Please make the DB again.")
         else:
-            print(f"Foldseek results file '{results_tsv_file}' already exists.", file=sys.stderr)
+            logging.error(f"Foldseek results file '{results_tsv_file}' already exists.")
     else:
-        print(f"Directory '{structures_dir}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{structures_dir}' not found.")
 
  
 def run_panx(panx_script, input, species_name, cpus=multiprocessing.cpu_count()):
@@ -716,9 +717,9 @@ def run_panx(panx_script, input, species_name, cpus=multiprocessing.cpu_count())
             run_bash_command(panx_command)
 
         else:
-            print(f"Directory '{input}' not found.", file=sys.stderr)
+            logging.error(f"Directory '{input}' not found.")
     else:
-        print(f"Script '{panx_script}' not found.", file=sys.stderr)
+        logging.error(f"Script '{panx_script}' not found.")
 
 def run_unzip(input_file, output_dir):
     
@@ -735,9 +736,9 @@ def run_unzip(input_file, output_dir):
             run_bash_command(unzip_command)
             print(f'Unzip {input_file} in {output_dir}')
         else:
-            print(f"Directory '{output_dir}' not found.", file=sys.stderr)
+            logging.error(f"Directory '{output_dir}' not found.")
     else:
-        print(f"File '{input_file}' not found.", file=sys.stderr)
+        logging.error(f"File '{input_file}' not found.")
 
 def run_ncbi_datasets(tax_id, organism_name, output_dir):
 
@@ -795,8 +796,8 @@ def run_ncbi_datasets(tax_id, organism_name, output_dir):
             f.write("Download complete: " + str(dehydrated_dir))
             f.close()
     else:
-        print(f"Checkpoint file '{checkpoint_file}' already exists.", file=sys.stderr)
-        print(f"NCBI datasets download already completed.", file=sys.stderr)
+        logging.info(f"Checkpoint file '{checkpoint_file}' already exists.")
+        logging.info(f"NCBI datasets download already completed.")
 
 def run_ncbi_accession(accession, output_dir):
 
@@ -839,7 +840,7 @@ def run_ncbi_accession(accession, output_dir):
             shutil.rmtree(ncbi_dataset_dir)
 
     else:
-        print(f"Directory '{output_dir}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{output_dir}' not found.")
     
     print(f'NCBI {accession} download complete in {output_dir }')
 
@@ -861,9 +862,9 @@ def run_ubiquitous(sbml_file, out_dir):
             except Exception as e:
                 print(f"An error occurred: {e}")
         else:
-            print(f"Directory '{out_dir}' not found.", file=sys.stderr)
+            logging.error(f"Directory '{out_dir}' not found.")
     else:
-        print(f"SBML file '{sbml_file}' not found.", file=sys.stderr)
+        logging.error(f"SBML file '{sbml_file}' not found.")
   
 def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
     
@@ -885,11 +886,11 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
                 except Exception as e:
                     print(f"An error occurred: {e}")
             else:
-                print(f"Directory '{out_dir}' not found.", file=sys.stderr)
+                logging.error(f"Directory '{out_dir}' not found.")
         else:
-            print(f"Ubiquitous compounds file '{ubiquitous_file}' not found.", file=sys.stderr)
+            logging.error(f"Ubiquitous compounds file '{ubiquitous_file}' not found.")
     else:
-        print(f"SBML file '{sbml_file}' not found.", file=sys.stderr) 
+        logging.error(f"SBML file '{sbml_file}' not found.") 
 
 def run_psort(input, organism_type, output_dir, output_format='terse'):
     """
@@ -930,9 +931,9 @@ def run_psort(input, organism_type, output_dir, output_format='terse'):
 
             os.remove(os.path.join(output_dir, file_name))
 
-            print(f"Psort results in '{output_dir}'.", file=sys.stderr)
+            logging.info(f"Psort results in '{output_dir}'.")
         else:
-            print(f"Directory '{output_dir}' not found.", file=sys.stderr)
+            logging.error(f"Directory '{output_dir}' not found.")
     else:
-        print(f"Directory '{input}' not found.", file=sys.stderr)
+        logging.error(f"Directory '{input}' not found.")
 
