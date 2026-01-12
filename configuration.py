@@ -2,6 +2,31 @@ import yaml
 import os
 import argparse
 
+def validate_file_path(filepath, name, required_extensions=None):
+    """
+    Validate that a file path exists and optionally has the correct extension.
+    
+    :param filepath: Path to validate
+    :param name: Human-readable name for error messages
+    :param required_extensions: List of valid extensions (e.g., ['.gbk', '.gb'])
+    :return: True if valid, error message string if invalid
+    """
+    if not isinstance(filepath, str) or not filepath.strip():
+        return f"{name} must be a non-empty string"
+    
+    if not os.path.exists(filepath):
+        return f"{name} not found: {filepath}"
+    
+    if not os.path.isfile(filepath):
+        return f"{name} is not a file: {filepath}"
+    
+    if required_extensions:
+        if not any(filepath.lower().endswith(ext) for ext in required_extensions):
+            ext_str = ", ".join(required_extensions)
+            return f"{name} should have one of these extensions: {ext_str} (got: {filepath})"
+    
+    return None  # Valid
+
 class Config:
     def __init__(self, config):
         self.organism = config['organism']
@@ -29,17 +54,221 @@ def load_config(config_path):
 
 def validate_config(config):
     """
-    Validate the configuration dictionary.
+    Validate the configuration dictionary with comprehensive checks.
     
     :param config: Configuration dictionary.
     """
+    errors = []
+    
+    # Check required top-level keys
     required_keys = [
         'organism', 'structures', 'metabolism-PathwayTools', 'metabolism-SBML',
         'core', 'metadata', 'offtarget', 'deg', 'psortb'
     ]
     for key in required_keys:
         if key not in config:
-            raise ValueError(f"Missing required config key: {key}")
+            errors.append(f"Missing required config key: '{key}'")
+    
+    # If critical keys missing, raise early
+    if errors:
+        raise ValueError("\n".join(errors))
+    
+    # Validate organism section
+    if 'organism' in config:
+        org = config['organism']
+        
+        # Check required organism fields
+        required_org_fields = ['name', 'tax_id', 'strain_taxid', 'gbk_file']
+        for field in required_org_fields:
+            if field not in org:
+                errors.append(f"Missing required organism field: '{field}'")
+        
+        # Validate organism name (no spaces, reasonable length)
+        if 'name' in org:
+            name = org['name']
+            if not isinstance(name, str) or not name.strip():
+                errors.append("Organism name must be a non-empty string")
+            elif ' ' in name:
+                errors.append(f"Organism name '{name}' should not contain spaces")
+            elif len(name) > 50:
+                errors.append(f"Organism name '{name}' is too long (max 50 characters)")
+        
+        # Validate tax IDs (must be positive integers)
+        for tax_field in ['tax_id', 'strain_taxid']:
+            if tax_field in org:
+                try:
+                    tax_val = int(org[tax_field])
+                    if tax_val <= 0:
+                        errors.append(f"Organism {tax_field} must be a positive integer (got {tax_val})")
+                except (ValueError, TypeError):
+                    errors.append(f"Organism {tax_field} must be an integer (got {org[tax_field]})")
+        
+        # Validate GBK file exists
+        if 'gbk_file' in org:
+            gbk_path = org['gbk_file']
+            if not isinstance(gbk_path, str) or not gbk_path.strip():
+                errors.append("GBK file path must be a non-empty string")
+            elif not os.path.exists(gbk_path):
+                errors.append(f"GBK file not found: {gbk_path}")
+            elif not gbk_path.lower().endswith(('.gbk', '.gbff', '.gb', '.genbank')):
+                errors.append(f"GBK file should have .gbk, .gbff, .gb, or .genbank extension: {gbk_path}")
+    
+    # Validate CPUs
+    if 'cpus' in config and config['cpus'] is not None:
+        try:
+            cpus = int(config['cpus'])
+            if cpus < 1:
+                errors.append(f"CPUs must be at least 1 (got {cpus})")
+            elif cpus > os.cpu_count():
+                errors.append(f"CPUs ({cpus}) exceeds available CPUs ({os.cpu_count()}). This may cause performance issues.")
+        except (ValueError, TypeError):
+            errors.append(f"CPUs must be an integer or None (got {config['cpus']})")
+    
+    # Validate structures section
+    if 'structures' in config:
+        if not isinstance(config['structures'], dict):
+            errors.append("'structures' must be a dictionary with 'enabled' key")
+        elif 'enabled' not in config['structures']:
+            errors.append("'structures' section missing 'enabled' key")
+        elif not isinstance(config['structures']['enabled'], bool):
+            errors.append(f"structures.enabled must be boolean (got {config['structures']['enabled']})")
+    
+    # Validate metabolism-PathwayTools section
+    if 'metabolism-PathwayTools' in config and config['metabolism-PathwayTools'].get('enabled'):
+        met = config['metabolism-PathwayTools']
+        required_met_files = ['sbml_file', 'chokepoint_file', 'smarttable_file']
+        for field in required_met_files:
+            if field not in met:
+                errors.append(f"metabolism-PathwayTools missing required field: '{field}'")
+            else:
+                filepath = met[field]
+                if not os.path.exists(filepath):
+                    errors.append(f"metabolism-PathwayTools {field} not found: {filepath}")
+    
+    # Validate metabolism-SBML section
+    if 'metabolism-SBML' in config and config['metabolism-SBML'].get('enabled'):
+        met_sbml = config['metabolism-SBML']
+        if 'sbml_file' not in met_sbml:
+            errors.append("metabolism-SBML missing required field: 'sbml_file'")
+        else:
+            sbml_path = met_sbml['sbml_file']
+            if not os.path.exists(sbml_path):
+                errors.append(f"metabolism-SBML sbml_file not found: {sbml_path}")
+        
+        # Filter file is optional, but if provided, validate it
+        if 'filter_file' in met_sbml and met_sbml['filter_file']:
+            filter_path = met_sbml['filter_file']
+            if not os.path.exists(filter_path):
+                errors.append(f"metabolism-SBML filter_file not found: {filter_path}")
+    
+    # Validate core genome section
+    if 'core' in config and config['core'].get('enabled'):
+        core = config['core']
+        
+        # Check at least one core method is enabled
+        if not core.get('roary') and not core.get('corecruncher'):
+            errors.append("Core analysis enabled but neither 'roary' nor 'corecruncher' is enabled")
+        
+        # Validate identity and frequency (0-100%)
+        if 'min_identity' in core:
+            try:
+                identity = float(core['min_identity'])
+                if not (0 <= identity <= 100):
+                    errors.append(f"core.min_identity must be between 0 and 100 (got {identity})")
+            except (ValueError, TypeError):
+                errors.append(f"core.min_identity must be a number (got {core['min_identity']})")
+        
+        if 'min_core_freq' in core:
+            try:
+                freq = float(core['min_core_freq'])
+                if not (0 <= freq <= 100):
+                    errors.append(f"core.min_core_freq must be between 0 and 100 (got {freq})")
+            except (ValueError, TypeError):
+                errors.append(f"core.min_core_freq must be a number (got {core['min_core_freq']})")
+    
+    # Validate offtarget section
+    if 'offtarget' in config and config['offtarget'].get('enabled'):
+        offt = config['offtarget']
+        
+        # Validate microbiome filters if microbiome enabled
+        if offt.get('microbiome'):
+            if 'microbiome_identity_filter' in offt:
+                try:
+                    identity = float(offt['microbiome_identity_filter'])
+                    if not (0 <= identity <= 100):
+                        errors.append(f"offtarget.microbiome_identity_filter must be between 0 and 100 (got {identity})")
+                except (ValueError, TypeError):
+                    errors.append(f"offtarget.microbiome_identity_filter must be a number (got {offt['microbiome_identity_filter']})")
+            
+            if 'microbiome_coverage_filter' in offt:
+                try:
+                    coverage = float(offt['microbiome_coverage_filter'])
+                    if not (0 <= coverage <= 100):
+                        errors.append(f"offtarget.microbiome_coverage_filter must be between 0 and 100 (got {coverage})")
+                except (ValueError, TypeError):
+                    errors.append(f"offtarget.microbiome_coverage_filter must be a number (got {offt['microbiome_coverage_filter']})")
+        
+        # Validate foldseek_human requires structures
+        if offt.get('foldseek_human') and not config.get('structures', {}).get('enabled'):
+            errors.append("offtarget.foldseek_human requires structures to be enabled")
+    
+    # Validate DEG section
+    if 'deg' in config and config['deg'].get('enabled'):
+        deg = config['deg']
+        
+        if 'deg_identity_filter' in deg:
+            try:
+                identity = float(deg['deg_identity_filter'])
+                if not (0 <= identity <= 100):
+                    errors.append(f"deg.deg_identity_filter must be between 0 and 100 (got {identity})")
+            except (ValueError, TypeError):
+                errors.append(f"deg.deg_identity_filter must be a number (got {deg['deg_identity_filter']})")
+        
+        if 'deg_coverage_filter' in deg:
+            try:
+                coverage = float(deg['deg_coverage_filter'])
+                if not (0 <= coverage <= 100):
+                    errors.append(f"deg.deg_coverage_filter must be between 0 and 100 (got {coverage})")
+            except (ValueError, TypeError):
+                errors.append(f"deg.deg_coverage_filter must be a number (got {deg['deg_coverage_filter']})")
+    
+    # Validate PSortB section
+    if 'psortb' in config and config['psortb'].get('enabled'):
+        psortb = config['psortb']
+        
+        if 'gram_type' not in psortb:
+            errors.append("psortb missing required field: 'gram_type'")
+        else:
+            gram = psortb['gram_type']
+            valid_gram_types = ['n', 'p', 'a']
+            if gram not in valid_gram_types:
+                errors.append(f"psortb.gram_type must be one of {valid_gram_types} (got '{gram}')")
+    
+    # Validate metadata section
+    if 'metadata' in config and config['metadata'].get('enabled'):
+        meta = config['metadata']
+        
+        if 'meta_tables' not in meta:
+            errors.append("metadata missing required field: 'meta_tables'")
+        else:
+            meta_tables = meta['meta_tables']
+            if not isinstance(meta_tables, list):
+                errors.append(f"metadata.meta_tables must be a list (got {type(meta_tables).__name__})")
+            elif len(meta_tables) == 0:
+                errors.append("metadata.meta_tables is empty but metadata is enabled")
+            else:
+                for i, table_path in enumerate(meta_tables):
+                    if not isinstance(table_path, str):
+                        errors.append(f"metadata.meta_tables[{i}] must be a string path")
+                    elif not os.path.exists(table_path):
+                        errors.append(f"metadata table not found: {table_path}")
+                    elif not table_path.lower().endswith(('.tsv', '.csv', '.txt')):
+                        errors.append(f"metadata table should be .tsv, .csv, or .txt file: {table_path}")
+    
+    # Raise all validation errors together
+    if errors:
+        error_msg = "\n❌ Configuration validation failed:\n\n" + "\n".join(f"  • {err}" for err in errors)
+        raise ValueError(error_msg)
 
 def print_config(config):
     """
