@@ -280,7 +280,8 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
     # Build the MetaGraphTools command arguments
     mgt_args = [
         'MetaGraphTools',
-        f'--model /data/{os.path.basename(model_file)}'
+        '--model',
+        f'/data/{os.path.basename(model_file)}'
     ]
     
     # Add optional flags
@@ -291,11 +292,13 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
     
     # Add frequency filter file if provided
     if filter_file:
-        mgt_args.append(f'--frequency_filter_file /data/{os.path.basename(filter_file)}')
+        mgt_args.extend(['--frequency_filter_file', f'/data/{os.path.basename(filter_file)}'])
     
-    # Build the complete docker command
+    # Build the complete docker command with user permissions
     docker_cmd = [
         'docker', 'run', '--rm',
+        '--user', f'{os.getuid()}:{os.getgid()}',  # Run as current user to avoid permission issues
+        '-e', 'HOME=/tmp',  # Set HOME to writable location for cache directories
         '-v', f'{work_dir}:/data',
         'mcpalumbo/metagraphtools:latest'
     ] + mgt_args
@@ -425,12 +428,21 @@ def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outf
             'diamond', 'blastp',
             '--evalue', str(evalue),
             '--max-hsps', str(max_hsps),
-            '--outfmt', str(outfmt),
+        ]
+        
+        # Handle outfmt: split if it contains spaces (e.g., "6 qseqid sseqid...")
+        outfmt_parts = str(outfmt).split()
+        if outfmt_parts:
+            diamond_blastp_command.append('--outfmt')
+            diamond_blastp_command.extend(outfmt_parts)
+        
+        diamond_blastp_command.extend([
             '--db', blastdb,
             '--query', query,
             '--threads', str(cpus),
             '--out', output
-        ]
+        ])
+        
         run_bash_command(diamond_blastp_command)
     else:
         logging.error(f"Query file '{query}' not found.")
