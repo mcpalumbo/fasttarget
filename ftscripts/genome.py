@@ -730,27 +730,35 @@ def localization_prediction(base_path, organism_name, organism_type):
 
     if not all_files:
         programs.run_psort(faa_path, organism_type, localization_dir, output_format='terse')
-    elif len(all_files) > 1:
+        # After running, find the newly created file
+        all_files = glob.glob(file_pattern)
+        if not all_files:
+            raise FileNotFoundError(f"PSORTb ran but no output file found in {localization_dir}")
+    
+    if len(all_files) > 1:
         raise FileNotFoundError(f"Multiple psort result files found in {localization_dir}. Leave only one.")
+    
+    # Process PSORTb results
+    print(f"Processing PSORTb results from {all_files[0]}")
+    
+    psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
+
+    if not files.file_check(psort_results):
+        # Parse the PSORTb output file
+        file_path = all_files[0]
+        df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
+
+        result_dict = df.set_index('SeqID')['Localization'].to_dict()
+
+        psort_df = metadata.metadata_table_with_values(base_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
+
+        return psort_df
     else:
-        print(f"Localization prediction already performed. Reading {all_files[0]}")
+        # Load previously processed results
+        print(f"Loading previously processed PSORTb results from {psort_results}")
+        psort_df = pd.read_csv(psort_results, sep='\t', index_col=0, header=0)
 
-        psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
-
-        if not files.file_check(psort_results):
-            file_path = all_files[0]
-            df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
-
-            result_dict = df.set_index('SeqID')['Localization'].to_dict()
-
-            psort_df = metadata.metadata_table_with_values(base_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
-
-            return psort_df
-        else:
-            print(f"Localization prediction already performed. Reading {psort_results}")
-            psort_df = pd.read_csv(psort_results, sep='\t', index_col=0, header=0)
-
-            return psort_df
+        return psort_df
         
     
 
