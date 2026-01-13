@@ -538,10 +538,14 @@ def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
     if not mgt_results_dir:   
         try:
             process_external_sbml(sbml_file, metabolism_dir, filter_file)
+            # After running MetaGraphTools, try to pick the results directory again
+            mgt_results_dir = pick_mgt_results_dir(metabolism_dir)
         except Exception as e:
             logging.exception(f'Error processing external SBML file: {e}')
             return None, None, None, None
-    else:
+    
+    # Parse results if we have a valid MGT results directory
+    if mgt_results_dir:
         consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
 
         bcentrality_df = metadata.metadata_table_with_values(base_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, 0)
@@ -552,6 +556,9 @@ def run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file):
         print(f'---------- Finished processing external SBML file ----------')
 
         return bcentrality_df, degree_df, consumption_df, production_df
+    else:
+        logging.error('MetaGraphTools did not produce valid results.')
+        return None, None, None, None
     
  
     
