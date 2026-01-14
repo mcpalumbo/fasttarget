@@ -648,7 +648,7 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
                 else:
                     logging.error(f'{organism_name}.gff not found.')
 
-                roary_table = metadata.metadata_table_bool(output_path, core_locus_tag, 'core_roary', conservation_dir)
+                roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
             else:
                 print(f'Roary output file already exists: {roary_results_table}.')
                 roary_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
