@@ -31,6 +31,7 @@ class Config:
     def __init__(self, config):
         self.organism = config['organism']
         self.cpus = config['cpus']
+        self.container_engine = config.get('container_engine', 'docker')  # Default to docker if not specified
         self.structures = config['structures'] if config['structures']['enabled'] else False
         self.metabolism_pathwaytools = config['metabolism-PathwayTools'] if config['metabolism-PathwayTools']['enabled'] else False
         self.metabolism_sbml = config['metabolism-SBML'] if config['metabolism-SBML']['enabled'] else False
@@ -124,6 +125,13 @@ def validate_config(config):
         except (ValueError, TypeError):
             errors.append(f"CPUs must be an integer or None (got {config['cpus']})")
     
+    #Validate container engine
+    if 'container_engine' in config:
+        engine = config['container_engine']
+        valid_engines = ['docker', 'singularity']
+        if engine not in valid_engines:
+            errors.append(f"container_engine must be one of {valid_engines} (got '{engine}')")
+
     # Validate structures section
     if 'structures' in config:
         if not isinstance(config['structures'], dict):

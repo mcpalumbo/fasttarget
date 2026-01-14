@@ -551,6 +551,7 @@ if __name__ == "__main__":
             "gbk_file": f'{test_path}/test.gbk'
         },
         "cpus": None,
+        "container_engine": "docker", # For test with singularity use "singularity"
         "metabolism-PathwayTools": {
             "enabled": True,
             "sbml_file": f'{test_path}/test.sbml',

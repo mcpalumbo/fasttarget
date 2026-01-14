@@ -325,14 +325,15 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
 
 # Functions for process an external SBML with MetaGraphTools (docker)
 
-def process_external_sbml(sbml_file, output_path, filter_file=None):
+def process_external_sbml(sbml_file, output_path, filter_file=None, container_engine='docker'):
 
     """
-    Process an external SBML file using MetaGraphTools Docker image to generate the Ubiquitous Compounds file.
+    Process an external SBML file using MetaGraphTools container image to generate the Ubiquitous Compounds file.
 
     :param sbml_file: Path to the SBML file.
     :param output_path: Path to the output directory.
     :param filter_file: Optional path to the filter file for ubiquitous compounds.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     """
 
     if not os.path.exists(output_path):
@@ -367,7 +368,7 @@ def process_external_sbml(sbml_file, output_path, filter_file=None):
         filter_file_destination = None
 
     try:    
-        programs.run_metagraphtools(output_path, sbml_file_destination, filter_file_destination, chokepoints=True, graph=True) 
+        programs.run_metagraphtools(output_path, sbml_file_destination, filter_file_destination, chokepoints=True, graph=True, container_engine=container_engine)
         print(f'MetaGraphTools processing completed. Results are in {output_path}.')
         try:
             programs.change_permission_user_dir(output_path)
@@ -537,7 +538,7 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file):
 
     if not mgt_results_dir:   
         try:
-            process_external_sbml(sbml_file, metabolism_dir, filter_file)
+            process_external_sbml(sbml_file, metabolism_dir, filter_file, container_engine=container_engine)
             # After running MetaGraphTools, try to pick the results directory again
             mgt_results_dir = pick_mgt_results_dir(metabolism_dir)
         except Exception as e:

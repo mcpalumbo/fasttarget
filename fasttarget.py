@@ -45,7 +45,8 @@ def prepare_genome_files(config, output_path):
     logging.info(f'Organism subfolders created in {output_path}/{organism_name}')
 
     # Create organism genome files (gbk, gff3 and fasta)
-    genome.ref_genome_files(gbk_file, output_path, organism_name)
+    genome.ref_genome_files(gbk_file, output_path, organism_name, container_engine=config.container_engine)
+
     logging.info(f'Genome files created in {output_path}/{organism_name}')
 
 def metabolic_module(config, output_path):
@@ -112,7 +113,8 @@ def metabolic_module(config, output_path):
                 logging.info('Filter file: Not provided (will use default frequency filter)')
 
             # Parse metabolic files, make network and calculate centrality
-            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file)
+            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine=config.container_engine)
+
             module_tables.append(mgt_bc_df)
             module_tables.append(mgt_degree_df)
             module_tables.append(mgt_consumption_df)
@@ -153,7 +155,7 @@ def structure_module(config, databases_path, output_path, cpus):
             logging.info(f'Strain Tax ID: {strain_taxid}')
             
             # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
-            df_structures = structures.pipeline_structures(output_path, organism_name, tax_id, strain_taxid, cpus=cpus)
+            df_structures = structures.pipeline_structures(output_path, organism_name, tax_id, strain_taxid, cpus=cpus, container_engine=config.container_engine)
             logging.info('Structures analysis finished')
             module_tables.append(df_structures)
 
@@ -194,7 +196,7 @@ def conservation_module(config, databases_path, output_path, cpus):
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
-            genome.core_check_files(output_path, organism_name)
+            genome.core_check_files(output_path, organism_name, container_engine=config.container_engine)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
@@ -206,7 +208,7 @@ def conservation_module(config, databases_path, output_path, cpus):
                     #Run roary
                     print('----- 2. Running Roary -----')
                     logging.info('Starting Roary analysis')
-                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'])
+                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'], container_engine=config.container_engine)
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
                     df_roary = genome.roary_output(output_path, organism_name, core_threshold=min_core_freq/100)
@@ -223,7 +225,7 @@ def conservation_module(config, databases_path, output_path, cpus):
                     # Run CoreCruncher
                     print('----- 2. Running CoreCruncher -----')
                     logging.info('Starting CoreCruncher analysis')
-                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'])
+                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'], container_engine=config.container_engine)
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
                     df_cc = genome.corecruncher_output(output_path, organism_name)
@@ -317,7 +319,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
                     print_stylized('FOLDSEEK HUMAN OFFTARGET')
                    
                     # Run foldseek against human structures
-                    foldseek_mapping = offtargets.run_foldseek_human_structures (databases_path, output_path, organism_name)
+                    foldseek_mapping = offtargets.run_foldseek_human_structures (databases_path, output_path, organism_name, container_engine=config.container_engine)
                     logging.info('Foldseek human offtarget search finished')
                     
                     # Parse results
@@ -407,7 +409,7 @@ def localization_module(config, output_path):
             
             #Run psortb
             print('----- Running psort -----')
-            df_psort = genome.localization_prediction(output_path, organism_name, gram_type)
+            df_psort = genome.localization_prediction(output_path, organism_name, gram_type, container_engine=config.container_engine)
             module_tables.append(df_psort)
             logging.info('Psortb analysis finished')
             print('----- Finished -----')

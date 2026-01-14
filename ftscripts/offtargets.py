@@ -330,7 +330,7 @@ def microbiome_protein_clusters_parse (output_path, organism_name, identity_filt
     return df_microbiome
 
 
-def run_foldseek_human_structures (databases_path, output_path, organism_name):
+def run_foldseek_human_structures (databases_path, output_path, organism_name, container_engine='docker'):
 
     """
     Runs Foldseek easy-search for human proteome PDB and AlphaFold structures.
@@ -345,6 +345,7 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name):
     :param output_path: Directory of the organism output.
     :param databases_path: Directory where FOLDSEEK structure databases are stored.
     :param organism_name: Name of the organism.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     :return: Dictionary with locus_tag as key and path to foldseek results file as value.
     """
     foldseek_results_mapping = {}
@@ -390,7 +391,7 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name):
         
         # Search with human PDB database
         try:
-            programs.run_foldseek_search(struct_dir, db_human_PDB_path, 'DB_human_PDB', struct_name, foldseek_results_path)
+            programs.run_foldseek_search(struct_dir, db_human_PDB_path, 'DB_human_PDB', struct_name, foldseek_results_path, container_engine=container_engine)
             print(f'  ✓ Foldseek vs human PDB completed')
             success_count += 1
             filename = f'{struct_name.split(".")[0]}_vs_DB_human_PDB_foldseek_results.tsv'
@@ -402,7 +403,7 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name):
         
         # Search with human AlphaFold database
         try:
-            programs.run_foldseek_search(struct_dir, db_human_AF_path, 'DB_human_AF', struct_name, foldseek_results_path)
+            programs.run_foldseek_search(struct_dir, db_human_AF_path, 'DB_human_AF', struct_name, foldseek_results_path, container_engine=container_engine)
             print(f'  ✓ Foldseek vs human AlphaFold completed')
             success_count += 1
             filename = f'{struct_name.split(".")[0]}_vs_DB_human_AF_foldseek_results.tsv'

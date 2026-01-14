@@ -23,6 +23,11 @@ organism:
 # cpus: Number of CPUs to use for parallel processing. Use 'null' for auto-detection, or specify a number (e.g., 4, 8, 16).
 cpus: null
 
+# ---- Container Engine ----
+# container_engine: Choose 'docker' or 'singularity' for running containerized tools.
+# Make sure to run the appropriate setup script (setup_docker.sh or setup_singularity.sh) before using.
+container_engine: docker
+
 # ---- Metabolism ----
 metabolism-PathwayTools:
   enabled: False

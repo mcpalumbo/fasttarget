@@ -893,12 +893,13 @@ def index_db_blast_human (database_path):
     except Exception as e:
         print('Error indexing Human database:', e)
 
-def index_db_foldseek_human_structures (database_path):
+def index_db_foldseek_human_structures (database_path, container_engine='docker'):
 
     """
     Makes a FOLDSEEK db for human proteome PDB and AlphaFold structures. 
 
     :param database_path =  Path to the databases folder.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
 
     """
 
@@ -908,14 +909,15 @@ def index_db_foldseek_human_structures (database_path):
 
     #Index PDB structures
     try:
-        programs.run_foldseek_create_index_db(human_PDB_path, 'DB_human_PDB')
+        programs.run_foldseek_create_index_db(human_PDB_path, 'DB_human_PDB', container_engine=container_engine)
+
         print('Foldseek PDB database created successfully.')
     except Exception as e:
         print('Error indexing human PDB structures for Foldseek:', e)
 
     #Index AlphaFold structures
     try:
-        programs.run_foldseek_create_index_db(human_AF_path, 'DB_human_AF')
+        programs.run_foldseek_create_index_db(human_AF_path, 'DB_human_AF', container_engine=container_engine)
         print('Foldseek AF database created successfully.')
     except Exception as e:
         print('Error indexing human AlphaFold structures for Foldseek.', e)

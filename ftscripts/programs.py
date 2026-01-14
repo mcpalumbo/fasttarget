@@ -16,6 +16,7 @@ from pathlib import Path
 import shutil
 import logging
 
+
 def change_permission_user_file(file_path):
     """
     Change the permissions of a file to the current user.
@@ -207,13 +208,119 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None,
     except docker.errors.ContainerError as e:
         print(f"Error running container: {e}")
 
-def run_fpocket(work_dir, pdb_file):
+def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None, sif_dir='singularity_sfi_files'):
+    """
+    Run a singularity container.
+
+    :param work_dir: Working directory path.
+    :param bind_dir: Binding directory path in container.
+    :param image_name: The Docker image name (will be converted to .sif filename).
+    :param command: The command to run.
+    :param env_vars: Dictionary of environment variables to set in the container.
+    :param volumes: Dictionary of volumes to mount in the container.
+    :param sif_dir: Directory where Singularity .sif files are stored.
 
     """
-    Run FPocket, using the docker image 'fpocket/fpocket'.
+    # Convert Docker image name to Singularity .sif filename
+    # e.g., "fpocket/fpocket" -> "fpocket_fpocket.sif"
+    # e.g., "mcpalumbo/p2rank:latest" -> "mcpalumbo_p2rank_latest.sif"
+    sif_name = image_name.replace('/', '_').replace(':', '_') + '.sif'
+    
+    # Get the base path (assuming sif_dir is relative to project root)
+    if not os.path.isabs(sif_dir):
+        # Try to find the base path from the current working directory
+        base_path = os.getcwd()
+        # If we're in a subfolder, go up to find the project root
+        while not os.path.exists(os.path.join(base_path, 'fasttarget.py')) and base_path != os.path.dirname(base_path):
+            base_path = os.path.dirname(base_path)
+        sif_path = os.path.join(base_path, sif_dir, sif_name)
+    else:
+        sif_path = os.path.join(sif_dir, sif_name)
+    
+    # Check if the .sif file exists
+    if not os.path.exists(sif_path):
+        raise FileNotFoundError(f"Singularity image not found: {sif_path}. Run setup_singularity.sh first.")
+    
+    # Build bind mounts
+    bind_mounts = []
+    if volumes:
+        for host_path, mount_info in volumes.items():
+            container_path = mount_info['bind']
+            bind_mounts.append(f"{host_path}:{container_path}")
+    else:
+        bind_mounts.append(f"{work_dir}:{bind_dir}")
+    
+    # Build singularity command
+    singularity_cmd = ['singularity', 'exec']
+    
+    # Add bind mounts
+    for bind in bind_mounts:
+        singularity_cmd.extend(['--bind', bind])
+    
+    # Add environment variables
+    if env_vars:
+        for key, value in env_vars.items():
+            singularity_cmd.extend(['--env', f'{key}={value}'])
+    
+    # Set working directory
+    singularity_cmd.extend(['--pwd', bind_dir])
+    
+    # Add the .sif file
+    singularity_cmd.append(sif_path)
+    
+    # Add the command (as a single string or split)
+    if isinstance(command, str):
+        singularity_cmd.extend(command.split())
+    else:
+        singularity_cmd.extend(command)
+    
+    try:
+        print(f'Running Singularity image {sif_name}, command: {command}')
+        result = subprocess.run(
+            singularity_cmd,
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(result.stdout)
+        if result.stderr:
+            print(f"STDERR: {result.stderr}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error running Singularity container: {e}")
+        print(f"STDOUT: {e.stdout}")
+        print(f"STDERR: {e.stderr}")
+        raise
+
+def run_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None, container_engine='docker'):
+    """
+    Run a container using either Docker or Singularity based on configuration.
+
+    :param work_dir: Working directory path.
+    :param bind_dir: Binding directory path in container.
+    :param image_name: The image to run.
+    :param command: The command to run.
+    :param env_vars: Dictionary of environment variables to set in the container.
+    :param volumes: Dictionary of volumes to mount in the container.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
+
+    """
+    if container_engine.lower() == 'singularity':
+        return run_singularity_container(work_dir, bind_dir, image_name, command, env_vars, volumes)
+    elif container_engine.lower() == 'docker':
+        return run_docker_container(work_dir, bind_dir, image_name, command, env_vars, volumes)
+    else:
+        raise ValueError(f"Unknown container engine: {container_engine}. Use 'docker' or 'singularity'.")
+
+
+def run_fpocket(work_dir, pdb_file, container_engine='docker'):
+
+    """
+    Run FPocket, using the container image 'fpocket/fpocket'.
     
     :param work_dir:  Working directory path.
     :param pdb_file:  Structure file (.pdb) path.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
 
     """
 
@@ -221,7 +328,7 @@ def run_fpocket(work_dir, pdb_file):
         FPOCKET_image = "fpocket/fpocket"
         FPOCKET_command = ["fpocket", "-f", pdb_file]
 
-        run_docker_container(work_dir, work_dir, FPOCKET_image, FPOCKET_command)
+        run_container(work_dir, work_dir, FPOCKET_image, FPOCKET_command, container_engine=container_engine)
 
         # rename output folder
         pdb_basename = os.path.basename(os.path.splitext(pdb_file)[0])
@@ -232,15 +339,17 @@ def run_fpocket(work_dir, pdb_file):
     else:
         logging.error(f"The file '{pdb_file}' not found.")
 
-def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
+def run_p2rank(work_dir, pdb_file, cpus, alphafold=False, container_engine='docker'):
     """
-    Run P2Rank inside the Docker image 'mcpalumbo/p2rank:latest'.
+    Run P2Rank inside the container image 'mcpalumbo/p2rank:latest'.
     Creates a folder for each pdb file with '_p2rank' suffix in work_dir.
 
     :param work_dir:  Working directory path (mounted inside the container).
     :param pdb_file:  Structure file (.pdb) path.
     :param cpus: Number of threads (CPUs) to use. 
     :param alphafold: Boolean, if True adds '-c alphafold' to the command.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
+
     """
 
     #create output directory if not exists for my pdb
@@ -256,12 +365,12 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False):
         if alphafold:
             P2RANK_command.extend(["-c", "alphafold"])
 
-        run_docker_container(work_dir, work_dir, P2RANK_image, P2RANK_command)
+        run_container(work_dir, work_dir, P2RANK_image, P2RANK_command, container_engine=container_engine)
     else:
         print(f"The file '{pdb_file}' not found.")
         raise FileNotFoundError(f'{pdb_file} not found.')
 
-def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True, graph=True):
+def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True, graph=True, container_engine='docker'):
     
     """
     Run MetaGraphTools inside the Docker image 'mcpalumbo/metagraphtools:latest'.
@@ -272,6 +381,7 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
     :param filter_file: Path to the frequency filter file (TSV format). If no file provided, uses metabolites with a frequency higher than 20 in the model.
     :param chokepoints: Whether to calculate chokepoints. Default True.
     :param graph: Whether to generate graphs. Default True.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
     """
     
     # Ensure work_dir is absolute path
@@ -465,7 +575,7 @@ def run_makediamonddb(input, output):
         logging.error(f"Diamond Blast database file '{input}' not found.")
 
 
-def run_genbank2gff3(input, output):
+def run_genbank2gff3(input, output, container_engine='docker'):
 
     """
     Runs script bp_genbank2gff3.pl from BioPerl.
@@ -473,20 +583,22 @@ def run_genbank2gff3(input, output):
 
     :param input: Input gbk file path.
     :param output: Output directory path.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
         
     """
     work_dir = os.path.dirname(input)
     bind_dir = '/data'
     image_name = 'mcpalumbo/bioperl:1'
-    command = ["bp_genbank2gff3", os.path.basename(input)]
+    command = f'bp_genbank2gff3 /data/{os.path.basename(input)}'
 
     if files.file_check(input):
         try:
-            run_docker_container(
+            run_container(
                 work_dir=work_dir,
                 bind_dir=bind_dir,
                 image_name=image_name,
-                command=command
+                command=command,
+                container_engine=container_engine
             )
             # Files genomes
             file_output = f'{input}.gff'
@@ -509,7 +621,7 @@ def run_genbank2gff3(input, output):
     else:
         logging.error(f"GenBank file '{input}' not found.")
 
-def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count()):
+def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count(), container_engine='docker'):
 
     """
     Runs the docker image sangerpathogens/roary, a pan genome pipeline. Default options.
@@ -522,6 +634,8 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
     :param identity: Minimum percentage identity for sequence comparisons performed by blastp. 
     :param cpus: Number of threads.
     :param cluster_number: Cluster sequences. Default 50000.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
+
     """
 
     if os.path.exists(input):
@@ -542,11 +656,11 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
             "-f", output
         ] + gff_files
 
-        run_docker_container(work_dir, work_dir, ROARY_image, ROARY_command)
+        run_container(work_dir, work_dir, ROARY_image, ROARY_command, container_engine=container_engine)
     else:
         logging.error(f"Directory '{input}' not found.")
 
-def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=95):
+def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=95, container_engine='docker'):
     """
     Runs CoreCruncher, a core genome tool. Default options.
     Runs the docker image mcpalumbo/corecruncher:1.
@@ -556,6 +670,7 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
     :param reference: Pivot genome, specify the name of the file.
     :param core_threshold: Minimum frequency of the gene across genomes to be considered core.
     :param identity: Identity score used by usearch or blast to define orthologs (percentage).
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
 
     """
    
@@ -573,11 +688,12 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
                 '-ref', reference
             ]  
             try:
-                run_docker_container(
+                run_container(
                     work_dir=work_dir,
                     bind_dir=bind_dir,
                     image_name=image_name,
-                    command=command
+                    command=command,
+                    container_engine=container_engine
                 )
             except Exception as e:
                 logging.exception(f'Error running corecruncher: {e}')
@@ -586,7 +702,7 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
     else:
         logging.error(f"Directory '{corecruncher_dir}' not found.")
 
-def run_foldseek_create_index_db(structures_dir, DB_name):
+def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='docker'):
 
     """
     Creates a database and indexes it for Foldseek, a tool designed for efficient protein structure comparison.
@@ -595,6 +711,7 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
 
     :param structures_dir: Folder containing the .pdb structures to make the database.
     :param DB_name: Name of the database to create.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
     
     """
 
@@ -612,18 +729,20 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
         command_index = ["createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
 
         try:
-            run_docker_container(
+            run_container(
                 work_dir=work_dir,
                 bind_dir=bind_dir,
                 image_name=image_name,
-                command=command_create
+                command=command_create,
+                container_engine=container_engine
             )
             try:
-                run_docker_container(
+                run_container(
                     work_dir=work_dir,
                     bind_dir=bind_dir,
                     image_name=image_name,
-                    command=command_index
+                    command=command_index,
+                    container_engine=container_engine
                 )
             except Exception as e:
                 logging.exception(f'Error running foldseek createindex: {e}')
@@ -632,7 +751,7 @@ def run_foldseek_create_index_db(structures_dir, DB_name):
     else:
         logging.error(f"Directory '{structures_dir}' not found.")
 
-def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
+def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, container_engine='docker'):
 
     """
     Runs Foldseek easy-search, a tool designed for efficient protein structure comparison.
@@ -644,6 +763,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
     :param DB_name: Name of the database.
     :param query: Query structure file name. Should be in structures_dir.
     :param output_dir: Output directory path.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
 
     """
   
@@ -683,12 +803,13 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir):
                 ]
 
                 try:
-                    run_docker_container(
+                    run_container(
                         volumes=volumes,
                         work_dir=work_dir,
                         bind_dir=bind_dir,
                         image_name=image_name,
-                        command=command
+                        command=command,
+                        container_engine=container_engine
                     )
 
                     if os.path.exists(foldseek_results_final):
@@ -899,7 +1020,7 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
     else:
         logging.error(f"SBML file '{sbml_file}' not found.") 
 
-def run_psort(input, organism_type, output_dir, output_format='terse'):
+def run_psort(input, organism_type, output_dir, output_format='terse', container_engine='docker'):
     """
     Runs PSORTb, a tool for predicting subcellular localization for a given set of protein sequences.
     More info: https://hub.docker.com/r/brinkmanlab/psortb_commandline
@@ -908,6 +1029,7 @@ def run_psort(input, organism_type, output_dir, output_format='terse'):
     :param organism_type: Type of organism, it can be Gram negative/positive bacteria or archaea. Only can take these values: n, p or a.
     :param output_dir:  Path of where to save results files.
     :param output_format: Format of output files. Value can be normal, terse or long. Default:terse.
+    :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
     
     """
 
@@ -923,20 +1045,32 @@ def run_psort(input, organism_type, output_dir, output_format='terse'):
         if os.path.exists(output_dir):          
 
             shutil.copy(input, output_dir)
+
+            # Create results subdirectory in output_dir (needed for Singularity)
+            results_dir = os.path.join(output_dir, 'results')
+            os.makedirs(results_dir, exist_ok=True)
+
             file_name = os.path.basename(input)
 
             image_name = 'brinkmanlab/psortb_commandline:1.0.2'
-            psortb_command = [
-                '/usr/local/psortb/bin/psort',
-                f'-{organism_type}',
-                '-o', output_format,
-                '-i', f'/tmp/results/{file_name}'
-            ]
+            psortb_command = f'/usr/local/psortb/bin/psort -{organism_type} -o {output_format} -i /tmp/{file_name}'
+
             env_vars = {'MOUNT': output_dir}
 
-            run_docker_container(output_dir, '/tmp/results', image_name, psortb_command, env_vars)
+            run_container(output_dir, '/tmp', image_name, psortb_command, env_vars, container_engine=container_engine)
 
             os.remove(os.path.join(output_dir, file_name))
+
+            # Move results from results_dir to output_dir
+            for item in os.listdir(results_dir):
+                s = os.path.join(results_dir, item)
+                d = os.path.join(output_dir, item)
+                if os.path.isdir(s):
+                    shutil.move(s, d)
+                else:
+                    shutil.move(s, d)
+            os.rmdir(results_dir)
+
 
             logging.info(f"Psort results in '{output_dir}'.")
         else:

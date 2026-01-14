@@ -215,7 +215,7 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
         with open(output_file_ffn, 'w') as ffn:
             ffn.write("\n".join(nucleotide_records))
 
-def ref_genome_files (gbk_file, output_path, organism_name):
+def ref_genome_files (gbk_file, output_path, organism_name, container_engine='docker'):
 
     """
     Generates the .fna, .faa, .ffn, and .gff3 files for a reference GenBank file.
@@ -223,6 +223,7 @@ def ref_genome_files (gbk_file, output_path, organism_name):
     :param gbk_file: GenBank file path.
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
 
     """
 
@@ -249,7 +250,7 @@ def ref_genome_files (gbk_file, output_path, organism_name):
 
         if not files.file_check(output_file_gff_path):
             try:
-                programs.run_genbank2gff3(ref_gbk, genome_dir)
+                programs.run_genbank2gff3(ref_gbk, genome_dir, container_engine=container_engine)
                 if os.path.exists(output_file_gff_path):
                     print(f'Gff3 file saved in {genome_dir}')
                     
@@ -391,7 +392,7 @@ def core_download_missing_accessions(output_path, organism_name, tax_id):
     else:
         print('Check already performed.')
 
-def core_files(output_path, organism_name):
+def core_files(output_path, organism_name, container_engine='docker'):
     """
     Select genomes with Human as host and generate .faa and .gff3 files for core genomes.
 
@@ -400,6 +401,7 @@ def core_files(output_path, organism_name):
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
 
     :return: List of core genomes IDs.
     """
@@ -468,7 +470,7 @@ def core_files(output_path, organism_name):
 
                         if not os.path.exists(new_gff):
                             try:      
-                                programs.run_genbank2gff3(new_gbk, gff_dir)
+                                programs.run_genbank2gff3(new_gbk, gff_dir, container_engine=container_engine)
                                 print(f"Processed {new_name}.gff")
                             except Exception as e:
                                 logging.exception(f"Error in run_genbank2gff3: {e}")
@@ -491,7 +493,7 @@ def core_files(output_path, organism_name):
     return core_genomes
 
 
-def core_check_files(output_path, organism_name):
+def core_check_files(output_path, organism_name, container_engine='docker'):
     """
 
     Check for missing files in the core genomes analysis.
@@ -502,6 +504,7 @@ def core_check_files(output_path, organism_name):
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
 
     """
     conservation_dir = os.path.join(output_path, organism_name, 'conservation')  
@@ -537,20 +540,20 @@ def core_check_files(output_path, organism_name):
         genomes_list = files.file_to_list(genomes_file)
         pending_files = pending_files(genomes_list)
         if len(pending_files) > 0:
-            core_files(output_path, organism_name)
+            core_files(output_path, organism_name, container_engine=container_engine)
     else:
-        core_files(output_path, organism_name)
+        core_files(output_path, organism_name, container_engine=container_engine)
         if files.file_check(genomes_file):
             genomes_list = files.file_to_list(genomes_file)
             pending_files = pending_files(genomes_list)
             if len(pending_files) > 0:
-                core_files(output_path, organism_name)
+                core_files(output_path, organism_name, container_engine=container_engine)
         else:
             print(f'No core genomes file found or empty: {genomes_file}.')
 
     return pending_files
 
-def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
+def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker'):
 
     """
     Run Roary and CoreCruncher programs for the core genomes analysis of the given organism.
@@ -563,7 +566,8 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param cpus: Number of CPUs to use.
-    :param program_list: List of programs to run, can be 'roary', 'corecruncher', or both
+    :param program_list: List of programs to run, can be 'roary', 'corecruncher', or both.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     
     """
 
@@ -578,7 +582,7 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         if os.path.exists(gff_dir):
             if not files.file_check(genes_csv_file):
                 print('Running Roary')
-                programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=99, identity=95, cpus=cpus)
+                programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=99, identity=95, cpus=cpus, container_engine=container_engine)
                 print('Finished')
             else:
                 print(f'Roary output file already exists: {genes_csv_file}.')
@@ -593,7 +597,7 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
                 print('Running CoreCruncher')
-                programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=99, identity=95)
+                programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=99, identity=95, container_engine=container_engine)
                 print('Finished')
             else:
                 print(f'CoreCruncher output file already exists: {cc_output_file}.')
@@ -700,7 +704,7 @@ def corecruncher_output(output_path, organism_name):
 
     return corecruncher_table
 
-def localization_prediction(output_path, organism_name, organism_type):
+def localization_prediction(output_path, organism_name, organism_type, container_engine='docker'):
 
     """
     Predicts the subcellular localization of proteins using PSORTb.
@@ -713,7 +717,8 @@ def localization_prediction(output_path, organism_name, organism_type):
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param organism_type: Type of organism, can be 'a' (archaea), 'n' (gram-negative bacteria), or 'p' (gram-positive bacteria).
-    
+    :param container_engine: Container engine to use ('docker' or 'singularity').
+
     :return: A dictionary with the localization predictions for each protein.
     
     """
@@ -729,7 +734,7 @@ def localization_prediction(output_path, organism_name, organism_type):
     all_files = glob.glob(file_pattern)
 
     if not all_files:
-        programs.run_psort(faa_path, organism_type, localization_dir, output_format='terse')
+        programs.run_psort(faa_path, organism_type, localization_dir, output_format='terse', container_engine=container_engine)
         # After running, find the newly created file
         all_files = glob.glob(file_pattern)
         if not all_files:

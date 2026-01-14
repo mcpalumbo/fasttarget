@@ -1760,7 +1760,7 @@ def FPocket_models(directory):
     else:
         logging.error(f"The directory '{directory}' not found.")
 
-def fpocket_for_structure(pdb, output_path, pockets_dir):
+def fpocket_for_structure(pdb, output_path, pockets_dir, container_engine='docker'):
     """
     Run Fpocket for a single PDB structure.
 
@@ -1771,6 +1771,7 @@ def fpocket_for_structure(pdb, output_path, pockets_dir):
     :param pdb: Path to the PDB file.
     :param output_path: Directory where Fpocket will write its output.
     :param pockets_dir: Directory where the final pockets results will be stored.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     """
 
     fpocket_outdir = os.path.basename(os.path.splitext(pdb)[0]) + "_fpocket"
@@ -1778,7 +1779,7 @@ def fpocket_for_structure(pdb, output_path, pockets_dir):
 
     if not os.path.exists(results_path):
         print(f'Running Fpocket for {pdb}')
-        programs.run_fpocket(output_path, pdb)
+        programs.run_fpocket(output_path, pdb, container_engine=container_engine)
 
         # Move the fpocket results to the pockets directory
         source_path = os.path.join(output_path, fpocket_outdir)
@@ -1841,7 +1842,7 @@ def find_structures_for_locus(locus_dir):
     print(f"  Warning: No reference structure (*_ref.pdb) or AlphaFold (AF_*.pdb) found in {locus_dir}. Skipping FPocket.")
     return None
 
-def pockets_finder_for_locus(locus_dir):
+def pockets_finder_for_locus(locus_dir, container_engine='docker'):
     """
     Run Fpocket for the selected structures in a locus_tag directory.
 
@@ -1854,6 +1855,7 @@ def pockets_finder_for_locus(locus_dir):
       - Runs Fpocket in parallel using ProcessPoolExecutor.
 
     :param locus_dir: Path to the locus_tag directory.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
 
     """
 
@@ -1871,18 +1873,19 @@ def pockets_finder_for_locus(locus_dir):
         print(f"Running Fpocket on {pdb_file} structures in {locus_dir}")
         
         pdb_parent_dir = os.path.dirname(pdb_file)
-        fpocket_for_structure(pdb_file, pdb_parent_dir, pockets_dir)
+        fpocket_for_structure(pdb_file, pdb_parent_dir, pockets_dir, container_engine=container_engine)
 
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
 
-def pockets_finder_for_all_loci(output_path, organism_name):
+def pockets_finder_for_all_loci(output_path, organism_name, container_engine='docker'):
     """
     Run Fpocket for all locus_tag directories under the 'structures' folder.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
 
     """
 
@@ -1897,7 +1900,7 @@ def pockets_finder_for_all_loci(output_path, organism_name):
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            pockets_finder_for_locus(locus_dir)
+            pockets_finder_for_locus(locus_dir, container_engine=container_engine)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -2016,7 +2019,7 @@ def pockets_filter(pockets_dict):
     return DS_dict
 
 ##  ------------------- P2Rank functions ------------------- ##
-def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False):
+def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False, container_engine='docker'):
     """
     Run P2Rank for a single PDB structure.
 
@@ -2029,6 +2032,7 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False):
     :param p2rank_dir: Directory where the final P2Rank results will be stored.
     :param cpus: Number of CPUs/threads to use.
     :param alphafold: Boolean, if True adds '-c alphafold' to the command.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     """
     pdb_basename = os.path.basename(os.path.splitext(pdb)[0])
     
@@ -2046,7 +2050,7 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False):
     
             print(f'Running P2Rank for {pdb}')
             # Run the p2rank Docker command
-            programs.run_p2rank(output_path, pdb, cpus, alphafold=alphafold)
+            programs.run_p2rank(output_path, pdb, cpus, alphafold=alphafold, container_engine=container_engine)
 
             # Move the output directory to the final destination
             shutil.move(p2rank_output_dir_tmp, p2rank_dir)
@@ -2057,7 +2061,7 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False):
         print(f'P2Rank results directory for {pdb} already present.')
 
 
-def p2rank_finder_for_locus(locus_dir, cpus):
+def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker'):
     """
     Run P2Rank for the selected structures in a locus_tag directory.
 
@@ -2071,6 +2075,7 @@ def p2rank_finder_for_locus(locus_dir, cpus):
 
     :param locus_dir: Path to the locus_tag directory.
     :param cpus: Number of CPUs/threads to use.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     """
 
     if os.path.exists(locus_dir):
@@ -2090,18 +2095,19 @@ def p2rank_finder_for_locus(locus_dir, cpus):
         print(f"Running P2Rank on {pdb_file} in {locus_dir} (AlphaFold={is_alphafold})")
         
         pdb_parent_dir = os.path.dirname(pdb_file)
-        p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold)
+        p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold, container_engine=container_engine)
 
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
-def p2rank_finder_for_all_loci(output_path, organism_name, cpus):
+def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine='docker'):
     """
     Run P2Rank for all locus_tag directories under the 'structures' folder.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param cpus: Number of CPUs/threads to use.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
     """
 
     structures_dir = os.path.join(output_path, organism_name, "structures")
@@ -2115,7 +2121,7 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus):
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            p2rank_finder_for_locus(locus_dir, cpus)
+            p2rank_finder_for_locus(locus_dir, cpus, container_engine=container_engine)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -2479,7 +2485,7 @@ def final_structure_table(output_path, organism_name):
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
-def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5):
+def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, container_engine='docker'):
     """
     Complete pipeline to obtain and process structures for drug target identification.
     
@@ -2495,7 +2501,9 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     :param specie_taxid: Species-level NCBI Taxonomy ID (e.g., 287 for P. aeruginosa).
     :param strain_taxid: Strain-level NCBI Taxonomy ID (e.g., 208964 for PAO1).
     :param cpus: Number of CPU cores to use. Default is all available cores.
-    
+    :param resolution_cutoff: Resolution cutoff for structure selection (default: 3.5 Å).
+    :param container_engine: Container engine to use ('docker' or 'singularity').
+
     :return: DataFrame with final structure summary table.
     """
     
@@ -2572,10 +2580,10 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         try:
             print(f'\n[3.1] Running FPocket for all structures...')
             structures_dir = os.path.join(output_path, organism_name, 'structures')
-            pockets_finder_for_all_loci(output_path, organism_name)
+            pockets_finder_for_all_loci(output_path, organism_name, container_engine=container_engine)
             
             print(f'\n[3.2] Running P2Rank for all structures...')
-            p2rank_finder_for_all_loci(output_path, organism_name, cpus)
+            p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine=container_engine)
             
             print(f'\n[3.3] Merging structure and pocket data...')
             merged_data = merge_structure_data(output_path, organism_name)
