@@ -20,12 +20,13 @@ def print_stylized(title, width=80):
     print(f'{title.center(width)}')
     print(asterisk_line)
 
-def main(config, base_path):
+def main(config, databases_path, output_path):
     """
     Main function to run FastTarget.
     
     :param config: Configuration object.
-    :param base_path: Base path of the FastTarget repository folder.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
 
     :return: DataFrame with the results.
     """
@@ -45,12 +46,12 @@ def main(config, base_path):
     print(f'Genome file: {gbk_file}')
 
     # Create organism subfolders
-    files.create_organism_subfolders(base_path, organism_name)
-    logging.info(f'Organism subfolders created in {base_path}/organism/{organism_name}')
+    files.create_organism_subfolders(output_path, organism_name)
+    logging.info(f'Organism subfolders created in {output_path}/{organism_name}')
 
     # Create organism genome files (gbk, gff3 and fasta)
-    genome.ref_genome_files(gbk_file, base_path, organism_name)
-    logging.info(f'Genome files created in {base_path}/organism/{organism_name}')
+    genome.ref_genome_files(gbk_file, output_path, organism_name)
+    logging.info(f'Genome files created in {output_path}/{organism_name}')
 
     # Number of CPUS
     if isinstance(config.cpus, int):
@@ -79,7 +80,7 @@ def main(config, base_path):
             logging.info(f'Smarttable file: {smarttable_file}')
 
             # Parse metabolic files, make network and calculate centrality
-            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (base_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
+            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
             tables.append(df_centrality)
             tables.append(df_edges)
             tables.append(producing_df)
@@ -115,7 +116,7 @@ def main(config, base_path):
                 logging.info('Filter file: Not provided (will use default frequency filter)')
 
             # Parse metabolic files, make network and calculate centrality
-            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (base_path, organism_name, sbml_file, filter_file)
+            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file)
             tables.append(mgt_bc_df)
             tables.append(mgt_degree_df)
             tables.append(mgt_consumption_df)
@@ -139,7 +140,7 @@ def main(config, base_path):
             logging.info(f'Strain Tax ID: {strain_taxid}')
             
             # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
-            df_structures = structures.pipeline_structures(base_path, organism_name, tax_id, strain_taxid, cpus=cpus)
+            df_structures = structures.pipeline_structures(output_path, organism_name, tax_id, strain_taxid, cpus=cpus)
             logging.info('Structures analysis finished')
             tables.append(df_structures)
 
@@ -157,13 +158,13 @@ def main(config, base_path):
 
             # Download complete NCBI genomes from organism tax id
             print('----- 1. Downloading tax_id genomes from NCBI -----')   
-            genome.core_download_genomes_ncbi(base_path, organism_name, tax_id)
-            genome.core_download_missing_accessions(base_path, organism_name, tax_id)
+            genome.core_download_genomes_ncbi(output_path, organism_name, tax_id)
+            genome.core_download_missing_accessions(output_path, organism_name, tax_id)
             logging.info('Genomes downloaded')
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
-            genome.core_check_files(base_path, organism_name)
+            genome.core_check_files(output_path, organism_name)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
@@ -175,10 +176,10 @@ def main(config, base_path):
                     #Run roary
                     print('----- 2. Running Roary -----')
                     logging.info('Starting Roary analysis')
-                    genome.core_genome_programs(base_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'])
+                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['roary'])
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
-                    df_roary = genome.roary_output(base_path, organism_name, core_threshold=min_core_freq/100)
+                    df_roary = genome.roary_output(output_path, organism_name, core_threshold=min_core_freq/100)
                     tables.append(df_roary)
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
@@ -192,10 +193,10 @@ def main(config, base_path):
                     # Run CoreCruncher
                     print('----- 2. Running CoreCruncher -----')
                     logging.info('Starting CoreCruncher analysis')
-                    genome.core_genome_programs(base_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'])
+                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'])
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
-                    df_cc = genome.corecruncher_output(base_path, organism_name)
+                    df_cc = genome.corecruncher_output(output_path, organism_name)
                     tables.append(df_cc)
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
@@ -211,7 +212,7 @@ def main(config, base_path):
     # Run OFFTARGETS
     if config.offtarget:
         try:
-            offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+            offtarget_path = os.path.join(output_path, organism_name, 'offtarget')
 
             if config.offtarget['human']:
                 try:
@@ -222,7 +223,7 @@ def main(config, base_path):
                     if not files.file_check(human_blast_output):
                         # Run blastp search
                         print('-----  Blastp search -----')
-                        offtargets.human_offtarget_blast(base_path, organism_name, cpus)
+                        offtargets.human_offtarget_blast(databases_path, output_path, organism_name, cpus)
                         logging.info('Human offtarget blast search finished')
                     else:
                         logging.info('Blast with human already done')
@@ -230,7 +231,7 @@ def main(config, base_path):
                         print(human_blast_output)
 
                     # Parse results
-                    df_human = offtargets.human_offtarget_parse(base_path, organism_name)
+                    df_human = offtargets.human_offtarget_parse(output_path, organism_name)
                     tables.append(df_human)
                     logging.info('Human offtarget analysis finished')
                     print('----- Finished -----')
@@ -246,7 +247,7 @@ def main(config, base_path):
 
                     # Run blastp search
                     print('----- Blastp search -----')
-                    offtargets.microbiome_offtarget_blast_species(base_path, organism_name, cpus)
+                    offtargets.microbiome_offtarget_blast_species(databases_path, output_path, organism_name, cpus)
                     logging.info('Microbiome offtarget blast search finished')
 
                     # Parse results
@@ -254,7 +255,7 @@ def main(config, base_path):
                     microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
                     logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
                     logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
-                    df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(base_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
+                    df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(databases_path, output_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
                     tables.append(df_microbiome_norm)
                     tables.append(df_microbiome_counts)
                     tables.append(df_microbiome_total_genomes)
@@ -271,13 +272,13 @@ def main(config, base_path):
                     print_stylized('FOLDSEEK HUMAN OFFTARGET')
                    
                     # Run foldseek against human structures
-                    foldseek_mapping = offtargets.run_foldseek_human_structures (base_path, organism_name)
+                    foldseek_mapping = offtargets.run_foldseek_human_structures (databases_path, output_path, organism_name)
                     logging.info('Foldseek human offtarget search finished')
                     
                     # Parse results
-                    results_foldseek_dict = offtargets.foldseek_human_parser (base_path, organism_name, foldseek_mapping)
-                    mapped_dict_foldseek = offtargets.merge_foldseek_data (base_path, organism_name)
-                    final_foldseek_df = offtargets.final_foldseek_structure_table (base_path, organism_name, mapped_dict_foldseek)
+                    results_foldseek_dict = offtargets.foldseek_human_parser (output_path, organism_name, foldseek_mapping)
+                    mapped_dict_foldseek = offtargets.merge_foldseek_data (output_path, organism_name)
+                    final_foldseek_df = offtargets.final_foldseek_structure_table (output_path, organism_name, mapped_dict_foldseek)
                     tables.append(final_foldseek_df)
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
@@ -293,7 +294,7 @@ def main(config, base_path):
 
     # Run ESSENTIALITY
     if config.deg:
-        essentiality_path = os.path.join(base_path, 'organism', f'{organism_name}', 'essentiality')
+        essentiality_path = os.path.join(output_path, organism_name, 'essentiality')
         try:
             print_stylized('ESSENTIALITY')
 
@@ -302,7 +303,7 @@ def main(config, base_path):
             if not files.file_check(deg_blast_output):
                 # Run blastp search
                 print('----- Blastp search -----')
-                essentiality.essential_deg_blast(base_path, organism_name, cpus)
+                essentiality.essential_deg_blast(databases_path, output_path, organism_name, cpus)
                 logging.info('DEG blast search finished')
             else:
                 logging.info('Blast with DEG already done')
@@ -314,7 +315,7 @@ def main(config, base_path):
             deg_coverage_filter = config.deg['deg_coverage_filter']
             logging.info(f'DEG identity filter: {deg_identity_filter}')
             logging.info(f'DEG coverage filter: {deg_coverage_filter}')
-            df_deg = essentiality.deg_parse(base_path, organism_name, deg_identity_filter, deg_coverage_filter)
+            df_deg = essentiality.deg_parse(output_path, organism_name, deg_identity_filter, deg_coverage_filter)
             tables.append(df_deg)
             logging.info('DEG analysis finished')
             print('----- Finished -----')
@@ -334,7 +335,7 @@ def main(config, base_path):
             
             #Run psortb
             print('----- Running psort -----')
-            df_psort = genome.localization_prediction(base_path, organism_name, gram_type)
+            df_psort = genome.localization_prediction(output_path, organism_name, gram_type)
             tables.append(df_psort)
             logging.info('Psortb analysis finished')
             print('----- Finished -----')
@@ -349,7 +350,7 @@ def main(config, base_path):
             print_stylized('METADATA')
             for table in config.metadata['meta_tables']:
                 print(f'----- Loading metadata table: {table} -----')
-                shutil.copy(table, os.path.join(base_path, 'organism', organism_name, 'metadata'))
+                shutil.copy(table, os.path.join(output_path, organism_name, 'metadata'))
                 with open(table, 'r') as file:
                     first_line = file.readline()
                     if '\t' in first_line:
@@ -373,8 +374,8 @@ def main(config, base_path):
     # Merge dfs
     print_stylized('RESULTS')
     current_date = datetime.now().strftime('%Y-%m-%d-%H-%M')
-    results_path = os.path.join(base_path, 'organism', organism_name, f'{organism_name}_results_{current_date}')
-    results_table_path = os.path.join(base_path, 'organism', organism_name, results_path, f'{organism_name}_results_table.tsv')
+    results_path = os.path.join(output_path, organism_name, f'{organism_name}_results_{current_date}')
+    results_table_path = os.path.join(output_path, organism_name, results_path, f'{organism_name}_results_table.tsv')
 
     if not os.path.exists(results_path):
         os.makedirs(results_path, exist_ok=True)
@@ -419,11 +420,21 @@ def main(config, base_path):
     return results 
 
 if __name__ == "__main__":
+    
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+    databases_default_path = os.path.join(base_path, 'databases')
+    output_default_path = os.path.join(base_path, 'organism')
+
     parser = argparse.ArgumentParser(description='FastTarget script')
     parser.add_argument('--config_file', type=str, default='config.yml', help='Path to the configuration file')
+    parser.add_argument('--databases_path', type=str, default=databases_default_path, help='Path to the databases directory')
+    parser.add_argument('--output_path', type=str, default=output_default_path, help='Path to the output directory')
+    
     args = parser.parse_args()
 
     config = configuration.get_config(args.config_file)
-    base_path = os.path.dirname(os.path.abspath(__file__))
+    
 
-    main(config, base_path)
+    main(config, args.databases_path, args.output_path)
+

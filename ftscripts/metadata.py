@@ -3,16 +3,16 @@ import pandas as pd
 import os
 from ftscripts import files
 
-def ref_gbk_locus(base_path, organism_name):
+def ref_gbk_locus(output_path, organism_name):
     """
     Returns a list of locus_tags from the reference genome.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
 
     :return: List of locus_tags.
     """
-    ref_gbk = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gbk')
+    ref_gbk = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
 
     locus_tags = []
 
@@ -24,11 +24,11 @@ def ref_gbk_locus(base_path, organism_name):
     
     return locus_tags
 
-def metadata_table_bool(base_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
+def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
     """
     Makes a metadata table. Each locus_tag has a boolean value for a property.    
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param locus_tag_true: List of locus_tag TRUE for a property.
     :param property: Name of the property.
@@ -37,7 +37,7 @@ def metadata_table_bool(base_path, organism_name, locus_tag_true:str, property:s
     :return: Metadata table. Each locus_tag has TRUE/FALSE value for a property.
     """
 
-    locus_tags = ref_gbk_locus(base_path, organism_name)
+    locus_tags = ref_gbk_locus(output_path, organism_name)
 
     data = {
         "gene": locus_tags,
@@ -52,11 +52,11 @@ def metadata_table_bool(base_path, organism_name, locus_tag_true:str, property:s
 
     return metadata_table
 
-def metadata_table_with_values(base_path, organism_name, values_dict:str, property:str, out_dir:str, neg_value=None):
+def metadata_table_with_values(output_path, organism_name, values_dict:str, property:str, out_dir:str, neg_value=None):
     """
     Makes a metadata table. Each locus_tag has a numerical or categorical value for a property.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param values_dict: Dictionary with locus_tag and value.
     :param property: Name of the property.
@@ -66,7 +66,7 @@ def metadata_table_with_values(base_path, organism_name, values_dict:str, proper
     :return: Metadata table. Each locus_tag has a numerical or categorical value for a property.
     """
 
-    locus_tags = ref_gbk_locus(base_path, organism_name)
+    locus_tags = ref_gbk_locus(output_path, organism_name)
 
     data = {"gene": [], property: []}
     for locus_tag in locus_tags:

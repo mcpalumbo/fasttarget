@@ -488,12 +488,13 @@ def validate_test_results(test_path, organism_name, test_config):
     
     return validation
 
-def run_test(test_config, base_path):
+def run_test(test_config, databases_path, output_path):
     """
     Run the fasttarget pipeline with the test configuration.
     
     :param test_config: Configuration object
-    :param base_path: Base path for the repository
+    :param databases_path: Path to the databases directory
+    :param output_path: Path to the output directory
     :return: Tuple of (result, validation_dict, elapsed_time)
     """
     try:
@@ -508,7 +509,7 @@ def run_test(test_config, base_path):
         print("="*80)
         
         start_time = time.time()
-        result = fasttarget.main(test_config, base_path)
+        result = fasttarget.main(test_config, databases_path, output_path)
         elapsed_time = time.time() - start_time
         
         print("\n" + "="*80)
@@ -516,7 +517,7 @@ def run_test(test_config, base_path):
         print("="*80)
         
         # Validate results
-        test_path = os.path.join(base_path, 'organism', test_config.organism['name'])
+        test_path = os.path.join(output_path, test_config.organism['name'])
         validation = validate_test_results(test_path, test_config.organism['name'], test_config)
         
         return result, validation, elapsed_time
@@ -528,8 +529,18 @@ def run_test(test_config, base_path):
 
 if __name__ == "__main__":
 
+    # Define paths
     base_path = os.path.dirname(os.path.abspath(__file__))
     test_path = os.path.join(base_path, 'organism', 'test')
+
+
+    databases_default_path = os.path.join(base_path, 'databases')
+    output_default_path = os.path.join(base_path, 'organism')
+
+    parser = argparse.ArgumentParser(description='Test script')
+    parser.add_argument('--databases_path', type=str, default=databases_default_path, help='Path to the databases directory')
+    parser.add_argument('--output_path', type=str, default=output_default_path, help='Path to the output directory')
+    args = parser.parse_args()
     
     # COMPLETE TEST CONFIGURATION - All modules enabled
     config_dict = {
@@ -588,7 +599,7 @@ if __name__ == "__main__":
     
     # Run test and validate
     try:
-        result, validation, elapsed_time = run_test(test_config, base_path)
+        result, validation, elapsed_time = run_test(test_config, args.databases_path, args.output_path)
         
         # Exit with appropriate code
         if validation["failed"]:

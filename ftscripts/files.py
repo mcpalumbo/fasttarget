@@ -123,15 +123,15 @@ def dict_to_json(output_path, file_name, my_dict):
     else:
         print(f"The directory '{output_path}' does not exist.")
 
-def create_organism_subfolders(base_path, organism_name):
+def create_organism_subfolders(output_path, organism_name):
 
     """
     Create subfolders for an organism. 
     
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Output path where the organism folder will be created.
     :param organism_names: Name of the organism.
     """
-    organism_dir = os.path.join(base_path, 'organism', organism_name)
+    organism_dir = os.path.join(output_path, organism_name)
 
     if not os.path.exists(organism_dir):
         os.makedirs(organism_dir, exist_ok=True)

@@ -370,7 +370,7 @@ def uniprot_protein_annotations_batch(uniprot_ids, batch_size=500):
     
     return all_annotations
 
-def download_species_uniprot_data(base_path, organism_name, specie_taxid):
+def download_species_uniprot_data(output_path, organism_name, specie_taxid):
     """
     Download all UniProt data for a taxonomic ID (species-level)
     Including sequences, strain information and structure availability
@@ -378,7 +378,7 @@ def download_species_uniprot_data(base_path, organism_name, specie_taxid):
     :param tax_id: NCBI Taxonomy ID
     :param output_path: Directory to save the data
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     output_path = os.path.join(structure_dir, 'uniprot_files')
 
     os.makedirs(output_path, exist_ok=True)
@@ -449,15 +449,18 @@ def parse_uniprot_species_data(uniptot_file, specie_taxid, strain_taxid):
                 fasta_out.write(f">{row['Entry']}\n{row['Sequence']}\n")
         print(f"Uniprot species REST FASTA file created: {fasta_file_species_rest}")
 
-def cluster_uniprot_specie(base_path, organism_name, specie_taxid):
+def cluster_uniprot_specie(output_path, organism_name, specie_taxid):
     """
     Cluster uniprot proteins at 100% identity and a minimum alignment coverage of 90% using CD-HIT.
     This function uses the `run_cd_hit` function from the `programs` module.
     Clustered sequences are saved in a new .faa file.
 
-    :param fasta_proteins: Path to the fasta file with specie-level proteins.
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param specie_taxid: Species Taxonomy ID.
+
     """
-    uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
     uniprot_species_rest_faa = os.path.join(uniprot_dir, f"uniprot_species_taxid_{specie_taxid}_rest.faa")
 
     try:
@@ -474,7 +477,7 @@ def cluster_uniprot_specie(base_path, organism_name, specie_taxid):
     except Exception as e:
         logging.exception(f"Failed to run CD-HIT on file {uniprot_species_rest_faa}: {e}")
 
-def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxid):
+def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_taxid):
     
     """
     Runs NCBI makeblastdb against uniprot proteome. Do this for:
@@ -485,12 +488,12 @@ def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxi
     This function uses the `run_makeblastdb` function from the `programs` module.
     Database is saved in the structures directory.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param proteome_id: Uniprot proteome ID.
     """
 
-    uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
 
     # For strain-specific database
     uniprot_strain_faa = os.path.join(uniprot_dir, f"uniprot_strain_taxid_{strain_taxid}.faa")
@@ -561,7 +564,7 @@ def create_uniprot_blast_db (base_path, organism_name, specie_taxid, strain_taxi
     else:
         print(f'Index already exists for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest')   
 
-def uniprot_proteome_blast (base_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count()):
+def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count()):
     """
     Runs NCBI Blastp against uniprot proteome databases. Do this for:
     1) Strain-specific proteome
@@ -570,17 +573,17 @@ def uniprot_proteome_blast (base_path, organism_name, specie_taxid, strain_taxid
     This function uses the `run_blastp` function from the `programs` module. 
     Results are saved in a .tsv file in the structures/uniprot_files directory, with separate files for each database.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param specie_taxid: Species Taxonomy ID.
     :param strain_taxid: Strain Taxonomy ID.
     :param cpus: Number of threads (CPUs) to use in blast search.
     """
 
-    uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
 
     # Query: proteins from the organism genome
-    organism_prot_seq_path = os.path.join(base_path, 'organism', f'{organism_name}','genome', f'{organism_name}.faa')
+    organism_prot_seq_path = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.faa')
 
     # For strain-specific database
     uniprot_strain_index_path = os.path.join(uniprot_dir, f'uniprot_strain_taxid_{strain_taxid}')
@@ -697,7 +700,7 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, all_h
 
     return best_hits
 
-def uniprot_proteome_mapping (base_path, organism_name, specie_taxid, strain_taxid):
+def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_taxid):
 
     """
     Map locus_tags to uniprot ids using blastp results for specie specific proteome.
@@ -706,13 +709,13 @@ def uniprot_proteome_mapping (base_path, organism_name, specie_taxid, strain_tax
     2) Map proteins to strain-specific uniprot proteome
     3) Map proteins to rest of specie-level uniprot proteome (cross-strain search)
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param strain_taxid: Strain Taxonomy ID.
     :return: Dictionary with locus_tag as key and list of uniprot ids as values.
 
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     uniprot_dir = os.path.join(structure_dir, 'uniprot_files')
     
     # Blastp search result files
@@ -759,7 +762,7 @@ def uniprot_proteome_mapping (base_path, organism_name, specie_taxid, strain_tax
 
         map_results = {}
 
-        all_locus_tags = set(metadata.ref_gbk_locus(base_path, organism_name))
+        all_locus_tags = set(metadata.ref_gbk_locus(output_path, organism_name))
         for locus_tag in all_locus_tags:
             if locus_tag in parse_pdb:
                 map_results[locus_tag] = parse_pdb[locus_tag]
@@ -1085,15 +1088,15 @@ def select_reference_structure(structs, resolution_cutoff= 3.5):
     # 4) Otherwise, None
     return None
 
-def create_subfolder_structures(base_path, organism_name):
+def create_subfolder_structures(output_path, organism_name):
     """
     Create structures subfolder within structure folder.
     Create one folder per locus_tag and one per UniProt ID.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     proteome_ids_file = os.path.join(structure_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
 
     if files.file_check(proteome_ids_file):
@@ -1167,7 +1170,7 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
 
     return summary_df
 
-def create_summary_structure_file(base_path, organism_name, resolution_cutoff= 3.5):
+def create_summary_structure_file(output_path, organism_name, resolution_cutoff= 3.5):
 
     """
     Create a TSV summary file with structure information for each locus_tag.
@@ -1176,11 +1179,11 @@ def create_summary_structure_file(base_path, organism_name, resolution_cutoff= 3
     - AlphaFold ID
     - PDB IDs
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
 
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     uniprot_files_dir = os.path.join(structure_dir, 'uniprot_files')
     proteome_ids_file = os.path.join(uniprot_files_dir, f'uniprot_{organism_name}_id_mapping.json')
 
@@ -1374,20 +1377,20 @@ def get_structure_alphafold(output_path, uniprot_id):
         res = True
     return res
 
-def download_structures(base_path, organism_name):
+def download_structures(output_path, organism_name):
 
     """
     Download structures for each locus_tag based on the summary table.
     
     Priority: Download .pdb if available, otherwise download .cif (for cryo-EM structures).
     
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
 
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     
-    all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in tqdm(all_locus_tags, desc='Locus tags'):
 
@@ -1592,7 +1595,7 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
     chains_str = ','.join(chain_ids)
     print(f"    Extracted chain(s) {chains_str} from {Path(cif_file).name} (CIF)")
 
-def get_chain_reference_structure(base_path, organism_name):
+def get_chain_reference_structure(output_path, organism_name):
     """
     For each locus_tag, get the reference structure chain(s) and save to a separate PDB file.
     
@@ -1603,12 +1606,12 @@ def get_chain_reference_structure(base_path, organism_name):
     IMPORTANT: Only ONE structure should be marked as reference per locus_tag.
     This function extracts the chain(s) from that single reference structure.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     
-    all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
     
     for locus_tag in all_locus_tags:
         locus_dir = os.path.join(structure_dir, locus_tag)
@@ -1874,22 +1877,22 @@ def pockets_finder_for_locus(locus_dir):
         logging.error(f"The directory '{locus_dir}' was not found.")
 
 
-def pockets_finder_for_all_loci(base_path, organism_name):
+def pockets_finder_for_all_loci(output_path, organism_name):
     """
     Run Fpocket for all locus_tag directories under the 'structures' folder.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
 
     """
 
-    structures_dir = os.path.join(base_path, 'organism', organism_name, "structures")
+    structures_dir = os.path.join(output_path, organism_name, "structures")
     
     if not os.path.exists(structures_dir):
         logging.error(f"The directory '{structures_dir}' was not found.")
         return
 
-    all_locus = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
@@ -2092,22 +2095,22 @@ def p2rank_finder_for_locus(locus_dir, cpus):
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
-def p2rank_finder_for_all_loci(base_path, organism_name, cpus):
+def p2rank_finder_for_all_loci(output_path, organism_name, cpus):
     """
     Run P2Rank for all locus_tag directories under the 'structures' folder.
 
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param cpus: Number of CPUs/threads to use.
     """
 
-    structures_dir = os.path.join(base_path, 'organism', organism_name, "structures")
+    structures_dir = os.path.join(output_path, organism_name, "structures")
     
     if not os.path.exists(structures_dir):
         logging.error(f"The directory '{structures_dir}' was not found.")
         return
 
-    all_locus = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
@@ -2255,22 +2258,22 @@ def p2rank_filter(p2rank_dict):
     return best_pockets_dict
 
 
-def merge_structure_data (base_path, organism_name):
+def merge_structure_data (output_path, organism_name):
     """
     Merge all the structure data in a single dictionary.
     Saves the dictionary in a .json file named using the organism name followed by '_structure_data.json' in the 'structures' directory.
     Returns a dictionary with the merged data.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
 
     :return: Dictionary with the merged data.
     """
 
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     merged_file = os.path.join(structure_dir, f'{organism_name}_structure_data.json')
 
-    all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
     if not files.file_check(merged_file):
 
@@ -2354,28 +2357,28 @@ def merge_structure_data (base_path, organism_name):
         print(f'Merged structure data in {merged_file}.')
         return merged_dict
 
-def final_structure_table(base_path, organism_name):
+def final_structure_table(output_path, organism_name):
     """
     Create a final summary table with structure and pocket information for each locus_tag.
     The table columns are ['gene', 'uniprot', 'druggability_score', 'pocket', 'structure']
     
-    :param base_path: Base path.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :return: DataFrame with the final summary table (ONE row per locus_tag).
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     merged_file = os.path.join(structure_dir, f'{organism_name}_structure_data.json')
     final_table_file = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
 
     if not files.file_check(final_table_file):
         
         if not files.file_check(merged_file):
-            merged_dict = merge_structure_data(base_path, organism_name)
+            merged_dict = merge_structure_data(output_path, organism_name)
         else:
             merged_dict = files.json_to_dict(merged_file)
 
         rows = []
-        all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+        all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
         for locus_tag in all_locus_tags:
             # Get UniProt ID and structure ID from REFERENCE structure only
@@ -2476,7 +2479,7 @@ def final_structure_table(base_path, organism_name):
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
-def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5):
+def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5):
     """
     Complete pipeline to obtain and process structures for drug target identification.
     
@@ -2487,7 +2490,7 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
     4. Runs FPocket and P2Rank for druggable pocket detection
     5. Generates final summary tables
     
-    :param base_path: Base path to project directory.
+    :param output_path: Path to the output directory.
     :param organism_name: Name of organism.
     :param specie_taxid: Species-level NCBI Taxonomy ID (e.g., 287 for P. aeruginosa).
     :param strain_taxid: Strain-level NCBI Taxonomy ID (e.g., 208964 for PAO1).
@@ -2508,31 +2511,31 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
     print(f'STAGE 1: UNIPROT PROTEOME ACQUISITION AND MAPPING')
     print(f'{"─"*80}')
 
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     final_table_path = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
     
     if not files.file_check(final_table_path):
     
         try:
             print(f'\n[1.1] Downloading UniProt species data (TaxID: {specie_taxid})...')
-            download_species_uniprot_data(base_path, organism_name, specie_taxid)
+            download_species_uniprot_data(output_path, organism_name, specie_taxid)
             
             print(f'\n[1.2] Parsing UniProt data into FASTA files...')
-            uniprot_dir = os.path.join(base_path, 'organism', organism_name, 'structures', 'uniprot_files')
+            uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
             uniprot_file = os.path.join(uniprot_dir, f"uniprot_specie_taxid_{specie_taxid}_data.tsv")
             parse_uniprot_species_data(uniprot_file, specie_taxid, strain_taxid)
             
             print(f'\n[1.3] Clustering species proteome with CD-HIT...')
-            cluster_uniprot_specie(base_path, organism_name, specie_taxid)
+            cluster_uniprot_specie(output_path, organism_name, specie_taxid)
             
             print(f'\n[1.4] Creating BLAST databases...')
-            create_uniprot_blast_db(base_path, organism_name, specie_taxid, strain_taxid)
+            create_uniprot_blast_db(output_path, organism_name, specie_taxid, strain_taxid)
             
             print(f'\n[1.5] Running BLAST searches against UniProt databases...')
-            uniprot_proteome_blast(base_path, organism_name, specie_taxid, strain_taxid, cpus=cpus)
+            uniprot_proteome_blast(output_path, organism_name, specie_taxid, strain_taxid, cpus=cpus)
             
             print(f'\n[1.6] Mapping organism genes to UniProt IDs...')
-            mapping_dict = uniprot_proteome_mapping(base_path, organism_name, specie_taxid, strain_taxid)
+            mapping_dict = uniprot_proteome_mapping(output_path, organism_name, specie_taxid, strain_taxid)
             print(f'    ✓ Mapped {len(mapping_dict)} genes to UniProt IDs')
             
         except Exception as e:
@@ -2546,16 +2549,16 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
         
         try:
             print(f'\n[2.1] Creating directory structure for each gene...')
-            create_subfolder_structures(base_path, organism_name)
+            create_subfolder_structures(output_path, organism_name)
             
             print(f'\n[2.2] Generating structure summary tables...')
-            create_summary_structure_file(base_path, organism_name, resolution_cutoff=resolution_cutoff)
+            create_summary_structure_file(output_path, organism_name, resolution_cutoff=resolution_cutoff)
             
             print(f'\n[2.3] Downloading PDB and AlphaFold structures...')
-            download_structures(base_path, organism_name)
+            download_structures(output_path, organism_name)
             
             print(f'\n[2.4] Extracting reference structure chains...')
-            get_chain_reference_structure(base_path, organism_name)
+            get_chain_reference_structure(output_path, organism_name)
             
         except Exception as e:
             logging.exception(f'\n    ✗ ERROR in Stage 2: {e}')
@@ -2568,18 +2571,18 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
         
         try:
             print(f'\n[3.1] Running FPocket for all structures...')
-            structures_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
-            pockets_finder_for_all_loci(base_path, organism_name)
+            structures_dir = os.path.join(output_path, organism_name, 'structures')
+            pockets_finder_for_all_loci(output_path, organism_name)
             
             print(f'\n[3.2] Running P2Rank for all structures...')
-            p2rank_finder_for_all_loci(base_path, organism_name, cpus)
+            p2rank_finder_for_all_loci(output_path, organism_name, cpus)
             
             print(f'\n[3.3] Merging structure and pocket data...')
-            merged_data = merge_structure_data(base_path, organism_name)
+            merged_data = merge_structure_data(output_path, organism_name)
             print(f'    ✓ Processed {len(merged_data)} genes')
             
             print(f'\n[3.4] Creating final summary table...')
-            final_df = final_structure_table(base_path, organism_name)
+            final_df = final_structure_table(output_path, organism_name)
             
         except Exception as e:
             logging.exception(f'\n    ✗ ERROR in Stage 3: {e}')
@@ -2600,25 +2603,25 @@ def pipeline_structures(base_path, organism_name, specie_taxid, strain_taxid, cp
     return final_df
 
 
-def get_reference_structure_path(base_path, organism_name, locus_tag):
+def get_reference_structure_path(output_path, organism_name, locus_tag):
     """
     Get the file path of the reference structure for a given locus_tag.
     
     This is a convenience wrapper around find_structures_for_locus() that takes
-    base_path, organism_name, and locus_tag as parameters.
+    output_path, organism_name, and locus_tag as parameters.
     
     Selection priority:
     1) PDB reference structures (*_ref.pdb) - extracted chains from PDB
     2) AlphaFold models (AF_*.pdb) - full AlphaFold predictions
     3) None if no reference structure found
     
-    :param base_path: Base path to project directory.
+    :param output_path: Path to output directory.
     :param organism_name: Name of organism.
     :param locus_tag: Locus tag identifier.
     
     :return: Absolute path to reference structure file, or None if not found.
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     locus_dir = os.path.join(structure_dir, locus_tag)
     
     # Check if locus directory exists
@@ -2631,33 +2634,33 @@ def get_reference_structure_path(base_path, organism_name, locus_tag):
     return reference_path
 
 
-def get_all_reference_structures(base_path, organism_name, path_mode=True):
+def get_all_reference_structures(output_path, organism_name, path_mode=True):
     """
     Get a dictionary mapping all locus_tags to their reference structure paths.
     
     This function iterates through all locus_tag directories and finds their
     reference structures, returning a complete mapping.
     
-    :param base_path: Base path to project directory.
+    :param output_path: Path to output directory.
     :param organism_name: Name of organism.
     
     :return: Dictionary with locus_tag as key and reference structure path as value.
              Locus tags without structures will have None as value.
     """
-    structure_dir = os.path.join(base_path, 'organism', organism_name, 'structures')
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
     
     # Get all locus_tags from genome
-    all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
     
     reference_structures = {}
     
     for locus_tag in all_locus_tags:
         if path_mode:
-            ref_path = get_reference_structure_path(base_path, organism_name, locus_tag)
+            ref_path = get_reference_structure_path(output_path, organism_name, locus_tag)
             reference_structures[locus_tag] = ref_path
         else:
             #get the name of the reference structure only
-            ref_path = get_reference_structure_path(base_path, organism_name, locus_tag)
+            ref_path = get_reference_structure_path(output_path, organism_name, locus_tag)
             if ref_path:
                 ref_name = os.path.basename(ref_path).split('.')[0]
                 reference_structures[locus_tag] = ref_name

@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import multiprocessing
 
-def essential_deg_blast(base_path, organism_name, cpus=multiprocessing.cpu_count()):
+def essential_deg_blast(databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 
     """
     Runs NCBI BLASTP against DEG bacterial proteome.
@@ -12,18 +12,18 @@ def essential_deg_blast(base_path, organism_name, cpus=multiprocessing.cpu_count
     It uses the DEG_DB database created by the `index_db_blast_deg` function from the `databases` module.
     The blast output is saved in the 'essentiality' folder of the organism directory.
 
-    :param base_path: Base path where the repository data is stored.
+    :param databases_path: Path where the DEG database is stored.
+    :param output_path: organism output path.
     :param organism_name: Name of the organism.
     :param cpus: Number of threads (CPUs) to use in blast search.
     
     """
 
     #Database files
-    databases_path = os.path.join(base_path, 'databases')
     deg_index_path = os.path.join(databases_path, 'DEG_DB')
 
     #Organism files
-    organism_path = os.path.join(base_path, f'organism/{organism_name}')
+    organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, f'genome/{organism_name}.faa')
 
     essentiality_path = os.path.join(organism_path, 'essentiality')
@@ -38,7 +38,7 @@ def essential_deg_blast(base_path, organism_name, cpus=multiprocessing.cpu_count
         cpus=cpus
     )
 
-def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
+def deg_parse (output_path, organism_name, identity_filter, coverage_filter):
 
     """
     Parse NCBI BLASTP results against DEG bacterial proteome, stored in the file 'deg_blast.tsv'.
@@ -46,7 +46,7 @@ def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
     Returns a list with locus_tags that have at least one hit with DEG, and a DataFrame with all locus_tags from the genome and a TRUE/FALSE value.
     The DataFrame is created using the `metadata_table_bool` function from the `metadata` module.
     
-    :param base_path:  Base path where the repository data is stored.
+    :param output_path: organism output path.
     :param organism_name: Name of organism.
     :param identity_filter: Value of % of Identity filter. Keeps results above this value in column pident.
     :param coverage_filter: Value of query coverage filter. Keeps results above this value in column qcovs.
@@ -55,7 +55,7 @@ def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
     :return: DataFrame with all locus_tags from genome and a TRUE/FALSE value.
     """
 
-    essentiality_path = os.path.join(base_path, 'organism', f'{organism_name}', 'essentiality')
+    essentiality_path = os.path.join(output_path, organism_name, 'essentiality')
     deg_blast_output = os.path.join(essentiality_path, 'deg_blast.tsv')
     deg_results = os.path.join(essentiality_path, 'hit_in_deg.tsv')
 
@@ -69,7 +69,7 @@ def deg_parse (base_path, organism_name, identity_filter, coverage_filter):
         unique_values = filtered_df['qseqid'].unique()
         deg_hits = unique_values.tolist()
 
-        df_deg = metadata.metadata_table_bool(base_path, organism_name, deg_hits, 
+        df_deg = metadata.metadata_table_bool(output_path, organism_name, deg_hits, 
                                             'hit_in_deg', essentiality_path)
     else:
         print('DEG analysis already done, output file found')

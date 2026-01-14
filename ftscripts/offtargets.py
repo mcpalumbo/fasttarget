@@ -7,7 +7,7 @@ import glob
 from tqdm import tqdm
 import logging
 
-def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_count()):
+def human_offtarget_blast (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 
     """
     Runs NCBI BLASTP against the human proteome.
@@ -15,18 +15,18 @@ def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_co
     It uses the HUMAN_DB database created by the `index_db_blast_human` function from the `databases` module.
     The blast output is saved in the 'offtarget' folder of the organism directory.
 
-    :param base_path: Base path where the repository data is stored.
+    :param databases_path: Directory where HUMAN databases are stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param cpus: Number of threads (CPUs) to use in the blast search.
     
     """
 
     #Database files
-    databases_path = os.path.join(base_path, 'databases')
     humanprot_index_path = os.path.join(databases_path, 'HUMAN_DB')
 
     #Organism files
-    organism_path = os.path.join(base_path, f'organism/{organism_name}')
+    organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, f'genome/{organism_name}.faa')
 
     offtarget_path = os.path.join(organism_path, 'offtarget')
@@ -41,7 +41,7 @@ def human_offtarget_blast (base_path, organism_name, cpus=multiprocessing.cpu_co
         cpus=cpus
     )
 
-def microbiome_offtarget_blast_species (base_path, organism_name, cpus=multiprocessing.cpu_count()):
+def microbiome_offtarget_blast_species (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
     """
     Runs Diamond BLASTP of the organism proteome against each genome in the microbiome species catalogue.
     Each genome in the species catalogue is stored as a subdirectory under `databases/species_catalogue`,
@@ -50,16 +50,17 @@ def microbiome_offtarget_blast_species (base_path, organism_name, cpus=multiproc
     For each genome, the BLAST output is stored in the 'offtarget' folder of the organism directory,
     with one result file per genome. The process can be resumed if interrupted.
 
-    :param base_path: Base path where the repository data is stored.
+    :param databases_path: Path where the species catalogue databases are stored.
+    :param output_path: Path of the organism output.
     :param organism_name: Name of the organism (folder name under 'organism').
     :param cpus: Number of threads (CPUs) to use in the BLAST search.
     """
 
     # Path to species catalogue
-    databases_path = os.path.join(base_path, "databases", "species_catalogue")
+    species_databases_path = os.path.join(databases_path, "species_catalogue")
 
     # Path to organism proteome (.faa file)
-    organism_path = os.path.join(base_path, "organism", organism_name)
+    organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, "genome", f"{organism_name}.faa")
 
     # Output folder
@@ -67,8 +68,8 @@ def microbiome_offtarget_blast_species (base_path, organism_name, cpus=multiproc
     os.makedirs(offtarget_path, exist_ok=True)
 
     # Iterate over each genome (subfolder with its own indexed faa)
-    for genome_dir in sorted(os.listdir(databases_path)):
-        genome_path = os.path.join(databases_path, genome_dir)
+    for genome_dir in sorted(os.listdir(species_databases_path)):
+        genome_path = os.path.join(species_databases_path, genome_dir)
         
         if not os.path.isdir(genome_path):
             continue
@@ -94,7 +95,7 @@ def microbiome_offtarget_blast_species (base_path, organism_name, cpus=multiproc
             cpus=cpus
         )
 
-def microbiome_offtarget_blast_allproteins (base_path, organism_name, cpus=multiprocessing.cpu_count()):
+def microbiome_offtarget_blast_allproteins (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 
     """
     Runs ncbi blastp against microbiome proteome.
@@ -102,18 +103,19 @@ def microbiome_offtarget_blast_allproteins (base_path, organism_name, cpus=multi
     It uses the MICROBIOME_DB database created by the `index_db_blast_microbiome` function from the `databases` module.
     The blast output is saved in the 'offtarget' folder of the organism directory.
 
-    :param base_path: Base path where the repository data is stored.
+    :param databases_path: Directory where MICROBIOME database is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param cpus: Number of threads (CPUs) to use in the blast search.
     
     """
     
     #Database files
-    databases_path = os.path.join(base_path, 'databases',  'species_catalogue')
-    microbiome_index_path = os.path.join(databases_path, 'MICROBIOME_DB')
+    species_databases_path = os.path.join(databases_path,  'species_catalogue')
+    microbiome_index_path = os.path.join(species_databases_path, 'MICROBIOME_DB')
 
     #Organism files
-    organism_path = os.path.join(base_path, f'organism/{organism_name}')
+    organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, f'genome/{organism_name}.faa')
 
     offtarget_path = os.path.join(organism_path, 'offtarget')
@@ -128,7 +130,7 @@ def microbiome_offtarget_blast_allproteins (base_path, organism_name, cpus=multi
         cpus=cpus
     )
 
-def human_offtarget_parse (base_path, organism_name):
+def human_offtarget_parse (output_path, organism_name):
 
     """
     Parse NCBI BLASTP results against human proteome, stored in the file 'human_offtarget_blast.tsv'.
@@ -137,14 +139,14 @@ def human_offtarget_parse (base_path, organism_name):
     and a DataFrame with all locus_tags from the genome and their respective values.
     The DataFrame is created using the `metadata_table_with_values` function from the `metadata` module.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     
     :return: Dictionary with locus_tag as key and highest percentage of identity value.
     :return: DataFrame with all locus_tags from the genome and their respective values.
     """
 
-    offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    offtarget_path = os.path.join(output_path, organism_name, 'offtarget')
     human_blast_output = os.path.join(offtarget_path, 'human_offtarget_blast.tsv')
     human_results = os.path.join(offtarget_path, 'human_offtarget.tsv')
 
@@ -160,7 +162,7 @@ def human_offtarget_parse (base_path, organism_name):
             if qseqid not in highest_pident_values or pident > highest_pident_values[qseqid]:
                 highest_pident_values[qseqid] = pident
 
-        df_human = metadata.metadata_table_with_values(base_path, organism_name, highest_pident_values, 
+        df_human = metadata.metadata_table_with_values(output_path, organism_name, highest_pident_values, 
                                             'human_offtarget', offtarget_path, 'no_hit')
     else:
         print('Human offtarget analysis already done, output file found')
@@ -169,7 +171,7 @@ def human_offtarget_parse (base_path, organism_name):
 
     return df_human
 
-def microbiome_species_parse(base_path, organism_name, identity_filter, coverage_filter):
+def microbiome_species_parse(databases_path, output_path, organism_name, identity_filter, coverage_filter):
     """
     Parse Diamond BLASTP results against all genomes in the microbiome species catalogue.
     Each genome has its own BLAST output file under 'offtarget' folder of the organism.
@@ -177,19 +179,25 @@ def microbiome_species_parse(base_path, organism_name, identity_filter, coverage
     For each protein (qseqid) of the organism, this function determines in which genomes
     it has at least one hit passing the identity and coverage filters.
 
+    :param output_path: Directory of the organism output.
+    :param databases_path: Base path where MICROBIOME database is stored.
+    :param organism_name: Name of the organism.
+    :param identity_filter: Percentage identity filter value. Keeps results above this value in the pident column.
+    :param coverage_filter: Query coverage filter value. Keeps results above this value in the qcovs column.
+
     Returns:
         - df_microbiome_norm: DataFrame with one row per protein and a column with normalized counts
         - df_microbiome_counts: DataFrame with one row per protein and a column with number of genomes with hits
         - df_microbiome_total_genomes: DataFrame with one row per protein and a column with total number of genomes analyzed
     """
 
-    offtarget_path = os.path.join(base_path, "organism", organism_name, "offtarget", "species_blast_results")
+    offtarget_path = os.path.join(output_path, organism_name, "offtarget", "species_blast_results")
 
     protein_hits = {}  # dict: protein_id -> set of genomes
     genome_files = [f for f in os.listdir(offtarget_path) if f.endswith("_offtarget.tsv")]
     total_outputs = len(genome_files)
 
-    species_path = os.path.join(base_path, "databases", "species_catalogue")
+    species_path = os.path.join(databases_path, "species_catalogue")
     total_genomes = len([d for d in os.listdir(species_path) if os.path.isdir(os.path.join(species_path, d))])
 
     if total_outputs == 0:
@@ -260,22 +268,22 @@ def microbiome_species_parse(base_path, organism_name, identity_filter, coverage
 
 
         # Build DataFrame 
-        df_microbiome = metadata.metadata_table_with_values(base_path, organism_name, protein_hits, 
+        df_microbiome = metadata.metadata_table_with_values(output_path, organism_name, protein_hits, 
                                                 'gut_microbiome_offtarget', offtarget_path, 'no_hit')
 
-        df_microbiome_norm = metadata.metadata_table_with_values(base_path, organism_name, protein_hit_counts,
+        df_microbiome_norm = metadata.metadata_table_with_values(output_path, organism_name, protein_hit_counts,
                                                 'gut_microbiome_offtarget_norm', offtarget_path, 0)
         
-        df_hit_totals = metadata.metadata_table_with_values(base_path, organism_name, protein_hit_totals,
+        df_hit_totals = metadata.metadata_table_with_values(output_path, organism_name, protein_hit_totals,
                                                 'gut_microbiome_offtarget_counts', offtarget_path, 0)
 
-        df_total_genomes = metadata.metadata_table_with_values(base_path, organism_name, protein_total_genomes,
+        df_total_genomes = metadata.metadata_table_with_values(output_path, organism_name, protein_total_genomes,
                                                 'gut_microbiome_genomes_analyzed', offtarget_path, total_genomes)
 
     return df_microbiome_norm, df_hit_totals, df_total_genomes
 
 
-def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter, coverage_filter):
+def microbiome_protein_clusters_parse (output_path, organism_name, identity_filter, coverage_filter):
 
     """
     Parse NCBI BLASTP results against microbiome proteome, stored in the file 'microbiome_offtarget_blast.tsv'.
@@ -284,7 +292,7 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
     and a DataFrame with all locus_tags from the genome and their respective values.
     The DataFrame is created using the `metadata_table_with_values` function from the `metadata` module.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param identity_filter: Percentage identity filter value. Keeps results above this value in the pident column.
     :param coverage_filter: Query coverage filter value. Keeps results above this value in the qcovs column.
@@ -293,7 +301,7 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
     :return: DataFrame with all locus_tags from the genome and their respective normalized values.
     """
 
-    offtarget_path = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    offtarget_path = os.path.join(output_path, organism_name, 'offtarget')
     microbiome_blast_output = os.path.join(offtarget_path, 'microbiome_offtarget_blast.tsv')
     microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget.tsv')
 
@@ -311,7 +319,7 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
 
         normalized_counts_dict = norm_counts.to_dict()
 
-        df_microbiome = metadata.metadata_table_with_values(base_path, organism_name, normalized_counts_dict, 
+        df_microbiome = metadata.metadata_table_with_values(output_path, organism_name, normalized_counts_dict, 
                                             'gut_microbiome_offtarget', offtarget_path, 'no_hit')
 
     else:
@@ -322,7 +330,7 @@ def microbiome_protein_clusters_parse (base_path, organism_name, identity_filter
     return df_microbiome
 
 
-def run_foldseek_human_structures (base_path, organism_name):
+def run_foldseek_human_structures (databases_path, output_path, organism_name):
 
     """
     Runs Foldseek easy-search for human proteome PDB and AlphaFold structures.
@@ -334,7 +342,8 @@ def run_foldseek_human_structures (base_path, organism_name):
     
     Each reference structure is searched against both human PDB and AlphaFold databases.
 
-    :param base_path: Base path of fasttarget folder.
+    :param output_path: Directory of the organism output.
+    :param databases_path: Directory where FOLDSEEK structure databases are stored.
     :param organism_name: Name of the organism.
     :return: Dictionary with locus_tag as key and path to foldseek results file as value.
     """
@@ -345,12 +354,12 @@ def run_foldseek_human_structures (base_path, organism_name):
     print(f'{"="*80}\n')
 
     # Human databases of PDB and AlphaFold structures
-    db_human_PDB_path = os.path.join(base_path, 'databases', 'human_structures', 'PDB_files', 'DB_foldseek')
-    db_human_AF_path = os.path.join(base_path, 'databases', 'human_structures', 'AlphaFold_files', 'DB_foldseek')
+    db_human_PDB_path = os.path.join(databases_path, 'human_structures', 'PDB_files', 'DB_foldseek')
+    db_human_AF_path = os.path.join(databases_path, 'human_structures', 'AlphaFold_files', 'DB_foldseek')
 
     # Get all reference structures using helper function
     print('Getting reference structures for all locus_tags...')
-    reference_dict = structures.get_all_reference_structures(base_path, organism_name, path_mode=True)
+    reference_dict = structures.get_all_reference_structures(output_path, organism_name, path_mode=True)
     
     # Filter out None values (locus_tags without structures)
     reference_dict = {k: v for k, v in reference_dict.items() if v is not None}
@@ -362,7 +371,7 @@ def run_foldseek_human_structures (base_path, organism_name):
         return
     
     # Offtarget path
-    offtarget_path = os.path.join(base_path, 'organism', organism_name, 'offtarget')
+    offtarget_path = os.path.join(output_path, organism_name, 'offtarget')
     foldseek_results_path = os.path.join(offtarget_path, 'foldseek_results')
 
     if not os.path.exists(foldseek_results_path):
@@ -412,7 +421,7 @@ def run_foldseek_human_structures (base_path, organism_name):
 
     return foldseek_results_mapping
 
-def foldseek_human_parser (base_path, organism_name, map_foldseek):
+def foldseek_human_parser (output_path, organism_name, map_foldseek):
 
     """
     Parses Foldseek results for reference structures and maps them to locus_tags.
@@ -420,7 +429,7 @@ def foldseek_human_parser (base_path, organism_name, map_foldseek):
     For each locus_tag, selects the best match (highest probability) across
     both human PDB and AlphaFold database searches.
 
-    :param base_path: Base path of fasttarget folder.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param map_locus_tag: Dictionary mapping locus_tag to foldseek result files.
     
@@ -428,7 +437,7 @@ def foldseek_human_parser (base_path, organism_name, map_foldseek):
     """
 
 
-    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    offtargets_dir = os.path.join(output_path, organism_name, 'offtarget')
     foldseek_results_path = os.path.join(offtargets_dir, 'foldseek_results')
 
     foldseek_dict_file = os.path.join(foldseek_results_path, 'human_foldseek_dict.json')
@@ -487,14 +496,14 @@ def foldseek_human_parser (base_path, organism_name, map_foldseek):
     
     return results_foldseek_dict
 
-def merge_foldseek_data (base_path, organism_name):
+def merge_foldseek_data (output_path, organism_name):
     """
     Format foldseek results for final output table.
     
     With the new structure organization, foldseek results are already keyed by locus_tag,
     so this function primarily reformats the data for the final table.
     
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param id_equivalences: Dictionary with locus_tag and uniprot_id (for compatibility).
     :param uniprot_proteome_annotations: Dictionary with annotations (for compatibility).
@@ -502,7 +511,7 @@ def merge_foldseek_data (base_path, organism_name):
     :return: Dictionary with the merged data formatted for final table.
     """
 
-    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    offtargets_dir = os.path.join(output_path, organism_name, 'offtarget')
     foldseek_res_file = os.path.join(offtargets_dir, 'human_foldseek_dict.json')
     foldseek_mapped_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.json')
 
@@ -536,22 +545,22 @@ def merge_foldseek_data (base_path, organism_name):
 
     return mapped_dict
 
-def final_foldseek_structure_table (base_path, organism_name, mapped_dict):
+def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
     """
     Create a final table with the merge dictionary of the Foldseek results. 
     Saves the table in a .tsv file named using the organism name followed by '_final_foldseek_results.tsv'in the 'structures' directory.
     Returns a DataFrame with the final results.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     :param mapped_dict: Dictionary with the merged data.
 
     :return: DataFrame with the final results.
     """
     
-    offtargets_dir = os.path.join(base_path, 'organism', f'{organism_name}', 'offtarget')
+    offtargets_dir = os.path.join(output_path, organism_name, 'offtarget')
 
-    all_locus_tags = metadata.ref_gbk_locus(base_path, organism_name)
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
     
     # Create a DataFrame with final results
     final_foldseek_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.tsv')

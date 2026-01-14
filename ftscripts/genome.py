@@ -215,18 +215,18 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
         with open(output_file_ffn, 'w') as ffn:
             ffn.write("\n".join(nucleotide_records))
 
-def ref_genome_files (gbk_file, base_path, organism_name):
+def ref_genome_files (gbk_file, output_path, organism_name):
 
     """
     Generates the .fna, .faa, .ffn, and .gff3 files for a reference GenBank file.
 
     :param gbk_file: GenBank file path.
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
 
     """
 
-    genome_dir = os.path.join(base_path, 'organism', organism_name, 'genome')
+    genome_dir = os.path.join(output_path, organism_name, 'genome')
     ref_gbk = os.path.join(genome_dir, f'{organism_name}.gbk')
 
     if os.path.exists(gbk_file):
@@ -292,32 +292,32 @@ def id_to_locustag_gff(file_path:str, ids, fix=False):
     list_locus = list(locus_tags.values())
     return list_locus
 
-def core_download_genomes_ncbi(base_path, organism_name, tax_id):
+def core_download_genomes_ncbi(output_path, organism_name, tax_id):
     """
     Download genomes from a TAX ID from NCBI.
     This function uses the `run_ncbi_datasets` function from the `programs` module.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param tax_id: Taxonomy ID from ncbi.
     """
 
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     programs.run_ncbi_datasets(tax_id, organism_name, conservation_dir)
 
-def core_check_genomes_ncbi(base_path, organism_name):
+def core_check_genomes_ncbi(output_path, organism_name):
     """
 
     Check genomes downloaded from NCBI. 
     Parse assembly_data_report.jsonl and look for .gbff and .gff files not downloaded.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
 
     :return: List of missing genomes.
     """
 
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     ncbi_download_data = os.path.join(conservation_dir, f'{organism_name}_dataset', 'ncbi_dataset', 'data')
 
     assembly_json = os.path.join(ncbi_download_data,'assembly_data_report.jsonl')
@@ -352,31 +352,31 @@ def core_check_genomes_ncbi(base_path, organism_name):
 
     return missing_files_accessions
         
-def core_download_missing_accessions(base_path, organism_name, tax_id):
+def core_download_missing_accessions(output_path, organism_name, tax_id):
     """
     Check for missing genome files and download them if necessary.
 
     This function checks if there are any missing genome files for the given organism.
     If there are missing files, it attempts to download them from NCBI.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param tax_id: Taxonomy ID of the organism.
     """
 
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     ncbi_download_data = os.path.join(conservation_dir, f'{organism_name}_dataset', 'ncbi_dataset', 'data')
     checkpoint_file =  os.path.join(ncbi_download_data, f'{organism_name}_checkpoint_check_datasets.txt')
 
     if not files.file_check(checkpoint_file):
         # Check for missing genome files
-        missing_files_accessions = core_check_genomes_ncbi(base_path, organism_name)
+        missing_files_accessions = core_check_genomes_ncbi(output_path, organism_name)
         if len(missing_files_accessions) > 0:
             # Download missing genome files
-            core_download_genomes_ncbi(base_path, organism_name, tax_id)
+            core_download_genomes_ncbi(output_path, organism_name, tax_id)
 
         # Re-check for missing genome files after download attempt
-        missing_files_accessions = core_check_genomes_ncbi(base_path, organism_name)
+        missing_files_accessions = core_check_genomes_ncbi(output_path, organism_name)
         if len(missing_files_accessions) > 0:
             print(f'Missing genomes: {missing_files_accessions}.')
             print(len(missing_files_accessions)) 
@@ -391,20 +391,20 @@ def core_download_missing_accessions(base_path, organism_name, tax_id):
     else:
         print('Check already performed.')
 
-def core_files(base_path, organism_name):
+def core_files(output_path, organism_name):
     """
     Select genomes with Human as host and generate .faa and .gff3 files for core genomes.
 
     This function processes the genomes of the given organism to select those with Human as host.
     It generates the necessary .faa and .gff3 files for each genome.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
 
     :return: List of core genomes IDs.
     """
 
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     ncbi_download_data = os.path.join(conservation_dir, f'{organism_name}_dataset', 'ncbi_dataset', 'data')
            
     #Output directory for Roary, for input takes gff files
@@ -418,9 +418,9 @@ def core_files(base_path, organism_name):
     core_genomes = [organism_name]
 
     #Reference genome
-    ref_gbk = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gbk')
-    ref_gff = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.gff')
-    ref_faa = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.faa')
+    ref_gbk = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
+    ref_gff = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gff')
+    ref_faa = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.faa')
 
     if not os.path.exists(os.path.join(gff_dir, f'{organism_name}.gff')):
         shutil.copy(ref_gff, gff_dir)
@@ -491,7 +491,7 @@ def core_files(base_path, organism_name):
     return core_genomes
 
 
-def core_check_files(base_path, organism_name):
+def core_check_files(output_path, organism_name):
     """
 
     Check for missing files in the core genomes analysis.
@@ -500,11 +500,11 @@ def core_check_files(base_path, organism_name):
     It checks for the presence of the .gff and .faa files.
     If pending files are found, it runs the `core_files` function to generate the missing files.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
 
     """
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')  
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')  
     genomes_file = os.path.join(conservation_dir,'core_genomes_IDs.txt')
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
@@ -537,20 +537,20 @@ def core_check_files(base_path, organism_name):
         genomes_list = files.file_to_list(genomes_file)
         pending_files = pending_files(genomes_list)
         if len(pending_files) > 0:
-            core_files(base_path, organism_name)
+            core_files(output_path, organism_name)
     else:
-        core_files(base_path, organism_name)
+        core_files(output_path, organism_name)
         if files.file_check(genomes_file):
             genomes_list = files.file_to_list(genomes_file)
             pending_files = pending_files(genomes_list)
             if len(pending_files) > 0:
-                core_files(base_path, organism_name)
+                core_files(output_path, organism_name)
         else:
             print(f'No core genomes file found or empty: {genomes_file}.')
 
     return pending_files
 
-def core_genome_programs(base_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
+def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher']):
 
     """
     Run Roary and CoreCruncher programs for the core genomes analysis of the given organism.
@@ -560,14 +560,14 @@ def core_genome_programs(base_path, organism_name, core_threshold=99, identity=9
 
     This function uses the `run_roary` and `run_core_cruncher` functions from the `programs` module.
 
-    :param base_path: Base path where the repository data is is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param cpus: Number of CPUs to use.
     :param program_list: List of programs to run, can be 'roary', 'corecruncher', or both
     
     """
 
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
 
@@ -600,18 +600,18 @@ def core_genome_programs(base_path, organism_name, core_threshold=99, identity=9
         else:
             print(f'{fasta_dir} not found.')
 
-def roary_output(base_path, organism_name, core_threshold=0.99):
+def roary_output(output_path, organism_name, core_threshold=0.99):
     """    
     This function processes the output files generated by Roary for the specified organism.
     It reads the 'gene_presence_absence.csv' file to extract the core locus tags and generates a metadata table with these IDs.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :core_threshold: Threshold to consider a gene as core (default is 0.99 for 99%).
     
     :return: A list containing the core locus tags and a true/false table.
     """
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     roary_out_dir = os.path.join(conservation_dir, 'roary_output')
     gff_dir = os.path.join(roary_out_dir,'gff')
     results_dir = os.path.join(roary_out_dir, 'results')
@@ -644,7 +644,7 @@ def roary_output(base_path, organism_name, core_threshold=0.99):
                 else:
                     logging.error(f'{organism_name}.gff not found.')
 
-                roary_table = metadata.metadata_table_bool(base_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
+                roary_table = metadata.metadata_table_bool(output_path, core_locus_tag, 'core_roary', conservation_dir)
             else:
                 print(f'Roary output file already exists: {roary_results_table}.')
                 roary_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
@@ -656,7 +656,7 @@ def roary_output(base_path, organism_name, core_threshold=0.99):
 
     return roary_table
 
-def corecruncher_output(base_path, organism_name):
+def corecruncher_output(output_path, organism_name):
     
     """
     Process the output from CoreCruncher for the given organism.
@@ -664,13 +664,13 @@ def corecruncher_output(base_path, organism_name):
     This function processes the output file 'families_core.txt' generated by CoreCruncher for the specified organism.
     It reads the file to extract the core locus tags and generates a metadata table with these IDs.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     
     :return: A list containing the core locus tags and a true/false table.
     """
         
-    conservation_dir = os.path.join(base_path, 'organism', organism_name, 'conservation')
+    conservation_dir = os.path.join(output_path, organism_name, 'conservation')
     cc_output_file = os.path.join(conservation_dir, 'corecruncher_output', 'families_core.txt')
     ref_genome = f'{organism_name}.faa'
     cc_results_table = os.path.join(conservation_dir, 'core_corecruncher.tsv')
@@ -693,14 +693,14 @@ def corecruncher_output(base_path, organism_name):
         print(f'CoreCruncher total core genes (> 90% strains): {core_total}')
         print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')
 
-        corecruncher_table = metadata.metadata_table_bool(base_path, organism_name, core_locus_tag, 'core_corecruncher',conservation_dir)
+        corecruncher_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_corecruncher',conservation_dir)
     else:
         print(f'CoreCruncher output file already exists: {cc_results_table}.')
         corecruncher_table = pd.read_csv(cc_results_table, sep='\t', index_col=0, header=0)
 
     return corecruncher_table
 
-def localization_prediction(base_path, organism_name, organism_type):
+def localization_prediction(output_path, organism_name, organism_type):
 
     """
     Predicts the subcellular localization of proteins using PSORTb.
@@ -710,7 +710,7 @@ def localization_prediction(base_path, organism_name, organism_type):
     If not, it runs PSORTb to predict the localization and saves the results to disk.
     This function uses the `run_psort` function from the `programs` module.
 
-    :param base_path: Base path where the repository data is stored.
+    :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param organism_type: Type of organism, can be 'a' (archaea), 'n' (gram-negative bacteria), or 'p' (gram-positive bacteria).
     
@@ -722,8 +722,8 @@ def localization_prediction(base_path, organism_name, organism_type):
     if organism_type not in valid_type:
         raise ValueError("output_dir must be one of %r." % valid_type)
     
-    faa_path = os.path.join(base_path, 'organism', organism_name, 'genome', f'{organism_name}.faa')
-    localization_dir = os.path.join(base_path, 'organism', organism_name, 'localization')
+    faa_path = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.faa')
+    localization_dir = os.path.join(output_path, organism_name, 'localization')
 
     file_pattern = os.path.join(localization_dir, "*_psortb_*.txt")
     all_files = glob.glob(file_pattern)
@@ -750,7 +750,7 @@ def localization_prediction(base_path, organism_name, organism_type):
 
         result_dict = df.set_index('SeqID')['Localization'].to_dict()
 
-        psort_df = metadata.metadata_table_with_values(base_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
+        psort_df = metadata.metadata_table_with_values(output_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
 
         return psort_df
     else:
