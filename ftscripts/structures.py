@@ -520,9 +520,13 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
     
     blast_output_strain_path= os.path.join(uniprot_dir, f'uniprot_strain_taxid_{strain_taxid}_blast.tsv')
 
+    # Check if strain-specific faa file exists and has sequences
+    strain_seq_count = count_fasta_sequences(uniprot_strain_faa)
+    strain_faa_exists = strain_seq_count > 0
+    
     #Index
-    if not files.file_check(blast_output_strain_path):
-        print(f'Indexing uniprot strain-specific proteome for taxid {strain_taxid}')
+    if strain_faa_exists and not files.file_check(blast_output_strain_path):
+        print(f'Indexing uniprot strain-specific proteome for taxid {strain_taxid} ({strain_seq_count} sequences)')
     
         try:
             programs.run_makeblastdb(
@@ -534,8 +538,10 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
             print(f'Index built for strain uniprot proteome: uniprot_strain_taxid_{strain_taxid}')
         except Exception as e:
             logging.exception(f"Failed to run makeblastdb to file {uniprot_strain_faa}: {e}")
-    else:
+    elif strain_faa_exists:
         print(f'Index already exists for strain uniprot proteome: uniprot_strain_taxid_{strain_taxid}')
+    else:
+        print(f'WARNING: No strain-specific proteins found for taxid {strain_taxid} (file has {strain_seq_count} sequences). Skipping strain database creation and will use species-level data only.')
 
     # For PDB structure database
     uniprot_pdb_faa = os.path.join(uniprot_dir, f"uniprot_PDB_structures_specie_taxid_{specie_taxid}.faa")
@@ -605,11 +611,16 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
     organism_prot_seq_path = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.faa')
 
     # For strain-specific database
+    uniprot_strain_faa = os.path.join(uniprot_dir, f"uniprot_strain_taxid_{strain_taxid}.faa")
     uniprot_strain_index_path = os.path.join(uniprot_dir, f'uniprot_strain_taxid_{strain_taxid}')
     blast_output_strain_path= os.path.join(uniprot_dir, f'uniprot_strain_taxid_{strain_taxid}_blast.tsv')
     
-    if not files.file_check(blast_output_strain_path):
-        print(f'Runing blastp for {organism_name} and uniprot strain-specific proteome taxid {strain_taxid}')
+    # Check if strain-specific faa file exists and has sequences
+    strain_seq_count = count_fasta_sequences(uniprot_strain_faa)
+    strain_faa_exists = strain_seq_count > 0
+    
+    if strain_faa_exists and not files.file_check(blast_output_strain_path):
+        print(f'Running blastp for {organism_name} and uniprot strain-specific proteome taxid {strain_taxid} ({strain_seq_count} sequences)')
 
         try:
             programs.run_blastp(
@@ -626,9 +637,11 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
 
         except Exception as e:
             logging.exception(f"Failed to run blastp to file {uniprot_strain_index_path}: {e}")
-    else:
+    elif strain_faa_exists:
         print(f'Blastp results in {blast_output_strain_path}.')
-    
+    else:
+        print(f'WARNING: No strain-specific proteins found for taxid {strain_taxid} (file has {strain_seq_count} sequences). Skipping strain BLAST and will use species-level data only.')
+   
     # For PDB structure database
     uniprot_pdb_index_path = os.path.join(uniprot_dir, f'uniprot_PDB_structures_specie_taxid_{specie_taxid}')
     blast_output_pdb_path= os.path.join(uniprot_dir, f'uniprot_PDB_structures_specie_taxid_{specie_taxid}_blast.tsv')
@@ -692,7 +705,21 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, all_h
 
     print(f'Reading blastp results for {file}.')
 
-    blast_output_df = files.read_blast_output(file)
+    # Check if file exists and has content
+    if not os.path.exists(file) or os.path.getsize(file) == 0:
+        print(f'WARNING: BLAST output file {file} is empty or does not exist. Returning empty results.')
+        return {}
+
+    try:
+        blast_output_df = files.read_blast_output(file)
+    except Exception as e:
+        print(f'WARNING: Could not parse BLAST output file {file}: {e}. Returning empty results.')
+        return {}
+    
+    # Check if dataframe is empty
+    if blast_output_df.empty:
+        print(f'WARNING: BLAST output file {file} contains no results. Returning empty results.')
+        return {}
 
     # Apply filters
     blast_output_filtered_df = blast_output_df[(blast_output_df['pident'] >= identity_cutoff) & 
@@ -765,9 +792,11 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
                                     identity_cutoff=95, 
                                     coverage_cutoff=90, 
                                     all_hits=False)
+            print(f'Mapped {len(parse_strain)} genes to strain-specific UniProt IDs')
         else:
-            raise FileNotFoundError(f'{blast_output_strain_path} not found.')
-        
+            parse_strain = {}
+            print(f'WARNING: No strain-specific BLAST results found. Continuing with species-level data only.')
+     
         # 3) Map with IDs within the specie
         if files.file_check(blast_output_species_rest_path):
             parse_rest = parse_best_result_blast (blast_output_species_rest_path, 
