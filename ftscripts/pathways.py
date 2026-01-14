@@ -528,7 +528,25 @@ def pick_mgt_results_dir(metabolism_dir):
         
     return valid_dirs[-1]  # Return the most recent valid directory
 
-def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file):
+def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine='docker'):
+
+    """
+    Runs the metabolism pipeline using an external SBML file with MetaGraphTools.
+    It processes the SBML file, generates the Ubiquitous Compounds file, and
+    parses the MetaGraphTools results to return DataFrames with locus_tag as key and the values of betweenness centrality,
+    node degrees, and chokepoints.
+    The DataFrames are created using the functions `metadata_table_with_values` from the `metadata
+    module.
+    :param output_path: Path where the output will be stored.
+    :param organism_name: Name of the organism.
+    :param sbml_file: Path to the SBML file.
+    :param filter_file: Path to the filter file for ubiquitous compounds.
+    :param container_engine: Container engine to use ('docker' or 'singularity').
+    :return: DataFrame with the betweenness centrality values.
+    :return: DataFrame with the node degrees.
+    :return: DataFrame with the consuming chokepoints.
+    :return: DataFrame with the producing chokepoints.
+    """
 
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
 
