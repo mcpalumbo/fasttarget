@@ -39,6 +39,25 @@ def parse_pdb_refs(pdb_string):
     else:
         return [pdb.strip() for pdb in str(pdb_string).split(';') if pdb.strip()]
 
+def count_fasta_sequences(fasta_file):
+    """
+    Count the number of sequences in a FASTA file.
+    
+    :param fasta_file: Path to FASTA file.
+    :return: Number of sequences in the file, or 0 if file doesn't exist or is invalid.
+    """
+    if not os.path.exists(fasta_file):
+        return 0
+    
+    try:
+        count = 0
+        with open(fasta_file, 'r') as f:
+            for record in SeqIO.parse(f, 'fasta'):
+                count += 1
+        return count
+    except Exception as e:
+        logger.logger.warning(f"Could not count sequences in {fasta_file}: {e}")
+        return 0
 
 
 @databases.retry_with_backoff(max_retries=10, initial_delay=2, backoff_factor=2, max_delay=80)
