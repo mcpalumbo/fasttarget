@@ -20,17 +20,12 @@ def print_stylized(title, width=80):
     print(f'{title.center(width)}')
     print(asterisk_line)
 
-def main(config, databases_path, output_path):
+def prepare_genome_files(config, output_path):
     """
-    Main function to run FastTarget.
-    
+    Prepare genome files and organism subfolders.
     :param config: Configuration object.
-    :param databases_path: Path to the databases directory.
     :param output_path: Path to the output directory.
-
-    :return: DataFrame with the results.
     """
-    results = None
 
     # Organism data
     print_stylized('GENOME')
@@ -53,20 +48,21 @@ def main(config, databases_path, output_path):
     genome.ref_genome_files(gbk_file, output_path, organism_name)
     logging.info(f'Genome files created in {output_path}/{organism_name}')
 
-    # Number of CPUS
-    if isinstance(config.cpus, int):
-        cpus = config.cpus
-    else:
-        cpus = multiprocessing.cpu_count()
+def metabolic_module(config, output_path):
+    """
+    Run metabolic analysis based on configuration.
+    :param config: Configuration object.
+    :param output_path: Path to the output directory.
+    :return: List of resulting DataFrames.
+    """
 
-    logging.info(f'CPUS: {cpus}')
-
-    tables = []
+    organism_name = config.organism['name']
+    module_tables = []
 
     # Run METABOLIC ANALYSIS
     if config.metabolism_pathwaytools:
         try:
-            print_stylized('METABOLIC ANALYSIS')
+            print_stylized('Metabolic analysis - Pathway Tools')
             print('Using Pathway Tools output files')
 
             logging.info('Starting metabolic analysis')
@@ -81,11 +77,11 @@ def main(config, databases_path, output_path):
 
             # Parse metabolic files, make network and calculate centrality
             df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
-            tables.append(df_centrality)
-            tables.append(df_edges)
-            tables.append(producing_df)
-            tables.append(consuming_df)
-            tables.append(both_df)
+            module_tables.append(df_centrality)
+            module_tables.append(df_edges)
+            module_tables.append(producing_df)
+            module_tables.append(consuming_df)
+            module_tables.append(both_df)
 
             logging.info('Metabolic analysis finished')
 
@@ -97,7 +93,7 @@ def main(config, databases_path, output_path):
 
     if config.metabolism_sbml:
         try:
-            print_stylized('METABOLIC ANALYSIS')
+            print_stylized('Metabolic analysis - Custom SBML file')
             print('Using SBML file and MetaGraphTools')
             
             logging.info('Starting metabolic analysis')
@@ -117,10 +113,10 @@ def main(config, databases_path, output_path):
 
             # Parse metabolic files, make network and calculate centrality
             mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file)
-            tables.append(mgt_bc_df)
-            tables.append(mgt_degree_df)
-            tables.append(mgt_consumption_df)
-            tables.append(mgt_production_df)
+            module_tables.append(mgt_bc_df)
+            module_tables.append(mgt_degree_df)
+            module_tables.append(mgt_consumption_df)
+            module_tables.append(mgt_production_df)
 
             logging.info('Metabolic analysis from SBML with MetaGraphTools finished')
 
@@ -129,8 +125,25 @@ def main(config, databases_path, output_path):
     else:
         logging.info('Metabolic analysis with SBML file not enabled')
     
+    return module_tables
+    
+def structure_module(config, databases_path, output_path, cpus):
+    """
+    Run structure analysis based on configuration.
+    :param config: Configuration object.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
+    :param cpus: Number of CPUs to use.
+    :return: List of resulting DataFrames.
+    """
 
+    module_tables = []
+    
     # Run STRUCTURES
+    organism_name = config.organism['name']
+    tax_id = config.organism['tax_id']
+    strain_taxid = config.organism['strain_taxid']
+
     if config.structures:
         try:
             print_stylized('STRUCTURES')
@@ -142,14 +155,31 @@ def main(config, databases_path, output_path):
             # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
             df_structures = structures.pipeline_structures(output_path, organism_name, tax_id, strain_taxid, cpus=cpus)
             logging.info('Structures analysis finished')
-            tables.append(df_structures)
+            module_tables.append(df_structures)
 
         except Exception as e:
             logging.exception(f'Error in structures analysis: {e}')
     else:
         logging.info('Structures analysis not enabled')
+    
+    return module_tables
 
+def conservation_module(config, databases_path, output_path, cpus):
+    """
+    Run conservation analysis based on configuration.
+    :param config: Configuration object.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
+    :param cpus: Number of CPUs to use.
+    :return: List of resulting DataFrames.
+    """
+
+    module_tables = []
+    
     # Run CORE ANALYSIS
+    organism_name = config.organism['name']
+    tax_id = config.organism['tax_id']
+
     if config.core:
         try:
             print_stylized('CORE ANALYSIS')
@@ -180,7 +210,7 @@ def main(config, databases_path, output_path):
                     # Parse output
                     print('----- 2. Parsing Roary results -----')
                     df_roary = genome.roary_output(output_path, organism_name, core_threshold=min_core_freq/100)
-                    tables.append(df_roary)
+                    module_tables.append(df_roary)
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
@@ -197,7 +227,7 @@ def main(config, databases_path, output_path):
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
                     df_cc = genome.corecruncher_output(output_path, organism_name)
-                    tables.append(df_cc)
+                    module_tables.append(df_cc)
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
@@ -208,7 +238,22 @@ def main(config, databases_path, output_path):
             logging.exception(f'Error in core analysis: {e}')
     else:
         logging.info('Core analysis not enabled')
+    
+    return module_tables
 
+def offtarget_module(config, databases_path, output_path, cpus):
+    """
+    Run offtarget analysis based on configuration.
+    :param config: Configuration object.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
+    :param cpus: Number of CPUs to use.
+    :return: List of resulting DataFrames.
+    """
+
+    module_tables = []
+    organism_name = config.organism['name']
+    
     # Run OFFTARGETS
     if config.offtarget:
         try:
@@ -232,7 +277,7 @@ def main(config, databases_path, output_path):
 
                     # Parse results
                     df_human = offtargets.human_offtarget_parse(output_path, organism_name)
-                    tables.append(df_human)
+                    module_tables.append(df_human)
                     logging.info('Human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
@@ -256,9 +301,9 @@ def main(config, databases_path, output_path):
                     logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
                     logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
                     df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(databases_path, output_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
-                    tables.append(df_microbiome_norm)
-                    tables.append(df_microbiome_counts)
-                    tables.append(df_microbiome_total_genomes)
+                    module_tables.append(df_microbiome_norm)
+                    module_tables.append(df_microbiome_counts)
+                    module_tables.append(df_microbiome_total_genomes)
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
                             
@@ -279,7 +324,7 @@ def main(config, databases_path, output_path):
                     results_foldseek_dict = offtargets.foldseek_human_parser (output_path, organism_name, foldseek_mapping)
                     mapped_dict_foldseek = offtargets.merge_foldseek_data (output_path, organism_name)
                     final_foldseek_df = offtargets.final_foldseek_structure_table (output_path, organism_name, mapped_dict_foldseek)
-                    tables.append(final_foldseek_df)
+                    module_tables.append(final_foldseek_df)
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
@@ -291,6 +336,21 @@ def main(config, databases_path, output_path):
             logging.exception(f'Error in offtarget analysis: {e}')
     else:
         logging.info('Offtarget analysis not enabled')
+    
+    return module_tables
+
+def essentiality_module(config, databases_path, output_path, cpus):
+    """
+    Run essentiality analysis based on configuration.
+    :param config: Configuration object.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
+    :param cpus: Number of CPUs to use.
+    :return: List of resulting DataFrames.
+    """
+
+    module_tables = []
+    organism_name = config.organism['name']
 
     # Run ESSENTIALITY
     if config.deg:
@@ -316,7 +376,7 @@ def main(config, databases_path, output_path):
             logging.info(f'DEG identity filter: {deg_identity_filter}')
             logging.info(f'DEG coverage filter: {deg_coverage_filter}')
             df_deg = essentiality.deg_parse(output_path, organism_name, deg_identity_filter, deg_coverage_filter)
-            tables.append(df_deg)
+            module_tables.append(df_deg)
             logging.info('DEG analysis finished')
             print('----- Finished -----')
 
@@ -324,7 +384,19 @@ def main(config, databases_path, output_path):
             logging.exception(f'Error in essentiality analysis: {e}')
     else:
         logging.info('Essentiality analysis not enabled')
+    
+    return module_tables
 
+def localization_module(config, output_path):
+    """
+    Run localization analysis based on configuration.
+    :param config: Configuration object.
+    :param output_path: Path to the output directory.
+    :return: List of resulting DataFrames.
+    """
+
+    module_tables = []
+    organism_name = config.organism['name']
     # Run LOCALIZATION
     if config.psortb:
         try:
@@ -336,13 +408,26 @@ def main(config, databases_path, output_path):
             #Run psortb
             print('----- Running psort -----')
             df_psort = genome.localization_prediction(output_path, organism_name, gram_type)
-            tables.append(df_psort)
+            module_tables.append(df_psort)
             logging.info('Psortb analysis finished')
             print('----- Finished -----')
         except Exception as e:
             logging.exception(f'Error in localization analysis: {e}')
     else:
         logging.info('Localization analysis not enabled')
+    
+    return module_tables
+
+def metadata_loading(config, output_path):
+    """
+    Load metadata tables based on configuration.
+    :param config: Configuration object.
+    :param output_path: Path to the output directory.
+    :return: List of resulting DataFrames.
+    """
+
+    module_tables = []
+    organism_name = config.organism['name']
 
     # Load METADATA
     if config.metadata:
@@ -363,13 +448,26 @@ def main(config, databases_path, output_path):
                         raise ValueError('Invalid file format. Only CSV and TSV metadata files are supported.')
 
                 df_meta = pd.read_csv(table, header=0, sep=sep)
-                tables.append(df_meta)
+                module_tables.append(df_meta)
                 logging.info(f'Metadata table {table} loaded')
                 print('----- Finished -----')
         except Exception as e:
             logging.exception(f'Error in metadata analysis: {e}')
     else:
         logging.info('Metadata analysis not enabled')
+    
+    return module_tables
+
+def merge_final_tables(config, output_path, tables):
+    """
+    Merge final result tables and save to output.
+    :param config: Configuration object.
+    :param output_path: Path to the output directory.
+    :param tables: List of DataFrames to merge.
+    :return: Combined DataFrame with results.
+    """
+
+    organism_name = config.organism['name']
 
     # Merge dfs
     print_stylized('RESULTS')
@@ -414,6 +512,142 @@ def main(config, databases_path, output_path):
         logging.info('Tables for Target Pathogen created')
     else:
         logging.error('----- Error: No final DataFrame data. -----')
+        results = None
+    
+    return results
+
+def main(config, databases_path, output_path):
+    """
+    Main function to run FastTarget.
+    
+    :param config: Configuration object.
+    :param databases_path: Path to the databases directory.
+    :param output_path: Path to the output directory.
+
+    :return: DataFrame with the results.
+    """
+    results = None
+
+    # Prepare genome files
+    prepare_genome_files(config, output_path)
+    
+    # Number of CPUS
+    if isinstance(config.cpus, int):
+        cpus = config.cpus
+    else:
+        cpus = multiprocessing.cpu_count()
+
+    logging.info(f'CPUS: {cpus}')
+
+    tables = []
+
+    error_modules = []
+
+    # Run metabolic module
+    try:
+        logging.info('Starting metabolic module')
+        metabolic_tables = metabolic_module(config, output_path)
+        if metabolic_tables:
+            tables.extend(metabolic_tables)
+            logging.info(f'Metabolic module completed - {len(metabolic_tables)} table(s) generated')
+        else:
+            logging.info('Metabolic module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in metabolic module: {e}')
+        error_modules.append('metabolic')
+        print(f'Warning: Metabolic module failed - {e}')
+
+    # Run structure module
+    try:
+        logging.info('Starting structure module')
+        structure_tables = structure_module(config, databases_path, output_path, cpus)
+        if structure_tables:
+            tables.extend(structure_tables)
+            logging.info(f'Structure module completed - {len(structure_tables)} table(s) generated')
+        else:
+            logging.info('Structure module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in structure module: {e}')
+        error_modules.append('structure')
+        print(f'Warning: Structure module failed - {e}')
+
+    # Run conservation module
+    try:
+        logging.info('Starting conservation module')
+        conservation_tables = conservation_module(config, databases_path, output_path, cpus)
+        if conservation_tables:
+            tables.extend(conservation_tables)
+            logging.info(f'Conservation module completed - {len(conservation_tables)} table(s) generated')
+        else:
+            logging.info('Conservation module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in conservation module: {e}')
+        error_modules.append('conservation')
+        print(f'Warning: Conservation module failed - {e}')
+
+    # Run offtarget module
+    try:
+        logging.info('Starting offtarget module')
+        offtarget_tables = offtarget_module(config, databases_path, output_path, cpus)
+        if offtarget_tables:
+            tables.extend(offtarget_tables)
+            logging.info(f'Offtarget module completed - {len(offtarget_tables)} table(s) generated')
+        else:
+            logging.info('Offtarget module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in offtarget module: {e}')
+        error_modules.append('offtarget')
+        print(f'Warning: Offtarget module failed - {e}')
+
+    # Run essentiality module
+    try:
+        logging.info('Starting essentiality module')
+        essentiality_tables = essentiality_module(config, databases_path, output_path, cpus)
+        if essentiality_tables:
+            tables.extend(essentiality_tables)
+            logging.info(f'Essentiality module completed - {len(essentiality_tables)} table(s) generated')
+        else:
+            logging.info('Essentiality module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in essentiality module: {e}')
+        error_modules.append('essentiality')
+        print(f'Warning: Essentiality module failed - {e}')
+
+    # Run localization module
+    try:
+        logging.info('Starting localization module')
+        localization_tables = localization_module(config, output_path)
+        if localization_tables:
+            tables.extend(localization_tables)
+            logging.info(f'Localization module completed - {len(localization_tables)} table(s) generated')
+        else:
+            logging.info('Localization module completed - no tables generated')
+    except Exception as e:
+        logging.exception(f'Fatal error in localization module: {e}')
+        error_modules.append('localization')
+        print(f'Warning: Localization module failed - {e}')
+
+    # Load metadata
+    try:
+        logging.info('Starting metadata loading')
+        metadata_tables = metadata_loading(config, output_path)
+        if metadata_tables:
+            tables.extend(metadata_tables)
+            logging.info(f'Metadata loading completed - {len(metadata_tables)} table(s) loaded')
+        else:
+            logging.info('Metadata loading completed - no tables loaded')
+    except Exception as e:
+        logging.exception(f'Fatal error in metadata loading: {e}')
+        error_modules.append('metadata')
+        print(f'Warning: Metadata loading failed - {e}')
+
+    # Merge final tables
+    logging.info(f'Total tables collected: {len(tables)}')
+    if error_modules:
+        logging.info(f'Modules with errors: {", ".join(error_modules)}')
+
+    results = merge_final_tables(config, output_path, tables)
+    
 
     print('------------------------------------- FINISHED ----------------------------------------')
     
