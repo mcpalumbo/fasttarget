@@ -540,6 +540,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test script')
     parser.add_argument('--databases_path', type=str, default=databases_default_path, help='Path to the databases directory')
     parser.add_argument('--output_path', type=str, default=output_default_path, help='Path to the output directory')
+    parser.add_argument('--container_engine', type=str, default='docker', help='Container engine to use (docker or singularity)')
     args = parser.parse_args()
     
     # COMPLETE TEST CONFIGURATION - All modules enabled
@@ -551,7 +552,7 @@ if __name__ == "__main__":
             "gbk_file": f'{test_path}/test.gbk'
         },
         "cpus": None,
-        "container_engine": "docker", # For test with singularity use "singularity"
+        "container_engine": args.container_engine,
         "metabolism-PathwayTools": {
             "enabled": True,
             "sbml_file": f'{test_path}/test.sbml',
