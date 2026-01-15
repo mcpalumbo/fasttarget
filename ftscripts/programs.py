@@ -373,7 +373,7 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False, container_engine='dock
 def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True, graph=True, container_engine='docker'):
     
     """
-    Run MetaGraphTools inside the Docker image 'mcpalumbo/metagraphtools:latest'.
+    Run MetaGraphTools inside the container image 'mcpalumbo/metagraphtools:latest'.
     Generates a folder MGT_results_<date> in the working directory.
     
     :param work_dir: Working directory where the data is located and results will be saved.
@@ -386,9 +386,11 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
     
     # Ensure work_dir is absolute path
     work_dir = os.path.abspath(work_dir)
+    bind_dir = '/data'
+    image_name = 'mcpalumbo/metagraphtools:latest'
     
     # Build the MetaGraphTools command arguments
-    mgt_args = [
+    mgt_command = [
         'MetaGraphTools',
         '--model',
         f'/data/{os.path.basename(model_file)}'
@@ -396,33 +398,31 @@ def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True,
     
     # Add optional flags
     if chokepoints:
-        mgt_args.append('--chokepoints')
+        mgt_command.append('--chokepoints')
     if graph:
-        mgt_args.append('--graph')
+        mgt_command.append('--graph')
     
     # Add frequency filter file if provided
     if filter_file:
-        mgt_args.extend(['--frequency_filter_file', f'/data/{os.path.basename(filter_file)}'])
+        mgt_command.extend(['--frequency_filter_file', f'/data/{os.path.basename(filter_file)}'])
     
-    # Build the complete docker command with user permissions
-    docker_cmd = [
-        'docker', 'run', '--rm',
-        '--user', f'{os.getuid()}:{os.getgid()}',  # Run as current user to avoid permission issues
-        '-e', 'HOME=/tmp',  # Set HOME to writable location for cache directories
-        '-v', f'{work_dir}:/data',
-        'mcpalumbo/metagraphtools:latest'
-    ] + mgt_args
-    
-    print(f'Running MetaGraphTools in Docker...')
+    # Set environment variable for HOME (needed for cache directories)
+    env_vars = {'HOME': '/tmp'}
     
     try:
-        result = run_bash_command(docker_cmd)
+        run_container(
+            work_dir=work_dir,
+            bind_dir=bind_dir,
+            image_name=image_name,
+            command=mgt_command,
+            env_vars=env_vars,
+            container_engine=container_engine
+        )
         print('MetaGraphTools completed successfully.')
-        return result
+
     except Exception as e:
         logging.exception(f'Error running MetaGraphTools: {e}')
         raise
-
 
 
 def run_cd_hit(input_fasta, output_fasta, identity=1.0, aln_coverage_short=0.9, aln_coverage_long=0.9, use_global_seq_identity=True, accurate_mode=True, cpus=multiprocessing.cpu_count()):
