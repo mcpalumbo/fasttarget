@@ -152,6 +152,12 @@ def validate_config(config):
                 filepath = met[field]
                 if not os.path.exists(filepath):
                     errors.append(f"metabolism-PathwayTools {field} not found: {filepath}")
+        
+        # Validate optional curated_ubiquitous_file
+        if 'curated_ubiquitous_file' in met and met['curated_ubiquitous_file']:
+            ubiq_path = met['curated_ubiquitous_file']
+            if not os.path.exists(ubiq_path):
+                errors.append(f"metabolism-PathwayTools curated_ubiquitous_file not found: {ubiq_path}")
     
     # Validate metabolism-SBML section
     if 'metabolism-SBML' in config and config['metabolism-SBML'].get('enabled'):
