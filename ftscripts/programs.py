@@ -253,6 +253,11 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     # Build singularity command
     singularity_cmd = ['singularity', 'exec']
     
+    
+    # Add isolation flags to prevent host environment contamination
+    singularity_cmd.append('--contain')  # Maximum isolation
+    singularity_cmd.append('--cleanenv')    # Don't inherit host environment variables  
+
     # Add bind mounts
     for bind in bind_mounts:
         singularity_cmd.extend(['--bind', bind])
