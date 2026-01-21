@@ -94,7 +94,9 @@ def gbk_to_gff3(gbk_file, gff_dir):
         print(f"GFF3 file saved to {gff_file}")
 
     if os.path.exists(gff_dir):
-        gff_file = os.path.join(gff_dir, f'{os.path.basename(gbk_file)}.gff')
+        # Fix: Remove .gbk extension before adding .gff
+        base_name = os.path.splitext(os.path.basename(gbk_file))[0]
+        gff_file = os.path.join(gff_dir, f'{base_name}.gff')
         if os.path.exists(gbk_file):
             try: 
                 fixed_gbk = os.path.join(os.path.dirname(gbk_file), f'fix_{os.path.basename(gbk_file)}')
@@ -107,6 +109,7 @@ def gbk_to_gff3(gbk_file, gff_dir):
                 write_gff3(gff_file, records)
             except Exception as e:
                 logging.exception(f"An error occurred during GBK to GFF3 conversion: {e}")
+                raise  # Re-raise to let caller know it failed
         else:
             logging.error(f"GBK file '{gbk_file}' not found.")
     else:
