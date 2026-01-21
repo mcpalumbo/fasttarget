@@ -45,7 +45,12 @@ def prepare_genome_files(config, output_path):
     logging.info(f'Organism subfolders created in {output_path}/{organism_name}')
 
     # Create organism genome files (gbk, gff3 and fasta)
-    genome.ref_genome_files(gbk_file, output_path, organism_name, container_engine=config.container_engine)
+    files_dir = os.path.join(output_path, organism_name, 'genome')
+    if not os.path.exists(files_dir):
+        os.makedirs(files_dir, exist_ok=True)
+        logging.info(f'Genome directory created in {files_dir}')
+        
+    genome.ref_genome_files(gbk_file, files_dir, organism_name, container_engine=config.container_engine)
 
     logging.info(f'Genome files created in {output_path}/{organism_name}')
 
