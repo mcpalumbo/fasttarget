@@ -224,45 +224,54 @@ def ref_genome_files (gbk_file, output_path, organism_name, container_engine='do
     Generates the .fna, .faa, .ffn, and .gff3 files for a reference GenBank file.
 
     :param gbk_file: GenBank file path.
-    :param output_path: Directory of the oraganism output.
+    :param output_path: Directory where files will be saved.
     :param organism_name: Name of the organism.
     :param container_engine: Container engine to use ('docker' or 'singularity').
 
     """
 
-    genome_dir = os.path.join(output_path, organism_name, 'genome')
-    ref_gbk = os.path.join(genome_dir, f'{organism_name}.gbk')
+    ref_gbk = os.path.join(output_path, f'{organism_name}.gbk')
 
     if os.path.exists(gbk_file):
         shutil.copy(gbk_file, ref_gbk)
-        print(f'GenBank file saved to {genome_dir}')
+        print(f'GenBank file saved to {output_path}')
     else:
         print('Gbk file not found.')
 
     if os.path.exists(ref_gbk):
-        output_file_fna_path = os.path.join(genome_dir, f'{organism_name}.fna')
-        output_file_faa_path = os.path.join(genome_dir, f'{organism_name}.faa')
-        output_file_ffn_path = os.path.join(genome_dir, f'{organism_name}.ffn')
-        output_file_gff_path = os.path.join(genome_dir, f'{organism_name}.gff')
+        output_file_fna_path = os.path.join(output_path, f'{organism_name}.fna')
+        output_file_faa_path = os.path.join(output_path, f'{organism_name}.faa')
+        output_file_ffn_path = os.path.join(output_path, f'{organism_name}.ffn')
+        output_file_gff_path = os.path.join(output_path, f'{organism_name}.gff')
 
         if not files.file_check(output_file_fna_path) or not files.file_check(output_file_faa_path) or not files.file_check(output_file_ffn_path):
             gbk_to_fasta(ref_gbk, output_file_fna=output_file_fna_path, output_file_faa=output_file_faa_path, output_file_ffn=output_file_ffn_path)
-            print(f'fna, faa and ffn files saved to {genome_dir}')
+            print(f'fna, faa and ffn files saved to {output_path}')
         else:
-            print(f'fna, faa and ffn files already exist in {genome_dir}')
+            print(f'fna, faa and ffn files already exist in {output_path}')
 
         if not files.file_check(output_file_gff_path):
             try:
-                programs.run_genbank2gff3(ref_gbk, genome_dir, container_engine=container_engine)
+                programs.run_genbank2gff3(ref_gbk, output_path, container_engine=container_engine)
                 if os.path.exists(output_file_gff_path):
-                    print(f'Gff3 file saved in {genome_dir}')
+                    print(f'Gff3 file saved in {output_path}')
+                else:
+                    raise FileNotFoundError(f"Container succeeded but GFF file not found")
                     
             except Exception as e:
-                logging.exception(f"An error occurred during run_genbank2gff3: {e}")
-                gbk_to_gff3(ref_gbk, genome_dir)
-                print(f'Gff3 file saved on {genome_dir}')
+                logging.warning(f"Container method failed, trying Python fallback: {e}")
+                try:
+                    gbk_to_gff3(ref_gbk, output_path)
+                    if os.path.exists(output_file_gff_path):
+                        print(f'Gff3 file saved using Python fallback in {output_path}')
+                    else:
+                        logging.error(f"GFF file was not created at {output_file_gff_path}")
+                        print(f'WARNING: GFF file could not be created. Some features may not work.')
+                except Exception as e2:
+                    logging.exception(f"Python fallback also failed: {e2}")
+                    print(f'WARNING: GFF file could not be created. Some features may not work.')
         else:
-            print(f'Gff3 file already exists in {genome_dir}')  
+            print(f'Gff3 file already exists in {output_path}')  
 
     else:
         print('Reference Gbk file not found.')
