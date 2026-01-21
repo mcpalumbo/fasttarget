@@ -6,6 +6,8 @@ organism/
 logs/
 __pycache__/
 *.yml
+!config.yml
+!config_test.yml
 .vscode/*
 .nextflow/
 nextflow/work
