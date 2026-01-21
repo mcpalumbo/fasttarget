@@ -1,7 +1,13 @@
 databases/
+singularity_sfi_files/
 ftscripts/*.pyc
 organism/
+!organism/test
 logs/
 __pycache__/
 *.yml
 .vscode/*
+.nextflow/
+nextflow/work
+nextflow/bin
+nextflow/.nextflow.log*
