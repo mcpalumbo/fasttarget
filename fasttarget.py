@@ -76,13 +76,22 @@ def metabolic_module(config, output_path):
             sbml_file =  config.metabolism_pathwaytools['sbml_file']
             chokepoint_file = config.metabolism_pathwaytools['chokepoint_file']
             smarttable_file = config.metabolism_pathwaytools['smarttable_file']
+            curated_ubiquitous_file = config.metabolism_pathwaytools.get('curated_ubiquitous_file', None)
+            
+            # Handle empty string or None for curated_ubiquitous_file
+            if curated_ubiquitous_file == "" or curated_ubiquitous_file is None:
+                curated_ubiquitous_file = None
 
             logging.info(f'SBML file: {sbml_file}')
             logging.info(f'Chokepoint file: {chokepoint_file}')
             logging.info(f'Smarttable file: {smarttable_file}')
+            if curated_ubiquitous_file:
+                logging.info(f'Curated ubiquitous file: {curated_ubiquitous_file}')
+            else:
+                logging.info('Curated ubiquitous file: Not provided (will use auto-generated)')
 
             # Parse metabolic files, make network and calculate centrality
-            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file)
+            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file)
             module_tables.append(df_centrality)
             module_tables.append(df_edges)
             module_tables.append(producing_df)
