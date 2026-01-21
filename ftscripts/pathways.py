@@ -37,28 +37,41 @@ def process_sbml(output_path, organism_name, sbml_file):
     else:
         logging.error(f"SBML file '{sbml_file}' not found.")
 
-def ubiquitous_checker(output_path, organism_name):
+def ubiquitous_checker(output_path, organism_name, curated_ubiquitous_file=None):
     """
-    Check if the ubiquitous_compounds.txt file was renamed and moved to the metabolism directory.
-    This function prompts the user to curate and rename the file and waits for the user to press Enter.    
+    Process the ubiquitous compounds file for metabolic network generation.
+    If a curated file is provided, it will be copied to the expected location.
+    If not provided, the auto-generated file will be used with a warning.
 
     :param output_path: Path where output will be stored.
     :param organism_name: Name of the organism.
+    :param curated_ubiquitous_file: Optional path to a pre-curated ubiquitous compounds file.
     """
 
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
     ubiquitous_file = os.path.join(metabolism_dir, f'{organism_name}_ubiquitous.txt')
+    auto_generated_file = os.path.join(metabolism_dir, 'ubiquitous_compounds.txt')
     
-    print(f'Please curate ubiquitous_compounds.txt and rename as {ubiquitous_file}')
-    
-    while True:
-        input("Press Enter after renaming the file...")
-        
-        if os.path.exists(ubiquitous_file):
-            print(f"File successfully renamed to {ubiquitous_file}. Proceeding with the pipeline...")
-            break
+    if curated_ubiquitous_file:
+        # User provided a curated file
+        if os.path.exists(curated_ubiquitous_file):
+            shutil.copy(curated_ubiquitous_file, ubiquitous_file)
+            print(f"Using curated ubiquitous compounds file: {curated_ubiquitous_file}")
+            logging.info(f"Copied curated ubiquitous file to {ubiquitous_file}")
         else:
-            print(f"{ubiquitous_file} not found. Please rename the file or try again.")
+            logging.error(f"Curated ubiquitous file not found: {curated_ubiquitous_file}")
+            raise FileNotFoundError(f"Curated ubiquitous file not found: {curated_ubiquitous_file}")
+    
+    if not curated_ubiquitous_file or not os.path.exists(curated_ubiquitous_file):
+        # No curated file provided, use auto-generated one
+        if os.path.exists(auto_generated_file):
+            shutil.copy(auto_generated_file, ubiquitous_file)
+            print(f"No curated ubiquitous file provided. Using auto-generated file.")
+            logging.warning("Using auto-generated ubiquitous compounds file without manual curation. "
+                          "For better results, consider providing a curated file via the config.")
+        else:
+            logging.error(f"Auto-generated ubiquitous file not found: {auto_generated_file}")
+            raise FileNotFoundError(f"Auto-generated ubiquitous file not found: {auto_generated_file}")
 
 def generate_sif(output_path, organism_name):
     """
@@ -266,7 +279,7 @@ def mapping_chokepoints(locus_reaction_dict, producing_ck, consuming_ck, both_ck
 
     return producing_chokepoint, consuming_chokepoint, both_chokepoint
 
-def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file):
+def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file=None):
     """
     Runs the metabolism pipeline. 
     It processes the SBML file, generates the Ubiquitous Compounds file, the network SIF file, and the gene-reaction mapping. 
@@ -278,6 +291,7 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
     :param sbml_file: Path to the SBML file.
     :param chokepoint_file: Path to the chokepoint file.
     :param smarttable_file: Path to the Smarttable file.
+    :param curated_ubiquitous_file: Optional path to a pre-curated ubiquitous compounds file.
 
     :return: DataFrame with the betweenness centrality values.
     :return: DataFrame with the node degrees.
@@ -290,8 +304,8 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
     process_sbml(output_path, organism_name, sbml_file)
     print(f'---------- 1. Finished ----------')
 
-    print(f'---------- 2. Generating Ubiquitous compounds file ----------')
-    ubiquitous_checker(output_path, organism_name)
+    print(f'---------- 2. Processing Ubiquitous compounds file ----------')
+    ubiquitous_checker(output_path, organism_name, curated_ubiquitous_file)
     print(f'---------- 2. Finished ----------')
 
     print(f'---------- 3. Generating network SIF file ----------')
