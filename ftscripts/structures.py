@@ -1425,6 +1425,86 @@ def get_structure_alphafold(output_path, uniprot_id):
         res = True
     return res
 
+def download_single_structure(structure_dir, locus_tag):
+    """
+    Download structures for a single locus_tag based on the summary table.
+    Priority: Download .pdb if available, otherwise download .cif (for cryo-EM structures).
+    :param structure_dir: Directory of the structures.
+    :param locus_tag: Locus tag identifier.
+    
+    """
+
+    summary_table_path = os.path.join(structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv")
+
+    if files.file_check(summary_table_path):
+        # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
+        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
+
+        uniprot_ids = summary_df['uniprot_id'].unique()
+
+        for uniprot_id in uniprot_ids:
+            uniprot_dir = os.path.join(structure_dir, locus_tag, uniprot_id)
+
+            struct_rows = summary_df[summary_df['uniprot_id'] == uniprot_id]
+
+            for _, row in struct_rows.iterrows():
+                struct_type = row['structure_type']
+                struct_id = row['structure_id']
+
+                if struct_type == 'PDB':
+                    # Define file paths
+                    pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
+                    cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
+                    
+                    # Check if we already have a valid structure file
+                    # Use try-except to handle potential race conditions or filesystem issues
+                    try:
+                        pdb_exists = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
+                    except OSError:
+                        pdb_exists = False
+                    
+                    try:
+                        cif_exists = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
+                    except OSError:
+                        cif_exists = False
+                    
+                    if pdb_exists or cif_exists:
+                        continue
+                    
+                    # Try PDB format first
+                    success_pdb = get_structure_PDB(uniprot_dir, struct_id)
+                    
+                    # If PDB fails, try CIF (common for cryo-EM structures)
+                    if not success_pdb:
+                        print(f"  PDB format not available for {struct_id}, trying CIF format...")
+                        success_cif = get_structure_CIF(uniprot_dir, struct_id)
+                        
+                        if not success_cif:
+                            print(f"  Warning: Could not download {struct_id} in either PDB or CIF format.")
+
+                elif struct_type == 'AlphaFold':
+                    # Check and download AlphaFold structure
+                    # Note: This handles both cases:
+                    # 1. AlphaFoldDB ID from UniProt API
+                    # 2. Fallback attempt using UniProt ID directly when no AlphaFoldDB ID was found
+                    af_file_path = os.path.join(uniprot_dir, f"AF_{uniprot_id}.pdb")
+                    
+                    # Check if we already have a valid AlphaFold file
+                    try:
+                        af_exists = files.file_check(af_file_path) and os.path.getsize(af_file_path) > 0
+                    except OSError:
+                        af_exists = False
+                    
+                    if not af_exists:
+                        # Download using UniProt ID (works for both explicit and fallback cases)
+                        success_af = get_structure_alphafold(uniprot_dir, uniprot_id)
+                        if not success_af:
+                            print(f"  Warning: Could not download AlphaFold model for {uniprot_id}.")
+    else:
+        print(f'Structure summary table not found for {locus_tag}, skipping download check.')
+
+
+
 def download_structures(output_path, organism_name):
 
     """
@@ -1441,76 +1521,11 @@ def download_structures(output_path, organism_name):
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in tqdm(all_locus_tags, desc='Locus tags'):
-
-        summary_table_path = os.path.join(structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv")
-
-        if files.file_check(summary_table_path):
-            # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
-
-            uniprot_ids = summary_df['uniprot_id'].unique()
-
-            for uniprot_id in uniprot_ids:
-                uniprot_dir = os.path.join(structure_dir, locus_tag, uniprot_id)
-
-                struct_rows = summary_df[summary_df['uniprot_id'] == uniprot_id]
-
-                for _, row in struct_rows.iterrows():
-                    struct_type = row['structure_type']
-                    struct_id = row['structure_id']
-
-                    if struct_type == 'PDB':
-                        # Define file paths
-                        pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
-                        cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
-                        
-                        # Check if we already have a valid structure file
-                        # Use try-except to handle potential race conditions or filesystem issues
-                        try:
-                            pdb_exists = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
-                        except OSError:
-                            pdb_exists = False
-                        
-                        try:
-                            cif_exists = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
-                        except OSError:
-                            cif_exists = False
-                        
-                        if pdb_exists or cif_exists:
-                            continue
-                        
-                        # Try PDB format first
-                        success_pdb = get_structure_PDB(uniprot_dir, struct_id)
-                        
-                        # If PDB fails, try CIF (common for cryo-EM structures)
-                        if not success_pdb:
-                            print(f"  PDB format not available for {struct_id}, trying CIF format...")
-                            success_cif = get_structure_CIF(uniprot_dir, struct_id)
-                            
-                            if not success_cif:
-                                print(f"  Warning: Could not download {struct_id} in either PDB or CIF format.")
-
-                    elif struct_type == 'AlphaFold':
-                        # Check and download AlphaFold structure
-                        # Note: This handles both cases:
-                        # 1. AlphaFoldDB ID from UniProt API
-                        # 2. Fallback attempt using UniProt ID directly when no AlphaFoldDB ID was found
-                        af_file_path = os.path.join(uniprot_dir, f"AF_{uniprot_id}.pdb")
-                        
-                        # Check if we already have a valid AlphaFold file
-                        try:
-                            af_exists = files.file_check(af_file_path) and os.path.getsize(af_file_path) > 0
-                        except OSError:
-                            af_exists = False
-                        
-                        if not af_exists:
-                            # Download using UniProt ID (works for both explicit and fallback cases)
-                            success_af = get_structure_alphafold(uniprot_dir, uniprot_id)
-                            if not success_af:
-                                print(f"  Warning: Could not download AlphaFold model for {uniprot_id}.")
-        else:
-            print(f'Structure summary table not found for {locus_tag}, skipping download check.')
-
+        try:
+            download_single_structure(structure_dir, locus_tag)
+        except Exception as e:
+            logging.error(f"Error downloading structures for {locus_tag}: {e}")
+            
 def extract_chain_from_pdb(pdb_file, chain_ids, output_file):
     """
     Extracts one or more specific chains from a PDB file using Biopython.
