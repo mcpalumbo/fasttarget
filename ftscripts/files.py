@@ -52,16 +52,19 @@ def file_check(file_path):
     """
 
     file_res = False
-    # Check if the file exists
-    if not os.path.isfile(file_path):
-        file_res = False
-    else:
-        # Check if the file is empty
-        if os.path.getsize(file_path) > 0:
-            file_res = True   
-        else:
+
+    if file_path:
+
+        # Check if the file exists
+        if not os.path.isfile(file_path):
             file_res = False
-            
+        else:
+            # Check if the file is empty
+            if os.path.getsize(file_path) > 0:
+                file_res = True   
+            else:
+                file_res = False
+                
     return file_res
 
 def json_to_dict (file_path):
