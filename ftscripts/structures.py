@@ -1183,7 +1183,8 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
     :param locus_tag: Locus tag to create summary for.
     :return: DataFrame with structure summary.
     """
-    
+    uniprot_id = None
+
     summary_data = []
     uniprot_ids = mapping_dict.get(locus_tag)
 
@@ -1214,8 +1215,22 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
 
         summary_df = pd.DataFrame(summary_data)
     else:
-        print(f'  No structure data found for {locus_tag}, skipping summary table creation.')
-        summary_df = pd.DataFrame()
+        summary_data.append({
+        "locus_tag": locus_tag,
+        "uniprot_id": uniprot_id,
+        "structure_type": "No structure found",
+        "structure_id": "NONE",
+        "method": None,
+        "resolution": None,
+        "chain": None,
+        "residue_range": None,
+        "coverage": None,
+        "sequence_length": None,
+        "is_reference": False
+         })
+
+        print(f'  No structure data found for {locus_tag}.')
+        summary_df = pd.DataFrame(summary_data)
 
     return summary_df
 
