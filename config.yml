@@ -53,6 +53,19 @@ structures:
   enabled: False
   # proteome_uniprot: Complete with the proteome ID of Uniprot for your organism. Example: UP000002438 for Pseudomonas aeruginosa PAO1.
   proteome_uniprot: proteome_uniprot
+  # pocket_full_mode: Set to True to find pockets to all structures for each protein, not only the best one.
+  # Set to True will significantly increase runtime and resource usage.
+  pocket_full_mode: False
+  
+colabfold:
+  enabled: False
+  # amber: Set to True to perform Amber refinement on ColabFold models.
+  amber: False
+  # gpu: Set to True to use GPU acceleration for ColabFold model generation.
+  gpu: False
+  # colabfold_run_all: Set to True to run ColabFold for all proteins, not only those without structures.
+  colabfold_run_all: False
+
 
 # ---- Core ----
 core:
