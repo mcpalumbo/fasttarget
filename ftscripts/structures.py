@@ -2542,6 +2542,7 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
 
 
 ##  ------------------- FPocket functions ------------------- ##
+
 def FPocket_models(directory):
     """
     Run Fpocket for all .pdb in a directory.
@@ -2603,68 +2604,21 @@ def fpocket_for_structure(pdb, output_path, pockets_dir, container_engine='docke
         print(f'Fpocket results for {pdb} already present.')
 
 
-def find_structures_for_locus(locus_dir):
-    """
-    Find ONLY the reference structure for a given locus_tag directory.
-    
-    Selection rules:
-    1) Look for PDB reference structures (*_ref.pdb)
-       (These are PDB chains extracted by extract_chain_from_pdb)
-    2) If no '_ref.pdb' found, use AlphaFold models: files starting with 'AF_'
-       (AlphaFold files don't need chain extraction)
-    3) If nothing found, return None
-    
-    :param locus_dir: Path to the locus_tag directory.
-    :return: Path to reference PDB file, or None.
-    """
-    # 1) First priority: Reference structures (*_ref.pdb)
-    # Exclude folder pockets
-    ref_files = glob.glob(os.path.join(locus_dir, '**', '*_ref.pdb'), recursive=True)
-    ref_files = [f for f in ref_files if 'pockets' not in f.split(os.sep)]
-    ref_files = sorted(set(ref_files))
-    
-    if len(ref_files) > 1:
-        print(f"  ERROR: Found {len(ref_files)} '*_ref.pdb' files in {locus_dir}. There should be only ONE reference.")
-        print(f"  Files found: {ref_files}")
-        print(f"  Using first file: {ref_files[0]}")
-        return ref_files[0]
-    elif len(ref_files) == 1:
-        print(f"  Using PDB reference: {ref_files[0]}")
-        return ref_files[0]
-    
-    # 2) Second priority: AlphaFold models (if no PDB ref exists)
-    # Exclude folder pockets
-    af_pdbs = glob.glob(os.path.join(locus_dir, '**', 'AF_*.pdb'), recursive=True)
-    af_pdbs = [f for f in af_pdbs if 'pockets' not in f.split(os.sep)]
-    af_pdbs = sorted(set(af_pdbs))
-    
-    if len(af_pdbs) > 1:
-        print(f"  Warning: Found {len(af_pdbs)} AlphaFold models in {locus_dir}. Using first one.")
-        print(f"  Using AlphaFold: {af_pdbs[0]}")
-        return af_pdbs[0]
-    elif len(af_pdbs) == 1:
-        #print(f"  Using AlphaFold model: {af_pdbs[0]}")
-        return af_pdbs[0]
-    
-    # 3) No reference structure found
-    print(f"  Warning: No reference structure (*_ref.pdb) or AlphaFold (AF_*.pdb) found in {locus_dir}. Skipping FPocket.")
-    return None
 
-def pockets_finder_for_locus(locus_dir, container_engine='docker'):
+def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
     """
     Run Fpocket for the selected structures in a locus_tag directory.
 
-    This function:
-      - Creates a 'pockets' directory inside the locus_tag directory.
-      - Selects the structures to run Fpocket on, according to:
-            * Reference PDB chains '*_ref.pdb' if any.
-            * Else, AlphaFold PDB files (heuristic by name).
-            * Else, all '.pdb' as a last fallback.
-      - Runs Fpocket in parallel using ProcessPoolExecutor.
+    This function handles TWO tracks:
+    1) DEFAULT TRACK: Reference structure (PDB/AF priority, CB as fallback)
+    2) PARALLEL COLABFOLD TRACK: CB model (only when colabfold_all_models=True)
 
     :param locus_dir: Path to the locus_tag directory.
     :param container_engine: Container engine to use ('docker' or 'singularity').
-
+    :param full_mode: If True, process all PDB files in the locus directory.
+    :param colabfold: If True, consider ColabFold as fallback in default track.
+    :param colabfold_all_models: If True, run parallel CB track for ALL proteins.
+    :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
     """
 
     if os.path.exists(locus_dir):
@@ -2672,29 +2626,75 @@ def pockets_finder_for_locus(locus_dir, container_engine='docker'):
         pockets_dir = os.path.join(locus_dir, 'pockets')
         os.makedirs(pockets_dir, exist_ok=True)
 
-        # Select structure to process
-        pdb_file = find_structures_for_locus(locus_dir)
-        if not pdb_file:
-            print(f"No structures to process in {locus_dir}")
-            return
+        # TRACK 1: DEFAULT - Select reference structure (PDB/AF priority, CB fallback)
+        if not full_mode:
+            pdb_files = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+            if pdb_files:
+                for pdb_file in pdb_files:
+                    print(f"Running Fpocket on default structure: {pdb_file}")
+                    pdb_parent_dir = os.path.dirname(pdb_file)
+                    fpocket_for_structure(pdb_file, pdb_parent_dir, pockets_dir, container_engine=container_engine)
+            else:
+                print(f"No default structures to process in {locus_dir}")
+            
+            # TRACK 2: PARALLEL COLABFOLD (only when ColabFold is installed AND colabfold_all_models=True)
+            if colabfold and colabfold_all_models:
+                cb_files = find_colabfold_for_locus(locus_dir)
+                if cb_files:
+                    for cb_file in cb_files:
+                        print(f"Running Fpocket on ColabFold model: {cb_file}")
+                        cb_parent_dir = os.path.dirname(cb_file)
+                        fpocket_for_structure(cb_file, cb_parent_dir, pockets_dir, container_engine=container_engine)
+        else:
+            # FULL MODE: Process ALL PDB structures
+            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
+            if not selected_structures_path:
+                print(f"No structures to process in {locus_dir}")
+            else:
+                print(f"Running Fpocket on {len(selected_structures_path)} structures in {locus_dir}")
 
-        print(f"Running Fpocket on {pdb_file} structures in {locus_dir}")
-        
-        pdb_parent_dir = os.path.dirname(pdb_file)
-        fpocket_for_structure(pdb_file, pdb_parent_dir, pockets_dir, container_engine=container_engine)
+                with ProcessPoolExecutor() as executor:
+                    futures = []
+                    for pdb_file in selected_structures_path:
+                        pdb_parent_dir = os.path.dirname(pdb_file)
+                        futures.append(
+                            executor.submit(
+                                fpocket_for_structure,
+                                pdb_file,
+                                pdb_parent_dir,
+                                pockets_dir,
+                                container_engine
+                            )
+                        )
 
+                    for future in tqdm(as_completed(futures), total=len(futures), desc="Fpocket progress"):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logging.error(f"Error during Fpocket execution: {e}")
+            
+            # TRACK 2: PARALLEL COLABFOLD (only when ColabFold is installed AND colabfold_all_models=True)
+            if colabfold and colabfold_all_models:
+                cb_files = find_colabfold_for_locus(locus_dir)
+                if cb_files:
+                    for cb_file in cb_files:
+                        print(f"Running Fpocket on ColabFold model: {cb_file}")
+                        cb_parent_dir = os.path.dirname(cb_file)
+                        fpocket_for_structure(cb_file, cb_parent_dir, pockets_dir, container_engine=container_engine)
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
 
-def pockets_finder_for_all_loci(output_path, organism_name, container_engine='docker'):
+def pockets_finder_for_all_loci(output_path, organism_name, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
     """
     Run Fpocket for all locus_tag directories under the 'structures' folder.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param container_engine: Container engine to use ('docker' or 'singularity').
-
+    :param full_mode: If True, process all PDB files in each locus directory instead of just the reference or AlphaFold models.
+    :param colabfold: If True, include ColabFold models in the processing.
+    :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
     """
 
     structures_dir = os.path.join(output_path, organism_name, "structures")
@@ -2708,7 +2708,7 @@ def pockets_finder_for_all_loci(output_path, organism_name, container_engine='do
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            pockets_finder_for_locus(locus_dir, container_engine=container_engine)
+            pockets_finder_for_locus(locus_dir, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -2774,7 +2774,9 @@ def pockets_data_to_dict(directory):
                         if parts[0] == 'PDB' and len(parts) >= 2:
                             protein_ID = parts[1]  # Get PDB code (e.g., "1ABC")
                         elif parts[0] == 'AF' and len(parts) >= 2:
-                            protein_ID = '_'.join(parts[1:])  # Get full UniProt ID (e.g., "P12345" or "P12345-F1")
+                            protein_ID = '_'.join(parts[1:])  # Get full UniProt ID
+                        elif parts[0] == 'CB' and len(parts) >= 2:
+                            protein_ID = folder_name.rsplit("_", 1)[0]  # Get full ColabFold ID
                         else:
                             protein_ID = folder_name
                         
@@ -2869,21 +2871,21 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False, co
         print(f'P2Rank results directory for {pdb} already present.')
 
 
-def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker'):
+def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
     """
     Run P2Rank for the selected structures in a locus_tag directory.
 
-    This function:
-      - Creates a 'pockets' directory inside the locus_tag directory.
-      - Selects the structures to run P2Rank on, according to:
-            * Reference PDB chains '*_ref.pdb' if any.
-            * Else, AlphaFold PDB files (heuristic by name).
-            * Else, all '.pdb' as a last fallback.
-      - Runs P2Rank with appropriate parameters.
+    This function handles TWO tracks:
+    1) DEFAULT TRACK: Reference structure (PDB/AF priority, CB as fallback)
+    2) PARALLEL COLABFOLD TRACK: CB model (only when colabfold_all_models=True)
 
     :param locus_dir: Path to the locus_tag directory.
     :param cpus: Number of CPUs/threads to use.
     :param container_engine: Container engine to use ('docker' or 'singularity').
+    :param full_mode: Boolean, if True processes all structures in the locus directory.
+    :param colabfold: Boolean indicating whether to consider CB as fallback.
+    :param colabfold_all_models: Boolean indicating whether to run parallel CB track.
+    :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
     """
 
     if os.path.exists(locus_dir):
@@ -2891,24 +2893,57 @@ def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker'):
         p2rank_dir = os.path.join(locus_dir, 'pockets')
         os.makedirs(p2rank_dir, exist_ok=True)
 
-        # Select structure to process
-        pdb_file = find_structures_for_locus(locus_dir)
-        if not pdb_file:
-            print(f"No structures to process in {locus_dir}")
-            return
+        # TRACK 1: DEFAULT - Select reference structure (PDB/AF priority, CB fallback)
+        if not full_mode:
+            pdb_files = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+            if pdb_files:
+                for pdb_file in pdb_files:
+                    # Determine if it's an AlphaFold or ColabFold structure (both need alphafold flag)
+                    pdb_basename = os.path.basename(pdb_file)
+                    is_alphafold = pdb_basename.startswith('AF_') or pdb_basename.startswith('CB_')
+                    
+                    print(f"Running P2Rank on default structure: {pdb_file} (AlphaFold={is_alphafold})")
+                    
+                    pdb_parent_dir = os.path.dirname(pdb_file)
+                    p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold, container_engine=container_engine)
+            else:
+                print(f"No default structures to process in {locus_dir}")
+            
+            # TRACK 2: PARALLEL COLABFOLD (only when ColabFold is installed AND colabfold_all_models=True)
+            if colabfold and colabfold_all_models:
+                cb_files = find_colabfold_for_locus(locus_dir)
+                if cb_files:
+                    for cb_file in cb_files:
+                        print(f"Running P2Rank on ColabFold model: {cb_file}")
+                        cb_parent_dir = os.path.dirname(cb_file)
+                        p2rank_for_structure(cb_file, cb_parent_dir, p2rank_dir, cpus, alphafold=True, container_engine=container_engine)
+        else:
+            # FULL MODE: Process ALL PDB structures
+            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
+            if not selected_structures_path:
+                print(f"No structures to process in {locus_dir}")
+            else:
+                print(f"Running P2Rank on {len(selected_structures_path)} structures in {locus_dir}")
 
-        # Determine if it's an AlphaFold structure
-        is_alphafold = 'AF_' in os.path.basename(pdb_file)
-        
-        print(f"Running P2Rank on {pdb_file} in {locus_dir} (AlphaFold={is_alphafold})")
-        
-        pdb_parent_dir = os.path.dirname(pdb_file)
-        p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold, container_engine=container_engine)
-
+                for pdb_file in tqdm(selected_structures_path, desc="P2Rank progress"):
+                    pdb_basename = os.path.basename(pdb_file)
+                    is_alphafold = pdb_basename.startswith('AF_') or pdb_basename.startswith('CB_')
+                    
+                    pdb_parent_dir = os.path.dirname(pdb_file)
+                    p2rank_for_structure(pdb_file, pdb_parent_dir, p2rank_dir, cpus, alphafold=is_alphafold, container_engine=container_engine)
+            
+            # TRACK 2: PARALLEL COLABFOLD (only when ColabFold is installed AND colabfold_all_models=True)
+            if colabfold and colabfold_all_models:
+                cb_files = find_colabfold_for_locus(locus_dir)
+                if cb_files:
+                    for cb_file in cb_files:
+                        print(f"Running P2Rank on ColabFold model: {cb_file}")
+                        cb_parent_dir = os.path.dirname(cb_file)
+                        p2rank_for_structure(cb_file, cb_parent_dir, p2rank_dir, cpus, alphafold=True, container_engine=container_engine)                                        
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
-def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine='docker'):
+def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
     """
     Run P2Rank for all locus_tag directories under the 'structures' folder.
 
@@ -2916,6 +2951,9 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engin
     :param organism_name: Name of organism.
     :param cpus: Number of CPUs/threads to use.
     :param container_engine: Container engine to use ('docker' or 'singularity').
+    :param full_mode: Boolean, if True processes all structures in each locus directory.
+    :param colabfold: Boolean indicating whether to run ColabFold or not (default: False).
+    :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
     """
 
     structures_dir = os.path.join(output_path, organism_name, "structures")
@@ -2929,7 +2967,7 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engin
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            p2rank_finder_for_locus(locus_dir, cpus, container_engine=container_engine)
+            p2rank_finder_for_locus(locus_dir, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -2982,16 +3020,59 @@ def p2rank_data_to_dict(directory):
     """
     Parse P2Rank results from a directory to extract pocket predictions.
     
-    This function processes P2Rank output directories and creates a dictionary
-     with pocket information.
+    This function can handle TWO modes:
+    1. Single p2rank folder (e.g., "PDB_1ABC_p2rank") - returns results for that structure
+    2. Parent directory containing multiple *_p2rank folders - returns aggregated results
     
-    :param directory: Path to the directory containing P2Rank results.
-    :return: Dictionary with P2Rank pocket data for each structure.
+    :param directory: Path to a p2rank folder OR parent directory containing p2rank folders.
+    :return: Dictionary with P2Rank pocket data for structure(s).
     """
     if not os.path.exists(directory):
         print(f'Error: {directory} not found.')
         return {}
     
+    # MODE 1: Check if this directory itself IS a p2rank folder
+    if directory.endswith('_p2rank'):
+        # Single p2rank folder mode - parse directly
+        p2rank_file = os.path.join(directory, 'p2rank_pockets.json')
+        
+        if not files.file_check(p2rank_file):
+            print(f'Parsing P2Rank results from {os.path.basename(directory)}.')
+            p2rank_dict = {}
+            
+            # Extract structure ID from folder name
+            folder_name = os.path.basename(directory).replace('_p2rank', '')
+            parts = folder_name.split('_')
+            
+            if parts[0] == 'PDB' and len(parts) >= 2:
+                protein_ID = parts[1]  # Get PDB code
+            elif parts[0] == 'AF' and len(parts) >= 2:
+                protein_ID = '_'.join(parts[1:])  # Get UniProt ID
+            elif parts[0] == 'CB' and len(parts) >= 2:
+                protein_ID = folder_name.rsplit("_", 1)[0]  # Get ColabFold ID
+            else:
+                protein_ID = folder_name
+            
+            # Find the predictions CSV file
+            predictions_file = None
+            for file in os.listdir(directory):
+                if file.endswith('_predictions.csv'):
+                    predictions_file = os.path.join(directory, file)
+                    break
+            
+            if predictions_file:
+                p2rank_dict[protein_ID] = p2rank_parse_predictions(predictions_file)
+            else:
+                print(f"Warning: No predictions CSV file found in {directory}")
+                p2rank_dict[protein_ID] = 'No_pockets'
+            
+            files.dict_to_json(directory, 'p2rank_pockets.json', p2rank_dict)
+        else:
+            p2rank_dict = files.json_to_dict(p2rank_file)
+        
+        return p2rank_dict
+    
+    # MODE 2: Parent directory mode - scan for all *_p2rank subdirectories
     p2rank_file = os.path.join(directory, 'all_p2rank_pockets.json')
     
     if not files.file_check(p2rank_file):
@@ -3004,16 +3085,15 @@ def p2rank_data_to_dict(directory):
             
             if os.path.isdir(item_path) and item.endswith('_p2rank'):
                 # Extract structure ID from folder name
-                # E.g., "PDB_1ABC_A_ref_p2rank" -> "1ABC"
-                # or "AF_P12345_p2rank" -> "P12345"
-                folder_name = item.replace('_p2rank', '')  # Remove '_p2rank' (7 characters)
-                
-                # Parse structure ID
+                folder_name = item.replace('_p2rank', '')
                 parts = folder_name.split('_')
+                
                 if parts[0] == 'PDB' and len(parts) >= 2:
-                    protein_ID = parts[1]  # Get PDB code (e.g., "1ABC")
+                    protein_ID = parts[1]  # Get PDB code
                 elif parts[0] == 'AF' and len(parts) >= 2:
-                    protein_ID = '_'.join(parts[1:])  # Get full UniProt ID (e.g., "P12345" or "P12345-F1")
+                    protein_ID = '_'.join(parts[1:])  # Get UniProt ID
+                elif parts[0] == 'CB' and len(parts) >= 2:
+                    protein_ID = folder_name.rsplit("_", 1)[0]  # Get ColabFold ID
                 else:
                     protein_ID = folder_name
                 
@@ -3071,8 +3151,43 @@ def p2rank_filter(p2rank_dict):
     
     return best_pockets_dict
 
+def select_best_pocket_dict(pocket_dict, mode='fpocket'):
+    """
+    Select the best pocket from a given pocket dictionary based on maximum score.
+    From a list of dicts like this {"7PTF": {"max_probability": 0.574, "pocket": "Pocket pocket1 "}, ...} 
+    it selects the one with the highest 'max_probability' or 'maxDS' score.
+    :param pocket_dict: Dictionary containing pocket data with scores.
+    :return: Dictionary with the best pocket information.
+    """
+    max_score = -float('inf')
+    best_pocket = None
+    no_pockets_fallback = None
 
-def merge_structure_data (output_path, organism_name):
+    for pocket in pocket_dict:
+        for struct_name, props in pocket.items():
+            if not isinstance(props, dict):
+                no_pockets_fallback = {struct_name: 'No_pockets'}
+                continue  # Skip if props is not a dictionary
+            if mode == 'fpocket':
+                score = props.get('maxDS', -float('inf'))
+            elif mode == 'p2rank':
+                score = props.get('max_probability', -float('inf'))
+            else:
+                raise ValueError(f"Unknown mode '{mode}' for selecting best pocket.")
+
+            if score > max_score:
+                max_score = score
+                best_pocket = pocket
+    
+    if best_pocket is None:
+        if no_pockets_fallback is not None:
+            return no_pockets_fallback
+        else:
+            return {}
+
+    return best_pocket 
+
+def merge_structure_data (output_path, organism_name, full_mode=False, colabfold=False, colabfold_all_models=False):
     """
     Merge all the structure data in a single dictionary.
     Saves the dictionary in a .json file named using the organism name followed by '_structure_data.json' in the 'structures' directory.
@@ -3080,6 +3195,9 @@ def merge_structure_data (output_path, organism_name):
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
+    :param full_mode: If True, processes all pockets data instead of just the best ones. Gives the maximum value.
+    :param colabfold: Boolean, if True includes ColabFold models in the selection.
+    :param colabfold_all_models: Boolean, if True includes all ColabFold models
 
     :return: Dictionary with the merged data.
     """
@@ -3111,57 +3229,117 @@ def merge_structure_data (output_path, organism_name):
             pockets_dir = os.path.join(locus_dir, 'pockets')
             
             if os.path.isdir(pockets_dir):
-                best_pockets_file = os.path.join(pockets_dir, f'best_DS_fpocket_{locus_tag}.json')
-
-                # Obtain best pockets data
-                if not files.file_check(best_pockets_file):
-
-                    # Fpocket
-                    all_fpocket_folders = [d for d in os.listdir(pockets_dir) if d.endswith('_fpocket') and os.path.isdir(os.path.join(pockets_dir, d))]
-
-                    if len(all_fpocket_folders) == 1:
-                        fpocket_folder = os.path.join(pockets_dir, all_fpocket_folders[0])
-                        pockets_dict = pockets_data_to_dict(fpocket_folder)
-                        best_pockets_dict = pockets_filter(pockets_dict)
-                        files.dict_to_json(pockets_dir, f'best_DS_fpocket_{locus_tag}.json', best_pockets_dict)
-
-                        merged_dict[locus_tag]['fpocket_best_pockets'] = best_pockets_dict
-
-                    elif len(all_fpocket_folders) > 1:
-                        print(f'Multiple Fpocket output folders found in {pockets_dir}, skipping best pockets extraction for {locus_tag}.')
-                    else:
-                        print(f'No Fpocket output folder found in {pockets_dir}, skipping best pockets extraction for {locus_tag}.')
+                # Get all fpocket folders
+                all_fpocket_folders = [d for d in os.listdir(pockets_dir) if d.endswith('_fpocket') and os.path.isdir(os.path.join(pockets_dir, d))]
                 
-                else:
-                    best_pockets_dict = files.json_to_dict(best_pockets_file)
-                    merged_dict[locus_tag]['fpocket_best_pockets'] = best_pockets_dict
+                # Separate DEFAULT track and COLABFOLD track results
+                default_fpocket_folders = [f for f in all_fpocket_folders if not f.startswith('CB_')]
+                colabfold_fpocket_folders = [f for f in all_fpocket_folders if f.startswith('CB_')]
+                
+                # Process DEFAULT track fpocket results
+                if default_fpocket_folders:
+                    best_pockets_file = os.path.join(pockets_dir, f'best_DS_fpocket_{locus_tag}.json')
+                    
+                    if not files.file_check(best_pockets_file):
+                        if not full_mode and len(default_fpocket_folders) == 1:
+                            # Single default structure
+                            fpocket_folder_path = os.path.join(pockets_dir, default_fpocket_folders[0])
+                            pockets_dict = pockets_data_to_dict(fpocket_folder_path)
+                            best_pockets_dict = pockets_filter(pockets_dict)
+                            files.dict_to_json(pockets_dir, f'best_DS_fpocket_{locus_tag}.json', best_pockets_dict)
+                            merged_dict[locus_tag]['fpocket_best_pockets'] = best_pockets_dict
+                            
+                        elif full_mode:
+                            # Multiple PDB structures - find best across all
+                            fpocket_structures_best_pockets = []
+                            for fpocket_folder_name in default_fpocket_folders:
+                                fpocket_folder_path = os.path.join(pockets_dir, fpocket_folder_name)
+                                pockets_dict = pockets_data_to_dict(fpocket_folder_path)
+                                best_pockets_dict = pockets_filter(pockets_dict)
+                                fpocket_structures_best_pockets.append(best_pockets_dict)
+                            
+                            if fpocket_structures_best_pockets:
+                                files.dict_to_json(pockets_dir, f'all_best_DS_fpocket_{locus_tag}.json', fpocket_structures_best_pockets)
+                                best_pocket = select_best_pocket_dict(fpocket_structures_best_pockets, mode='fpocket')
+                                files.dict_to_json(pockets_dir, f'best_DS_fpocket_{locus_tag}.json', best_pocket)
+                                merged_dict[locus_tag]['fpocket_best_pockets'] = best_pocket
+                    else:
+                        best_pockets_dict = files.json_to_dict(best_pockets_file)
+                        merged_dict[locus_tag]['fpocket_best_pockets'] = best_pockets_dict
+                
+                # Process COLABFOLD track fpocket results (only when ColabFold installed AND enabled)
+                if colabfold and colabfold_fpocket_folders:
+                    colabfold_pockets_file = os.path.join(pockets_dir, f'best_DS_fpocket_colabfold_{locus_tag}.json')
+                    
+                    if not files.file_check(colabfold_pockets_file):
+                        # Process first ColabFold result
+                        cf_folder_path = os.path.join(pockets_dir, colabfold_fpocket_folders[0])
+                        cf_pockets_dict = pockets_data_to_dict(cf_folder_path)
+                        cf_best_pockets_dict = pockets_filter(cf_pockets_dict)
+                        files.dict_to_json(pockets_dir, f'best_DS_fpocket_colabfold_{locus_tag}.json', cf_best_pockets_dict)
+                        merged_dict[locus_tag]['fpocket_colabfold_pockets'] = cf_best_pockets_dict
+                    else:
+                        cf_best_pockets_dict = files.json_to_dict(colabfold_pockets_file)
+                        merged_dict[locus_tag]['fpocket_colabfold_pockets'] = cf_best_pockets_dict
 
             # ========== P2Rank Data ==========
             p2rank_dir = os.path.join(locus_dir, 'pockets')
             
             if os.path.isdir(p2rank_dir):
-                best_p2rank_file = os.path.join(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json')
-
-                # Obtain best P2Rank pockets data
-                if not files.file_check(best_p2rank_file):
-
-                    # P2Rank
-                    all_p2rank_folders = [d for d in os.listdir(p2rank_dir) if d.endswith('_p2rank') and os.path.isdir(os.path.join(p2rank_dir, d))]
-
-                    if len(all_p2rank_folders) >= 1:
-                        # Process P2Rank results
-                        p2rank_dict = p2rank_data_to_dict(p2rank_dir)
-                        best_p2rank_dict = p2rank_filter(p2rank_dict)
-                        files.dict_to_json(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json', best_p2rank_dict)
-
-                        merged_dict[locus_tag]['p2rank_best_pockets'] = best_p2rank_dict
-
-                    else:
-                        print(f'No P2Rank output folder found in {p2rank_dir}, skipping P2Rank extraction for {locus_tag}.')
+                # Get all p2rank folders
+                all_p2rank_folders = [d for d in os.listdir(p2rank_dir) if d.endswith('_p2rank') and os.path.isdir(os.path.join(p2rank_dir, d))]
                 
-                else:
-                    best_p2rank_dict = files.json_to_dict(best_p2rank_file)
-                    merged_dict[locus_tag]['p2rank_best_pockets'] = best_p2rank_dict
+                # Separate DEFAULT track and COLABFOLD track results
+                default_p2rank_folders = [f for f in all_p2rank_folders if not f.startswith('CB_')]
+                colabfold_p2rank_folders = [f for f in all_p2rank_folders if f.startswith('CB_')]
+                
+                # Process DEFAULT track p2rank results
+                if default_p2rank_folders:
+                    best_p2rank_file = os.path.join(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json')
+                    
+                    if not files.file_check(best_p2rank_file):
+                        if not full_mode and len(default_p2rank_folders) == 1:
+                            # Single default structure - pass specific folder path
+                            p2rank_folder_path = os.path.join(p2rank_dir, default_p2rank_folders[0])
+                            p2rank_dict = p2rank_data_to_dict(p2rank_folder_path)
+                            best_p2rank_dict = p2rank_filter(p2rank_dict)
+                            files.dict_to_json(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json', best_p2rank_dict)
+                            merged_dict[locus_tag]['p2rank_best_pockets'] = best_p2rank_dict
+                            
+                        elif full_mode:
+                            # Multiple PDB structures - find best across all (SAME AS FPOCKET)
+                            p2rank_structures_best_pockets = []
+                            for p2rank_folder_name in default_p2rank_folders:
+                                # Pass specific p2rank folder path (matching fpocket logic)
+                                p2rank_folder_path = os.path.join(p2rank_dir, p2rank_folder_name)
+                                p2rank_dict = p2rank_data_to_dict(p2rank_folder_path)
+                                best_p2rank_dict = p2rank_filter(p2rank_dict)
+                                p2rank_structures_best_pockets.append(best_p2rank_dict)
+                            
+                            if p2rank_structures_best_pockets:
+                                files.dict_to_json(p2rank_dir, f'all_best_prob_p2rank_{locus_tag}.json', p2rank_structures_best_pockets)
+                                best_pocket = select_best_pocket_dict(p2rank_structures_best_pockets, mode='p2rank')
+                                files.dict_to_json(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json', best_pocket)
+                                merged_dict[locus_tag]['p2rank_best_pockets'] = best_pocket
+                    else:
+                        best_p2rank_dict = files.json_to_dict(best_p2rank_file)
+                        merged_dict[locus_tag]['p2rank_best_pockets'] = best_p2rank_dict
+                
+                # Process COLABFOLD track p2rank results (only when ColabFold installed AND enabled)
+                if colabfold and colabfold_p2rank_folders:
+                    colabfold_p2rank_file = os.path.join(p2rank_dir, f'best_prob_p2rank_colabfold_{locus_tag}.json')
+                    
+                    if not files.file_check(colabfold_p2rank_file):
+                        # Process ColabFold p2rank result - pass specific folder path
+                        if colabfold_p2rank_folders:
+                            colabfold_p2rank_folder_path = os.path.join(p2rank_dir, colabfold_p2rank_folders[0])
+                            p2rank_dict = p2rank_data_to_dict(colabfold_p2rank_folder_path)
+                            best_p2rank_dict = p2rank_filter(p2rank_dict)
+                            files.dict_to_json(p2rank_dir, f'best_prob_p2rank_colabfold_{locus_tag}.json', best_p2rank_dict)
+                            merged_dict[locus_tag]['p2rank_colabfold_pockets'] = best_p2rank_dict
+                    else:
+                        best_p2rank_dict = files.json_to_dict(colabfold_p2rank_file)
+                        merged_dict[locus_tag]['p2rank_colabfold_pockets'] = best_p2rank_dict
 
         files.dict_to_json(structure_dir, f'{organism_name}_structure_data.json', merged_dict)
         return merged_dict
@@ -3171,56 +3349,36 @@ def merge_structure_data (output_path, organism_name):
         print(f'Merged structure data in {merged_file}.')
         return merged_dict
 
-def final_structure_table(output_path, organism_name):
+def final_structure_table(output_path, organism_name, full_mode=False, colabfold=False, colabfold_all_models=False):
     """
     Create a final summary table with structure and pocket information for each locus_tag.
     The table columns are ['gene', 'uniprot', 'druggability_score', 'pocket', 'structure']
     
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
-    :return: DataFrame with the final summary table (ONE row per locus_tag).
+    :param full_mode: Boolean indicating whether to use full pocket mode for processing.
+    :param colabfold: Boolean indicating whether to include ColabFold models (default: False).
+    :param colabfold_all_models: Boolean indicating whether to include all ColabFold models
     """
     structure_dir = os.path.join(output_path, organism_name, 'structures')
     merged_file = os.path.join(structure_dir, f'{organism_name}_structure_data.json')
     final_table_file = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
 
-    if not files.file_check(final_table_file):
+    proteome_map_file = os.path.join(structure_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
+    map_results = files.json_to_dict(proteome_map_file) if files.file_check(proteome_map_file) else {}
+
+    def get_pocket_data(locus_tag, uniprot_id, structure_id, structure_type, data, colabfold_track=False):
+        """
+        Helper function to retrieve pocket data for a given locus_tag and structure.
         
-        if not files.file_check(merged_file):
-            merged_dict = merge_structure_data(output_path, organism_name)
+        :param colabfold_track: If True, extract from ColabFold parallel track data
+        """
+        
+        # Select data source based on track
+        if colabfold_track:
+            fpocket_data = data.get('fpocket_colabfold_pockets', {})
+            p2rank_data = data.get('p2rank_colabfold_pockets', {})
         else:
-            merged_dict = files.json_to_dict(merged_file)
-
-        rows = []
-        all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
-
-        for locus_tag in all_locus_tags:
-            # Get UniProt ID and structure ID from REFERENCE structure only
-            structure_summary_path = os.path.join(
-                structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv"
-            )
-            
-            uniprot_id = None
-            structure_id = None
-            structure_type = None
-            
-            if files.file_check(structure_summary_path):
-                # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str})
-                ref_rows = struct_df[struct_df['is_reference'] == True]
-                
-                if not ref_rows.empty:
-                    if len(ref_rows) > 1:
-                        print(f'  Warning: Multiple reference structures for {locus_tag}, using first.')
-                    ref_row = ref_rows.iloc[0]
-                    uniprot_id = ref_row['uniprot_id']
-                    structure_id = ref_row['structure_id']
-                    structure_type = ref_row['structure_type']
-            
-            # Get pocket data for the reference structure
-            data = merged_dict.get(locus_tag, {})
-            
-            # ========== FPocket Data ==========
             fpocket_data = data.get('fpocket_best_pockets', {})
             
             druggability_score = None
