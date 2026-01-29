@@ -32,7 +32,23 @@ class Config:
         self.organism = config['organism']
         self.cpus = config['cpus']
         self.container_engine = config.get('container_engine', 'docker')  # Default to docker if not specified
-        self.structures = config['structures'] if config['structures']['enabled'] else False
+        
+        # Structures with defaults
+        if config['structures']['enabled']:
+            self.structures = config['structures'].copy()
+            self.structures.setdefault('pocket_full_mode', False)
+        else:
+            self.structures = False
+        
+        # ColabFold with defaults
+        if config['colabfold']['enabled']:
+            self.colabfold = config['colabfold'].copy()
+            self.colabfold.setdefault('amber', False)
+            self.colabfold.setdefault('gpu', False)
+            self.colabfold.setdefault('colabfold_run_all', False)
+        else:
+            self.colabfold = False
+        
         self.metabolism_pathwaytools = config['metabolism-PathwayTools'] if config['metabolism-PathwayTools']['enabled'] else False
         self.metabolism_sbml = config['metabolism-SBML'] if config['metabolism-SBML']['enabled'] else False
         self.core = config['core'] if config['core']['enabled'] else False
@@ -140,7 +156,42 @@ def validate_config(config):
             errors.append("'structures' section missing 'enabled' key")
         elif not isinstance(config['structures']['enabled'], bool):
             errors.append(f"structures.enabled must be boolean (got {config['structures']['enabled']})")
+        else:
+            if config['structures']['enabled']:
+                # Validate proteome_uniprot
+                if 'proteome_uniprot' not in config['structures']:
+                    errors.append("structures missing required field: 'proteome_uniprot'")
+                else:
+                    proteome_id = config['structures']['proteome_uniprot']
+                    if not isinstance(proteome_id, str) or not proteome_id.strip():
+                        errors.append("structures.proteome_uniprot must be a non-empty string")
+                
+                # Validate pocket_full_mode (set default if missing)
+                if 'pocket_full_mode' not in config['structures']:
+                    config['structures']['pocket_full_mode'] = False
+                elif not isinstance(config['structures']['pocket_full_mode'], bool):
+                    errors.append(f"structures.pocket_full_mode must be boolean (got {config['structures']['pocket_full_mode']})")
     
+    #Validate colabfold section
+    if 'colabfold' in config:
+        if not isinstance(config['colabfold'], dict):
+            errors.append("'colabfold' must be a dictionary with 'enabled' key")
+        elif 'enabled' not in config['colabfold']:
+            errors.append("'colabfold' section missing 'enabled' key")
+        elif not isinstance(config['colabfold']['enabled'], bool):
+            errors.append(f"colabfold.enabled must be boolean (got {config['colabfold']['enabled']})")
+        else:
+            if config['colabfold']['enabled']:
+                # Set defaults for optional colabfold fields
+                config['colabfold'].setdefault('amber', False)
+                config['colabfold'].setdefault('gpu', False)
+                config['colabfold'].setdefault('colabfold_run_all', False)
+                
+                # Validate types
+                for bool_field in ['amber', 'gpu', 'colabfold_run_all']:
+                    if not isinstance(config['colabfold'][bool_field], bool):
+                        errors.append(f"colabfold.{bool_field} must be boolean (got {config['colabfold'][bool_field]})")
+
     # Validate metabolism-PathwayTools section
     if 'metabolism-PathwayTools' in config and config['metabolism-PathwayTools'].get('enabled'):
         met = config['metabolism-PathwayTools']
@@ -305,8 +356,19 @@ def print_config(config):
     print("\n---- Structures ----")
     if config.structures:
         print("Structures will be used in the analysis.")
+        print(f"Proteome UniProt ID: {config.structures['proteome_uniprot']}")
+        print(f"Pocket Full Mode: {config.structures['pocket_full_mode']}")
     else:
         print(f"Structures Enabled: {config.structures}")
+
+    print("\n---- ColabFold ----")
+    if config.colabfold:
+        print("ColabFold options:")
+        print(f"  Amber Refinement: {config.colabfold['amber']}")
+        print(f"  GPU Acceleration: {config.colabfold['gpu']}")
+        print(f"  Run All Models: {config.colabfold['colabfold_run_all']}")
+    else:
+        print(f"ColabFold Enabled: {config.colabfold}")
     
     print("\n---- Metabolism ----")
     if config.metabolism_pathwaytools:
@@ -378,6 +440,7 @@ def print_config(config):
     enabled_modules = []
     if config.metabolism_pathwaytools or config.metabolism_sbml: enabled_modules.append("Metabolism")
     if config.structures: enabled_modules.append("Structures") 
+    if config.colabfold: enabled_modules.append("ColabFold")
     if config.core: enabled_modules.append("Core Analysis")
     if config.offtarget: enabled_modules.append("Off-target")
     if config.deg: enabled_modules.append("DEG")
