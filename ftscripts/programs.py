@@ -375,6 +375,30 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False, container_engine='dock
         print(f"The file '{pdb_file}' not found.")
         raise FileNotFoundError(f'{pdb_file} not found.')
 
+def run_colabfold_batch(input_fasta, output_dir, amber=False, gpu_relax=False):
+    """
+    Run ColabFold batch script.
+    :param input_fasta: Input fasta file path.
+    :param output_dir: Output directory path.
+    :param amber: Whether to use AMBER for relaxation. Default False.
+    :param gpu_relax: Run amber on GPU. Default False.
+    """
+
+    if files.file_check(input_fasta):
+        colabfold_command = [
+            'colabfold_batch',
+            input_fasta,
+            output_dir
+        ]
+        if amber:
+            colabfold_command.extend(['--amber', '--num-models', '3', '--num-relax', '1'])
+        if gpu_relax:
+            colabfold_command.append('--use-gpu-relax')
+        
+        run_bash_command(colabfold_command)
+    else:
+        logging.error(f"Input fasta file '{input_fasta}' not found.")  
+
 def run_metagraphtools(work_dir, model_file, filter_file=None, chokepoints=True, graph=True, container_engine='docker'):
     
     """
