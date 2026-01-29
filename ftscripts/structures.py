@@ -1973,6 +1973,574 @@ def get_chain_reference_structure(output_path, organism_name):
         else:
             print(f'  Structure summary table not found for {locus_tag}, skipping chain extraction.')
 
+
+def find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False):
+    """
+    Find ONLY the reference structure for a given locus_tag directory.
+    
+    Selection rules (DEFAULT TRACK - PDB/AF priority, CB as fallback only):
+    1) Look for PDB reference structures (*_ref.pdb)
+       (These are PDB chains extracted by extract_chain_from_pdb)
+    2) If no '_ref.pdb' found, use AlphaFold models: files starting with 'AF_'
+       (AlphaFold files don't need chain extraction)
+    3) If no AlphaFold, use ColabFold models: files starting with 'CB_' if colabfold=True
+       (ColabFold models generated locally - only as FALLBACK)
+    4) If nothing found, return None
+    
+    NOTE: When colabfold_all_models=True, this function still returns ONLY the
+    reference structure for the default pipeline. CB models are handled separately
+    in the parallel ColabFold track.
+    
+    :param locus_dir: Path to the locus_tag directory.
+    :param colabfold: Boolean indicating whether to consider ColabFold models as fallback.
+    :param colabfold_all_models: Boolean (ignored here - CB handled separately in parallel track).
+    :return: List of paths to structures to use.
+    """
+
+    # 1) First priority: Reference structures (*_ref.pdb)
+    # Exclude folder pockets
+    pdb_files = glob.glob(os.path.join(locus_dir, '**', 'PDB_*.pdb'), recursive=True)
+    ref_files = glob.glob(os.path.join(locus_dir, '**', 'PDB*_ref.pdb'), recursive=True)
+    ref_files = [f for f in ref_files if 'pockets' not in f.split(os.sep)]
+    ref_files = sorted(set(ref_files))
+    
+    if len(ref_files) > 1:
+        print(f"  ERROR: Found {len(ref_files)} '*_ref.pdb' files in {locus_dir}. There should be only ONE reference.")
+        print(f"  Files found: {ref_files}")
+        print(f"  Using first file: {ref_files[0]}")
+        return ref_files
+    elif len(ref_files) == 1:
+        print(f"  Using PDB reference: {ref_files[0]}")
+        return ref_files
+    elif len(ref_files) == 0 and len(pdb_files) > 1:
+        print(f"  ERROR: Found {len(pdb_files)} PDB files in {locus_dir} but no '*_ref.pdb' file.")
+        logging.warning(f" Error with reference structures in {locus_dir}. Please ensure that one PDB structure is marked as reference.")
+
+    
+    # 2) Second priority: AlphaFold models (if no PDB ref exists)
+    # Exclude folder pockets
+    af_pdbs = glob.glob(os.path.join(locus_dir, '**', 'AF_*.pdb'), recursive=True)
+    af_pdbs = [f for f in af_pdbs if 'pockets' not in f.split(os.sep)]
+    af_pdbs = sorted(set(af_pdbs))
+    
+    if len(af_pdbs) > 1:
+        print(f"  Warning: Found {len(af_pdbs)} AlphaFold models in {locus_dir}. Using first one.")
+        print(f"  Using AlphaFold: {af_pdbs[0]}")
+        return af_pdbs
+    elif len(af_pdbs) == 1:
+        #print(f"  Using AlphaFold model: {af_pdbs[0]}")
+        return af_pdbs
+    
+    # 3) Third priority: ColabFold models (if no AlphaFold exists - FALLBACK ONLY)
+    # Exclude folder pockets
+    if colabfold:
+        cb_pdbs = glob.glob(os.path.join(locus_dir, 'CB_*.pdb'))
+        cb_pdbs = [f for f in cb_pdbs if 'pockets' not in f.split(os.sep) and 'colabfold_models' not in f.split(os.sep)]
+        cb_pdbs = sorted(set(cb_pdbs))
+        
+        if len(cb_pdbs) > 1:
+            print(f"  Warning: Found {len(cb_pdbs)} ColabFold models in {locus_dir}. Using first one.")
+            print(f"  Using ColabFold: {cb_pdbs[0]}")
+            return cb_pdbs
+        elif len(cb_pdbs) == 1:
+            print(f"  Using ColabFold model: {cb_pdbs[0]}")
+            return cb_pdbs
+    
+    # 4) No reference structure found
+    print(f"  Warning: No reference structure found in {locus_dir} (checked: *_ref.pdb, AF_*.pdb, CB_*.pdb)")
+    return None
+
+
+##  ------------------- ColabFold functions ------------------- ##
+
+
+def find_colabfold_for_locus(locus_dir):
+    """
+    Find ColabFold model for parallel processing (when colabfold_run_all=True).
+    This is separate from the default structure selection.
+    
+    :param locus_dir: Path to the locus_tag directory.
+    :return: List with ColabFold model path, or None if not found.
+    """
+    cb_pdbs = glob.glob(os.path.join(locus_dir, 'CB_*.pdb'))
+    cb_pdbs = [f for f in cb_pdbs if 'pockets' not in f.split(os.sep) and 'colabfold_models' not in f.split(os.sep)]
+    cb_pdbs = sorted(set(cb_pdbs))
+    
+    if len(cb_pdbs) >= 1:
+        # Return first CB model for parallel track
+        return [cb_pdbs[0]]
+    
+    return None
+
+def locus_tag_to_fasta(locus_tag, gbk_path, output_fasta):
+    """
+    Extract the sequence for a given locus_tag from a GenBank file and save it to a FASTA file.
+    :param locus_tag: Locus tag identifier.
+    :param gbk_path: Path to the GenBank file.
+    :param output_fasta: Path to the output FASTA file.
+    """
+    from Bio import SeqIO
+
+    with open(gbk_path, 'r') as gbk_file:
+        for record in SeqIO.parse(gbk_file, 'genbank'):
+            for feature in record.features:
+                if feature.type == 'CDS' and 'locus_tag' in feature.qualifiers:
+                    if locus_tag in feature.qualifiers['locus_tag']:
+                        sequence = feature.qualifiers.get('translation', [''])[0]
+                        if sequence:
+                            with open(output_fasta, 'w') as fasta_file:
+                                fasta_file.write(f">{locus_tag}\n{sequence}\n")
+                            print(f"Extracted sequence for {locus_tag} to {output_fasta}")
+                            return
+    
+    # If we reach here, locus_tag was not found
+    logging.error(f"Locus tag {locus_tag} not found in {gbk_path}")
+
+def get_colabfold_plddt(colabfold_dir):
+    """
+    Extract average pLDDT score from ColabFold JSON output.
+    
+    :param colabfold_dir: Directory containing ColabFold results.
+    :return: Average pLDDT score as float, or None if not found.
+    """
+    import json
+    
+    # Find the scores JSON file for rank_001
+    scores_files = glob.glob(os.path.join(colabfold_dir, "*_scores_rank_001*.json"))
+    
+    if not scores_files:
+        logging.warning(f"No pLDDT scores file found in {colabfold_dir}")
+        return None
+    
+    scores_file = scores_files[0]
+    
+    try:
+        with open(scores_file, 'r') as f:
+            scores_data = json.load(f)
+        
+        # The JSON contains a 'plddt' key with a list of per-residue scores
+        if 'plddt' in scores_data:
+            plddt_values = scores_data['plddt']
+            if plddt_values:
+                avg_plddt = sum(plddt_values) / len(plddt_values)
+                return round(avg_plddt, 2)
+        
+        logging.warning(f"No 'plddt' key found in {scores_file}")
+        return None
+        
+    except Exception as e:
+        logging.error(f"Error reading pLDDT scores from {scores_file}: {e}")
+        return None
+
+def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_path, plddt_score):
+    """
+    Update or create the structure summary table to include ColabFold model.
+    
+    :param locus_dir: Directory of the locus_tag.
+    :param locus_tag: Locus tag identifier.
+    :param uniprot_id: UniProt ID associated with the locus_tag.
+    :param model_path: Path to the ColabFold model PDB file.
+    :param plddt_score: Average pLDDT score.
+    """
+    summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
+
+    # Create a new entry for the ColabFold model
+    colabfold_entry = {
+        "locus_tag": locus_tag,
+        "uniprot_id": uniprot_id,
+        "structure_type": "ColabFold",
+        "structure_id": "CB_" + locus_tag,
+        "method": "AlphaFold2",
+        "resolution": None,
+        "chain": "A",
+        "residue_range": None,
+        "coverage": 100.0,
+        "sequence_length": None,
+        "is_reference": True,
+        "plddt": plddt_score
+    }
+    
+    # Check if summary table exists
+    if os.path.exists(summary_table_path):
+        # Read existing table
+        summary_df = pd.read_csv(summary_table_path, sep='\t')
+        
+        # Check for existing ColabFold entry
+        existing_cf = summary_df[
+            (summary_df['structure_type'] == 'ColabFold')]
+
+        if not existing_cf.empty:
+            logging.info(f"ColabFold entry already exists in summary table for {locus_tag}, skipping update.")
+            return
+
+        # Add plddt column if it doesn't exist
+        if 'plddt' not in summary_df.columns:
+            summary_df['plddt'] = None
+               
+        # Append ColabFold entry
+        summary_df = pd.concat([summary_df, pd.DataFrame([colabfold_entry])], ignore_index=True)
+    else:
+        # Create new table with just the ColabFold entry
+        summary_df = pd.DataFrame([colabfold_entry])
+    
+    # Save updated table
+    summary_df.to_csv(summary_table_path, sep='\t', index=False)
+    logging.info(f"Updated summary table for {locus_tag} with ColabFold model (pLDDT: {plddt_score})")
+
+def make_models_colabfold(output_path, organism_name, amber_option=False, gpu_option=False):
+    """
+    Run ColabFold to generate models for sequences without structures.
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param amber_option: If True, generate Amber-relaxed models.
+    :param gpu_option: If True, use GPU for Amber relaxation.
+    """
+
+    structures_dir = os.path.join(output_path, organism_name, "structures")
+    
+    if not os.path.exists(structures_dir):
+        logging.error(f"The directory '{structures_dir}' was not found.")
+        return
+
+    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
+
+    if files.file_check(proteome_ids_file):
+        map_results = files.json_to_dict(proteome_ids_file)
+    else:
+        map_results = {}
+        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
+
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
+
+    for locus_tag in tqdm(all_locus, desc='Locus tags'):
+
+        if locus_tag in map_results:
+            uniprot_id = map_results[locus_tag]
+            if isinstance(uniprot_id, list):
+                uniprot_id = uniprot_id[0]  # Get first UniProt ID
+        else:
+            uniprot_id = None  
+
+        locus_dir = os.path.join(structures_dir, locus_tag)
+        colab_dir = os.path.join(locus_dir, "colabfold_models")
+
+        relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
+        unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
+
+        dest_file = relaxed_file if amber_option else unrelaxed_file
+
+        if os.path.exists(locus_dir):
+            
+            if not files.file_check(dest_file):
+                # Check if there are ANY downloaded structures (PDB or AlphaFold)
+                # This prevents ColabFold from running when structures exist but chain extraction failed
+                pdb_structures = (
+                    glob.glob(os.path.join(locus_dir, "**", "PDB_*.pdb"), recursive=True) +
+                    glob.glob(os.path.join(locus_dir, "**", "PDB_*.cif"), recursive=True)
+                )
+                af_structures = glob.glob(os.path.join(locus_dir, "**", "AF_*.pdb"), recursive=True)
+
+                if pdb_structures or af_structures:
+                    logging.info(f"Structures already exist for {locus_tag} (PDB: {len(pdb_structures)}, AF: {len(af_structures)}). Skipping ColabFold.")
+                    continue
+                
+                # Also check using find_structures_for_locus (checks for _ref.pdb)
+                pdb_file = find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False)
+                if not pdb_file:
+                    logging.info(f"No structures found for {locus_dir}")
+                    logging.info(f"Generating models with ColabFold for {locus_dir}")
+                    # Extract sequence to FASTA
+                    fasta_file = os.path.join(locus_dir, f"{locus_tag}.fasta")
+                    locus_tag_to_fasta(
+                        locus_tag,
+                        os.path.join(output_path, organism_name, "genome", f"{organism_name}.gbk"),
+                        fasta_file
+                    )
+                    
+                    os.makedirs(colab_dir, exist_ok=True)
+
+                    #Check if colab .done.txt file already exists to skip re-running
+                    output_colab_file = os.path.join(colab_dir, f"{locus_tag}.done.txt")
+                    if not os.path.exists(output_colab_file):
+                        programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
+                    else:
+                        logging.info(f"ColabFold .done.txt file found for {locus_tag}, skipping re-run.")
+                    # Expected output files:
+                    # 1BJP_1_relaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb
+                    # 1BJP_1_unrelaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb
+        
+                    model_copied = False
+                    if amber_option:
+                        #find resulting relaxed model pdb
+                        glob_pattern = os.path.join(colab_dir, "*_relaxed_rank_001*.pdb")
+                        relaxed_models = glob.glob(glob_pattern)
+                        if len(relaxed_models) == 1:
+                            logging.info(f"  ColabFold relaxed model generated for {locus_tag}: {relaxed_models[0]}")
+                            #copy to main locus_dir
+                            shutil.copy2(relaxed_models[0], dest_file)
+                            model_copied = True
+                        else:
+                            logging.warning(f"  Warning: Expected 1 relaxed model, found {len(relaxed_models)} for {locus_tag}")
+                    else:
+                        #find resulting unrelaxed model pdb
+                        glob_pattern = os.path.join(colab_dir, "*_unrelaxed_rank_001*.pdb")
+                        unrelaxed_models = glob.glob(glob_pattern)
+                        if len(unrelaxed_models) == 1:
+                            logging.info(f"  ColabFold unrelaxed model generated for {locus_tag}: {unrelaxed_models[0]}")
+                            #copy to main locus_dir
+                            shutil.copy2(unrelaxed_models[0], dest_file)
+                            model_copied = True
+                        else:
+                            logging.warning(f"  Warning: Expected 1 unrelaxed model, found {len(unrelaxed_models)} for {locus_tag}")
+                    
+                    # Update summary table with ColabFold model
+                    if model_copied:
+                        plddt_score = get_colabfold_plddt(colab_dir)
+                        update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+                        logging.info(f"  Added ColabFold model to summary table for {locus_tag}")
+            else:
+                logging.info(f"ColabFold model already exists for {locus_tag}.")
+                plddt_score = get_colabfold_plddt(colab_dir)
+                update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+                print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
+        else:
+            logging.error(f"The directory '{locus_dir}' was not found.")
+
+def make_models_colabfold_all_proteins(output_path, organism_name, amber_option=False, gpu_option=False):
+    """
+    Run ColabFold to generate models for ALL proteins in the genome,
+    regardless of existing structures.
+    
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param amber_option: If True, generate Amber-relaxed models.
+    :param gpu_option: If True, use GPU for Amber relaxation.
+    """
+    structures_dir = os.path.join(output_path, organism_name, "structures")
+    
+    if not os.path.exists(structures_dir):
+        logging.error(f"The directory '{structures_dir}' was not found.")
+        return
+
+    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
+
+    if files.file_check(proteome_ids_file):
+        map_results = files.json_to_dict(proteome_ids_file)
+    else:
+        map_results = {}
+        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
+
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
+
+    for locus_tag in tqdm(all_locus, desc='Locus tags'):
+
+        if locus_tag in map_results:
+            uniprot_id = map_results[locus_tag]
+            if isinstance(uniprot_id, list):
+                uniprot_id = uniprot_id[0]  # Get first UniProt ID
+        else:
+            uniprot_id = None  
+
+        locus_dir = os.path.join(structures_dir, locus_tag)
+        colab_dir = os.path.join(locus_dir, "colabfold_models")
+
+        relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
+        unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
+
+        dest_file = relaxed_file if amber_option else unrelaxed_file
+
+        if os.path.exists(locus_dir):
+            
+            if not files.file_check(dest_file):
+                logging.info(f"Generating models with ColabFold for {locus_dir}")
+                # Extract sequence to FASTA
+                fasta_file = os.path.join(locus_dir, f"{locus_tag}.fasta")
+                locus_tag_to_fasta(
+                    locus_tag,
+                    os.path.join(output_path, organism_name, "genome", f"{organism_name}.gbk"),
+                    fasta_file
+                )
+                
+                
+                os.makedirs(colab_dir, exist_ok=True)
+
+                programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
+    
+                model_copied = False
+                if amber_option:
+                    #find resulting relaxed model pdb
+                    glob_pattern = os.path.join(colab_dir, "*_relaxed_rank_001*.pdb")
+                    relaxed_models = glob.glob(glob_pattern)
+                    if len(relaxed_models) == 1:
+                        logging.info(f"  ColabFold relaxed model generated for {locus_tag}: {relaxed_models[0]}")
+                        #copy to main locus_dir
+                        shutil.copy2(relaxed_models[0], dest_file)
+                        model_copied = True
+                    else:
+                        logging.warning(f"  Warning: Expected 1 relaxed model, found {len(relaxed_models)} for {locus_tag}")
+                else:
+                    #find resulting unrelaxed model pdb
+                    glob_pattern = os.path.join(colab_dir, "*_unrelaxed_rank_001*.pdb")
+                    unrelaxed_models = glob.glob(glob_pattern)
+                    if len(unrelaxed_models) == 1:
+                        logging.info(f"  ColabFold unrelaxed model generated for {locus_tag}: {unrelaxed_models[0]}")
+                        #copy to main locus_dir
+                        shutil.copy2(unrelaxed_models[0], dest_file)
+                        model_copied = True
+                    else:
+                        logging.warning(f"  Warning: Expected 1 unrelaxed model, found {len(unrelaxed_models)} for {locus_tag}")
+                # Update summary table with ColabFold model
+                if model_copied:
+                    plddt_score = get_colabfold_plddt(colab_dir)
+                    update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+                    logging.info(f"  Added ColabFold model to summary table for {locus_tag}")
+            else:
+                plddt_score = get_colabfold_plddt(colab_dir)
+                update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+                logging.info(f"ColabFold model already exists for {locus_tag}.")
+                print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
+        else:
+            logging.error(f"The directory '{locus_dir}' was not found.")
+
+##  ------------------- Pocket functions ------------------- ##
+
+def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=3.5, colabfold=False, colabfold_all_models=False):
+    """
+    Select structures for pocket prediction based on the specified mode.
+    
+    Modes:
+    - 'ref': Select only the reference structure.
+    - 'all': Select all available structures.
+
+    :param locus_dir: Path to the locus_tag directory.
+    :param full_mode: Boolean, if True processes all structures in each locus directory.
+    :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
+    :param colabfold: Boolean, if True includes ColabFold models in the selection.
+    :param colabfold_all_models: Boolean, if True includes all ColabFold models instead of just the top-ranked one.
+    
+    :return: Both lists: 1) paths to selected structures, 2) their IDs.
+    """
+    selected_structures_path = []
+    selected_structures_ids = []
+
+    locus_tag = os.path.basename(locus_dir)
+    
+    summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
+
+    if not full_mode:
+        ref_structure = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
+        if ref_structure:
+            selected_structures_path.extend(ref_structure)
+        else:
+            print(f"  Warning: No reference structure found in {locus_dir}.")
+    else:
+        elegible_pdbs = False
+        elegible_af = False
+        if files.file_check(summary_table_path):
+            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
+            #DF of PDBS
+            PDBs_summary_df = summary_df[summary_df['structure_type'] == 'PDB']
+            AFs_summary_df = summary_df[summary_df['structure_type'] == 'AlphaFold']
+            CFs_summary_df = summary_df[summary_df['structure_type'] == 'ColabFold']
+
+            for _, row in PDBs_summary_df.iterrows():
+                uniprot_id = row['uniprot_id']
+                if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+                    print(f"  Warning: Missing UniProt ID for structure {row['structure_id']} in {locus_dir}, skipping.")
+                    continue
+
+                struct_type = row['structure_type']
+                struct_id = row['structure_id']
+                coverage = row.get('coverage', None)
+                resolution = row.get('resolution', None)
+                
+                uniprot_dir = os.path.join(locus_dir, uniprot_id)
+                
+                if coverage > 50 and (resolution is not None and resolution <= resolution_cutoff):
+                    
+                    # PDB files - look for chain extracted files
+                    pdb_glob = os.path.join(uniprot_dir, f"PDB_{struct_id}_*.pdb")
+                    pdb_files = glob.glob(pdb_glob)
+                    # Cif files - look for chain extracted files
+                    cif_glob = os.path.join(uniprot_dir, f"PDB_{struct_id}_*.cif")
+                    cif_files = glob.glob(cif_glob)
+
+                    if pdb_files:
+                        pdb_file_path = pdb_files[0]
+                        # Check file validity
+                        try:
+                            pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
+                        except OSError:
+                            pdb_valid = False
+                    else:
+                        pdb_file_path = None
+                        pdb_valid = False
+                    
+                    if cif_files:
+                        cif_file_path = cif_files[0]
+                        try:
+                            cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
+                        except OSError:
+                            cif_valid = False
+                    else:
+                        cif_file_path = None
+                        cif_valid = False                    
+
+                    
+                    if pdb_valid:
+                        selected_structures_path.extend([pdb_file_path])
+                        selected_structures_ids.extend([struct_id])
+                        elegible_pdbs = True
+                    elif cif_valid:
+                        selected_structures_path.extend([cif_file_path])
+                        selected_structures_ids.extend([struct_id])
+                        elegible_pdbs = True
+                    else:
+                        print(f"  Warning: No valid PDB or CIF file for {struct_id} in {locus_dir}.")
+            
+            if not elegible_pdbs and not AFs_summary_df.empty:
+                for _, row in AFs_summary_df.iterrows():
+                    uniprot_id = row['uniprot_id']
+                    if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+                        print(f"  Warning: Missing UniProt ID for AlphaFold structure in {locus_dir}, skipping.")
+                        continue
+                    uniprot_dir = os.path.join(locus_dir, uniprot_id)
+                    af_file_path = os.path.join(uniprot_dir, f"AF_{uniprot_id}.pdb")
+                                        
+                    try:
+                        af_valid = files.file_check(af_file_path) and os.path.getsize(af_file_path) > 0
+                    except OSError:
+                        af_valid = False
+                    
+                    if af_valid:
+                        selected_structures_path.extend([af_file_path])
+                        selected_structures_ids.extend([f"AF_{uniprot_id}"])
+                        elegible_af = True
+                    else:
+                        print(f"  Warning: No valid AlphaFold file for {uniprot_id} in {locus_dir}.")
+            if not elegible_pdbs and not elegible_af and not CFs_summary_df.empty:
+                for _, row in CFs_summary_df.iterrows():
+                    struct_id = row['structure_id']
+                    # Look for CB_*.pdb in locus_dir
+                    glob_pattern = os.path.join(locus_dir, f"{struct_id}*.pdb")
+                    cf_files = glob.glob(glob_pattern)
+                    if not cf_files:
+                        print(f"  Warning: No ColabFold file found for {struct_id} in {locus_dir}.")
+                        continue 
+                    cf_file_path = cf_files[0]
+                    try:
+                        cf_valid = files.file_check(cf_file_path) and os.path.getsize(cf_file_path) > 0
+                    except OSError:
+                        cf_valid = False
+                    
+                    if cf_valid:
+                        selected_structures_path.extend([cf_file_path])
+                        selected_structures_ids.extend([struct_id])
+                    else:
+                        print(f"  Warning: No valid ColabFold file for {locus_dir}.")       
+    return selected_structures_path, selected_structures_ids
+
+
 ##  ------------------- FPocket functions ------------------- ##
 def FPocket_models(directory):
     """
