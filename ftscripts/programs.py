@@ -116,36 +116,6 @@ def run_bash_command_with_retries(cmd_list, retries=3, delay=5):
 
     return None
 
-'''
-def run_bash_command(command):
-    """
-    Run a bash command.
-
-    :param command: The command to run.
-    """
-    try:
-        print(f'Running: {command}')
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        stdout, stderr = process.communicate()
-        print(f"STDOUT:\n{stdout}")  # Print stdout regardless of success/failure
-        print(f"STDERR:\n{stderr}")
-
-        if process.returncode == 0:
-            print("Command executed successfully.")
-            if stdout:
-                print(f"STDOUT:\n{stdout}")
-            if stderr:
-                print(f"STDERR:\n{stderr}")
-        else:
-            print(f"Command failed with return code {process.returncode}.")
-            if stderr:
-                print(f"STDERR:\n{stderr}")
-            raise Exception(f"Command failed with return code {process.returncode}.")
-
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-'''
 
 def run_bash_command(cmd_list, capture_output=True):
     """
