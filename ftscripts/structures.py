@@ -3380,58 +3380,218 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
             p2rank_data = data.get('p2rank_colabfold_pockets', {})
         else:
             fpocket_data = data.get('fpocket_best_pockets', {})
-            
-            druggability_score = None
-            fpocket_pocket = None
-            
-            if fpocket_data and structure_id:
-                # For AlphaFold structures, use UniProt ID as key
-                # For PDB structures, use PDB code as key
-                if structure_type == 'AlphaFold':
-                    pocket_key = uniprot_id
-                else:
-                    pocket_key = structure_id
-                
-                pocket_info = fpocket_data.get(pocket_key)
-                if pocket_info:
-                    if pocket_info != 'No_pockets':
-                        druggability_score = pocket_info.get('maxDS')
-                        fpocket_pocket = pocket_info.get('pocket')
-                    else:
-                        fpocket_pocket = 'No_pockets'
-            
-            # ========== P2Rank Data ==========
             p2rank_data = data.get('p2rank_best_pockets', {})
+        
+        # ========== FPocket Data ==========
+        druggability_score = None
+        fpocket_pocket = None
+        
+        if fpocket_data and structure_id:
+            # For AlphaFold structures, use UniProt ID as key
+            # For PDB structures, use PDB code as key
+            if structure_type == 'AlphaFold':
+                pocket_key = uniprot_id
+            elif structure_type == 'ColabFold':
+                pocket_key = f'CB_{locus_tag}'
+            else:
+                pocket_key = structure_id
             
-            p2rank_probability = None
-            p2rank_pocket = None
-            
-            if p2rank_data and structure_id:
-                # For AlphaFold structures, use UniProt ID as key
-                # For PDB structures, use PDB code as key
-                if structure_type == 'AlphaFold':
-                    pocket_key = uniprot_id
+            pocket_info = fpocket_data.get(pocket_key)
+            if pocket_info:
+                if pocket_info != 'No_pockets':
+                    druggability_score = pocket_info.get('maxDS')
+                    fpocket_pocket = pocket_info.get('pocket')
                 else:
-                    pocket_key = structure_id
-                
-                pocket_info = p2rank_data.get(pocket_key)
-                if pocket_info:
-                    if pocket_info != 'No_pockets':
-                        p2rank_probability = pocket_info.get('max_probability')
-                        p2rank_pocket = pocket_info.get('pocket')
-                    else:
-                        p2rank_pocket = 'No_pockets'
+                    fpocket_pocket = 'No_pockets'
+        
+        # ========== P2Rank Data ==========
+        p2rank_probability = None
+        p2rank_pocket = None
+        
+        if p2rank_data and structure_id:
+            # For AlphaFold structures, use UniProt ID as key
+            # For PDB structures, use PDB code as key
+            if structure_type == 'AlphaFold':
+                pocket_key = uniprot_id
+            elif structure_type == 'ColabFold':
+                pocket_key = f'CB_{locus_tag}'
+            else:
+                pocket_key = structure_id
             
-            # Add ONE row per locus_tag
-            rows.append({
+            pocket_info = p2rank_data.get(pocket_key)
+            if pocket_info:
+                if pocket_info != 'No_pockets':
+                    p2rank_probability = pocket_info.get('max_probability')
+                    p2rank_pocket = pocket_info.get('pocket')
+                else:
+                    p2rank_pocket = 'No_pockets'
+                    
+        return druggability_score, fpocket_pocket, p2rank_probability, p2rank_pocket
+    
+    if not files.file_check(final_table_file):
+        
+        if not files.file_check(merged_file):
+            merged_dict = merge_structure_data(output_path, organism_name)
+        else:
+            merged_dict = files.json_to_dict(merged_file)
+
+        rows = []
+        all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
+
+        for locus_tag in all_locus_tags:
+
+            # Get uniprot id from proteome mapping
+            if map_results:
+                uniprot_id = map_results.get(locus_tag)
+                if isinstance(uniprot_id, list):
+                    uniprot_id = uniprot_id[0]
+            else:
+                uniprot_id = None
+
+            # Get pocket data for the reference structure
+            data = merged_dict.get(locus_tag, {})
+
+            # Get UniProt ID and structure ID from REFERENCE structure only
+            structure_summary_path = os.path.join(
+                structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv"
+            )
+            
+            structure_id = None
+            structure_ids = None
+            structure_type = None
+            
+            if files.file_check(structure_summary_path):
+                # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
+                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str})
+                
+                druggability_score = None
+                fpocket_pocket = None
+                p2rank_probability = None
+                p2rank_pocket = None
+                colabfold_best_pocket = None
+                colabfold_plddt = None
+                fp_uniprot_id = None
+                pr_uniprot_id = None
+                CB_druggability_score = None
+                CB_fpocket_pocket = None
+                CB_p2rank_probability = None
+                CB_p2rank_pocket = None
+
+                
+
+                if not full_mode:
+                
+                    ref_rows = struct_df[struct_df['is_reference'] == True]
+                    
+                    if not ref_rows.empty:
+                        if len(ref_rows) > 1:
+                            print(f'  Warning: Multiple reference structures for {locus_tag}, using first.')
+                        ref_row = ref_rows.iloc[0]
+                        if ref_row['uniprot_id'] != uniprot_id:
+                            print(f'  Warning: Different UniProt ID in reference structure ({ref_row["uniprot_id"]}) and mapping ({uniprot_id}) for {locus_tag}.')
+                            uniprot_id = ref_row['uniprot_id']
+                        structure_id = ref_row['structure_id']
+                        structure_type = ref_row['structure_type']
+
+                        use_colabfold_track = (structure_type == 'ColabFold' and colabfold)
+
+                        druggability_score, fpocket_pocket, p2rank_probability, p2rank_pocket = get_pocket_data(locus_tag, uniprot_id, structure_id, structure_type, data, colabfold_track=use_colabfold_track)
+                else:
+
+                    # Select best structure for FPocket and P2Rank independently
+                    fpocket_best = data.get('fpocket_best_pockets') or data.get('fpocket_colabfold_pockets') or {}
+                    p2rank_best = data.get('p2rank_best_pockets') or data.get('p2rank_colabfold_pockets') or {}
+
+                    best_fpocket_id = next(iter(fpocket_best.keys()), None)
+                    best_p2rank_id = next(iter(p2rank_best.keys()), None)
+
+                    all_structures_list = [s for s in struct_df['structure_id'].tolist() if s not in (None, 'NONE', 'nan', float('nan'), '')]
+                    structure_ids = set(all_structures_list)
+
+                    if not structure_ids:
+                        structure_ids = None
+
+                    # Resolve FPocket best structure row
+                    if best_fpocket_id:
+                        fp_row = struct_df[struct_df['structure_id'] == best_fpocket_id]
+                        if not fp_row.empty:
+                            fp_row = fp_row.iloc[0]
+                            fp_uniprot_id = fp_row['uniprot_id']
+                            fp_structure_id = fp_row['structure_id']
+                            fp_structure_type = fp_row['structure_type']
+                            fp_use_colabfold = (fp_structure_type == 'ColabFold' and colabfold)
+
+                            druggability_score, fpocket_pocket, _, _ = get_pocket_data(
+                                locus_tag, fp_uniprot_id, fp_structure_id, fp_structure_type, data, colabfold_track=fp_use_colabfold
+                            )
+
+                    # Resolve P2Rank best structure row
+                    if best_p2rank_id:
+                        pr_row = struct_df[struct_df['structure_id'] == best_p2rank_id]
+                        if not pr_row.empty:
+                            pr_row = pr_row.iloc[0]
+                            pr_uniprot_id = pr_row['uniprot_id']
+                            pr_structure_id = pr_row['structure_id']
+                            pr_structure_type = pr_row['structure_type']
+                            pr_use_colabfold = (pr_structure_type == 'ColabFold' and colabfold)
+
+                            _, _, p2rank_probability, p2rank_pocket = get_pocket_data(
+                                locus_tag, pr_uniprot_id, pr_structure_id, pr_structure_type, data, colabfold_track=pr_use_colabfold
+                            )
+                                        
+                    uniprot_id = "|".join(set(x for x in [uniprot_id, fp_uniprot_id, pr_uniprot_id] if x is not None))
+
+                if colabfold_all_models:
+                    colab_rows = struct_df[struct_df['structure_type'] == 'ColabFold']
+                    if not colab_rows.empty:
+                        # Get first ColabFold row
+                        colab_row = colab_rows.iloc[0]
+                        colabfold_plddt = colab_row.get('plddt', None)
+                        cf_locus_tag = colab_row.get('locus_tag', locus_tag)
+                        cf_structure_id = colab_row.get('structure_id', None)
+                        cf_uniprot_id = colab_row.get('uniprot_id', None)
+                        if cf_uniprot_id != uniprot_id:
+                            print(f'  Warning: Different UniProt ID in ColabFold structure ({cf_uniprot_id}) and mapping ({uniprot_id}) for {locus_tag}.')
+                            
+                        # Extract ColabFold data from PARALLEL TRACK (colabfold_track=True)
+                        CB_druggability_score, CB_fpocket_pocket, CB_p2rank_probability, CB_p2rank_pocket = get_pocket_data(
+                            cf_locus_tag, cf_uniprot_id, cf_structure_id, 'ColabFold', data, colabfold_track=True
+                        )
+
+            row = {
                 'gene': locus_tag,
                 'uniprot': uniprot_id,
-                'structure': structure_id,
-                'druggability_score': druggability_score,
-                'fpocket_pocket': fpocket_pocket,
-                'p2rank_probability': p2rank_probability,
-                'p2rank_pocket': p2rank_pocket
-            })
+            }
+
+            if full_mode:
+                row.update({
+                    'structure': structure_ids,
+                    'best_fpocket_structure': best_fpocket_id,
+                    'druggability_score': druggability_score,
+                    'fpocket_pocket': fpocket_pocket,
+                    'best_p2rank_structure': best_p2rank_id,
+                    'p2rank_probability': p2rank_probability,
+                    'p2rank_pocket': p2rank_pocket,
+                })
+            else:
+                row.update({
+                    'structure': structure_id,
+                    'druggability_score': druggability_score,
+                    'fpocket_pocket': fpocket_pocket,
+                    'p2rank_probability': p2rank_probability,
+                    'p2rank_pocket': p2rank_pocket,
+                })
+
+            if colabfold_all_models:
+                row.update({
+                    'colabfold_plddt': colabfold_plddt,
+                    'colabfold_druggability_score': CB_druggability_score,
+                    'colabfold_fpocket_pocket': CB_fpocket_pocket,
+                    'colabfold_p2rank_probability': CB_p2rank_probability,
+                    'colabfold_p2rank_pocket': CB_p2rank_pocket,
+                })
+
+            rows.append(row)
 
         final_df = pd.DataFrame(rows)
         # Ensure structure column is stored as string to prevent scientific notation issues
@@ -3451,7 +3611,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
-def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, container_engine='docker'):
+def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False):
     """
     Complete pipeline to obtain and process structures for drug target identification.
     
@@ -3469,7 +3629,11 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     :param cpus: Number of CPU cores to use. Default is all available cores.
     :param resolution_cutoff: Resolution cutoff for structure selection (default: 3.5 Å).
     :param container_engine: Container engine to use ('docker' or 'singularity').
-
+    :param full_mode: Boolean indicating whether to run the pipeline in full mode (default: False).
+    :param amber_option: Boolean indicating whether to use Amber refinement (default: False).
+    :param gpu_option: Boolean indicating whether to use GPU acceleration (default: False).
+    :param colabfold: Boolean indicating whether to run ColabFold or not (default: False).
+    :param colabfold_all_models: Boolean indicating whether to run ColabFold for all proteins (default: False).
     :return: DataFrame with final structure summary table.
     """
     
@@ -3532,11 +3696,39 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
             download_structures(output_path, organism_name)
             
             print(f'\n[2.4] Extracting reference structure chains...')
-            get_chain_reference_structure(output_path, organism_name)
+            if not full_mode:
+                get_chain_reference_structure(output_path, organism_name)
+            else:
+                get_chain_all_pdbs(output_path, organism_name)
             
         except Exception as e:
             logging.exception(f'\n    ✗ ERROR in Stage 2: {e}')
             raise
+        
+        # ========== STAGE 2.5: ColabFold Model Generation (for missing structures) ==========
+        print(f'\n{"─"*80}')
+        print(f'STAGE 2.5: COLABFOLD MODEL GENERATION FOR MISSING STRUCTURES')
+        print(f'{"─"*80}')
+        
+        if colabfold and not colabfold_all_models:
+            try:
+                print(f'\n[2.5.1] Generating ColabFold models for genes without structures...')
+                make_models_colabfold(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
+                print(f'    ✓ ColabFold model generation complete')
+                
+            except Exception as e:
+                logging.exception(f'\n    ✗ ERROR in Stage 2.5: {e}')
+                raise
+
+        if colabfold and colabfold_all_models:
+            try:
+                print(f'\n[2.5.1] Generating ColabFold models for ALL genes in the organism...')
+                make_models_colabfold_all_proteins(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
+                print(f'    ✓ ColabFold model generation complete')
+                
+            except Exception as e:
+                logging.exception(f'\n    ✗ ERROR in Stage 2.5: {e}')
+                raise
         
         # ========== STAGE 3: Pocket Detection ==========
         print(f'\n{"─"*80}')
@@ -3546,17 +3738,17 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         try:
             print(f'\n[3.1] Running FPocket for all structures...')
             structures_dir = os.path.join(output_path, organism_name, 'structures')
-            pockets_finder_for_all_loci(output_path, organism_name, container_engine=container_engine)
+            pockets_finder_for_all_loci(output_path, organism_name, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
             
             print(f'\n[3.2] Running P2Rank for all structures...')
-            p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine=container_engine)
+            p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
             
             print(f'\n[3.3] Merging structure and pocket data...')
-            merged_data = merge_structure_data(output_path, organism_name)
+            merged_data = merge_structure_data(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
             print(f'    ✓ Processed {len(merged_data)} genes')
             
             print(f'\n[3.4] Creating final summary table...')
-            final_df = final_structure_table(output_path, organism_name)
+            final_df = final_structure_table(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
             
         except Exception as e:
             logging.exception(f'\n    ✗ ERROR in Stage 3: {e}')
@@ -3603,7 +3795,7 @@ def get_reference_structure_path(output_path, organism_name, locus_tag):
         return None
     
     # Use existing function to find reference structure
-    reference_path = find_structures_for_locus(locus_dir)
+    reference_path = find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False)[0]
     
     return reference_path
 
