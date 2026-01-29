@@ -167,9 +167,34 @@ def structure_module(config, databases_path, output_path, cpus):
 
             logging.info(f'Species Tax ID: {tax_id}')
             logging.info(f'Strain Tax ID: {strain_taxid}')
+
+            pocket_full_mode = config.structures.get('pocket_full_mode', False)
+            logging.info(f'Pocket full mode: {pocket_full_mode}')
+
+            #Colabfold options
+            amber_option = False
+            gpu_option = False
+            colabfold_all_models_option = False
+            if config.colabfold:
+                amber_option = config.colabfold.get('amber', False)
+                gpu_option = config.colabfold.get('gpu', False)
+                colabfold_all_models_option = config.colabfold.get('colabfold_run_all', False)
+            logging.info(f'ColabFold Amber option: {amber_option}')
+            logging.info(f'ColabFold GPU option: {gpu_option}')
+            logging.info(f'ColabFold Run All Models option: {colabfold_all_models_option}')
             
             # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
-            df_structures = structures.pipeline_structures(output_path, organism_name, tax_id, strain_taxid, cpus=cpus, container_engine=config.container_engine)
+            df_structures = structures.pipeline_structures(output_path, 
+                                                            organism_name, 
+                                                            tax_id, 
+                                                            strain_taxid, 
+                                                            cpus=cpus, 
+                                                            container_engine=config.container_engine, 
+                                                            full_mode=pocket_full_mode, 
+                                                            amber_option=amber_option, 
+                                                            gpu_option=gpu_option,
+                                                            colabfold=config.colabfold,
+                                                            colabfold_all_models=colabfold_all_models_option)
             logging.info('Structures analysis finished')
             module_tables.append(df_structures)
 
