@@ -1428,7 +1428,11 @@ def get_structure_alphafold(output_path, uniprot_id):
                 elif response.status_code == 404:
                     # 404 means AlphaFold prediction doesn't exist for this UniProt ID
                     print(f"AlphaFold prediction not available for {uniprot_id} (404).")
+                    marker_path = os.path.join(output_path, f".no_af_{uniprot_id}")
+                    with open(marker_path, "w") as fh:
+                        fh.write("404")
                     break
+
                 else:
                     print(f"Failed to download AlphaFold for {uniprot_id}, status code: {response.status_code}")
             except requests.exceptions.RequestException as e:
