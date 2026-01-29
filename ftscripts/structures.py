@@ -848,7 +848,7 @@ def parse_chain_string(chains_str):
     Handles multiple formats from UniProt PDB chain annotations:
     - Single chain: "A=1-139" → [('A', 1, 139)]
     - Homooligomer (identical chains): "A/B/C=1-139" → [('A', 1, 139)]  # Only first chain
-    - Heterooligomer (different subunits): "A=24-193, B=217-762" → [('A', 24, 193), ('B', 217, 762)]  # ALL chains
+    - Fragmented protein (different subunits): "A=24-193, B=217-762" → [('A', 24, 193), ('B', 217, 762)]  # ALL chains
     - Mixed format: "A/B=27-512, C/P=528-536" → [('A', 27, 512), ('C', 528, 536)]  # First from each group
     - Chain without range: "A" → [('A', None, None)]
     
@@ -864,7 +864,7 @@ def parse_chain_string(chains_str):
 
     result = []
     
-    # Split by comma first to handle different subunits (HETEROOLIGOMER)
+    # Split by comma first to handle different subunits 
     subunits = [s.strip() for s in str(chains_str).split(',')]
     
     for subunit in subunits:
@@ -877,7 +877,7 @@ def parse_chain_string(chains_str):
             chain_part = chain_part.strip()
             range_part = range_part.strip()
             
-            # Handle multiple chains with same range (A/B/C=1-139) - HOMOOLIGOMER
+            # Handle multiple chains with same range (A/B/C=1-139)
             # These are identical - select FIRST chain only
             if '/' in chain_part:
                 chains = [c.strip() for c in chain_part.split('/')]
@@ -933,7 +933,7 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
     collects all structure entries (PDB and AlphaFold) and returns
     a list of dicts with structure information.
     
-    For heterooligomers (multiple chains separated by commas), stores ALL chain IDs
+    If protein is fragmented in multiple chains, stores ALL chain IDs
     in the 'chain' field as a semicolon-separated string.
     
     :param uniprot_id: Uniprot accession ID.
@@ -979,13 +979,13 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
             if resolution is not None and resolution <= resolution_cutoff:
                 has_good_resolution_pdb = True
 
-            # For heterooligomers: store ALL chains as semicolon-separated string
+            # For fragmented proteins: store ALL chains as semicolon-separated string
             if chain_info_list:
                 if len(chain_info_list) > 1:
-                    # Heterooligomer - multiple different subunits
+                    # Multiple different subunits
                     chain_ids = [c[0] for c in chain_info_list]
                     chain_id_str = ';'.join(chain_ids)
-                    print(f"    Heterooligomer detected for {pdb_id}: chains {chain_id_str}")
+                    print(f"Protein fragmented detected for {pdb_id}: chains {chain_id_str}")
                     # Use range from all chain for coverage calculation
                     start, end = chain_info_list[0][1], chain_info_list[len(chain_info_list)-1][2]
                 else:
@@ -1004,7 +1004,7 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
                 "structure_id": pdb_id,
                 "method": method,
                 "resolution": resolution,
-                "chain": chain_id_str,  # Now can be "A;B;C" for heterooligomers
+                "chain": chain_id_str,  # Can be "A;B;C" for fragmented proteins
                 "residue_range": f"{start}-{end}" if start is not None and end is not None else None,
                 "coverage": coverage,
                 "sequence_length": seq_len,
@@ -1529,9 +1529,7 @@ def download_structures(output_path, organism_name):
             
 def extract_chain_from_pdb(pdb_file, chain_ids, output_file):
     """
-    Extracts one or more specific chains from a PDB file using Biopython.
-    
-    For heterooligomers, pass multiple chain IDs to extract all functional subunits
+    Extracts one or more specific chains from a PDB file using Biopython
     into a single output file.
 
     :param pdb_file: Path to the input PDB file.
@@ -1551,7 +1549,7 @@ def extract_chain_from_pdb(pdb_file, chain_ids, output_file):
         Biopython Select subclass to filter multiple chains.
         
         Accepts chains whose IDs match any in the provided list.
-        Used for extracting heterooligomers (multiple different subunits).
+        Used for extracting different subunits.
         """
         def __init__(self, chain_ids: list):
             super().__init__()
@@ -1597,9 +1595,6 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
     
     This function is similar to extract_chain_from_pdb but works with mmCIF format files,
     which are commonly used for cryo-EM structures.
-    
-    For heterooligomers, pass multiple chain IDs to extract all functional subunits
-    into a single output file.
 
     :param cif_file: Path to the input CIF file.
     :param chain_ids: Single chain ID (str) or list of chain IDs to extract.
@@ -1619,7 +1614,7 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
         Biopython Select subclass to filter multiple chains.
         
         Accepts chains whose IDs match any in the provided list.
-        Used for extracting heterooligomers (multiple different subunits).
+        Used for extracting multiple different subunits.
         """
         def __init__(self, chain_ids: list):
             super().__init__()
@@ -1659,13 +1654,141 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
     chains_str = ','.join(chain_ids)
     print(f"    Extracted chain(s) {chains_str} from {Path(cif_file).name} (CIF)")
 
+def get_chain_all_pdbs(output_path, organism_name):
+    """
+    For each locus_tag, extract chain(s) from ALL downloaded PDB structures
+    listed in the structure summary table (not only the reference one).
+
+    Handles:
+    - Single chains (monomers / homooligomers)
+    - Multiple chains (fragmented proteins)
+
+    AlphaFold structures are skipped (no chain extraction needed).
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of organism.
+    """
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
+    all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
+
+    for locus_tag in all_locus_tags:
+        locus_dir = os.path.join(structure_dir, locus_tag)
+
+        if not os.path.isdir(locus_dir):
+            continue
+
+        summary_table_path = os.path.join(
+            locus_dir, f"{locus_tag}_structure_summary.tsv"
+        )
+
+        if not files.file_check(summary_table_path):
+            print(f'  Structure summary table not found for {locus_tag}, skipping.')
+            continue
+
+        summary_df = pd.read_csv(
+            summary_table_path, sep='\t', dtype={'structure_id': str}
+        )
+
+        # Keep only PDB entries
+        pdb_rows = summary_df[summary_df['structure_type'] == 'PDB']
+
+        if pdb_rows.empty:
+            print(f'  No PDB structures found for {locus_tag}.')
+            continue
+
+        for _, row in pdb_rows.iterrows():
+            struct_id = row['structure_id']
+            chain_field = row['chain']
+            uniprot_id = row['uniprot_id']
+
+            if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+                print(f"  Warning: Missing UniProt ID for structure {struct_id} in {locus_tag}, skipping.")
+                continue
+
+            # Parse chain field
+            if not chain_field or pd.isna(chain_field):
+                chain_ids = ['A']
+                print(f'  Warning: No chain ID for {struct_id} in {locus_tag}, defaulting to A.')
+            elif ';' in str(chain_field):
+                chain_ids = [c.strip() for c in str(chain_field).split(';')]
+            else:
+                chain_ids = [str(chain_field)]
+
+            uniprot_dir = os.path.join(locus_dir, uniprot_id)
+
+            if not os.path.isdir(uniprot_dir):
+                print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
+                continue
+
+            pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
+            cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
+
+            # Build output filename
+            if len(chain_ids) > 1:
+                if len(chain_ids) <= 5:
+                    chains_suffix = '_'.join(chain_ids)
+                else:
+                    chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
+            else:
+                chains_suffix = chain_ids[0]
+
+            output_chain_file = os.path.join(
+                uniprot_dir, f"PDB_{struct_id}_chain_{chains_suffix}.pdb"
+            )
+
+            # Check file validity
+            try:
+                pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
+            except OSError:
+                pdb_valid = False
+
+            try:
+                cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
+            except OSError:
+                cif_valid = False
+
+            if pdb_valid:
+                if not files.file_check(output_chain_file):
+                    print(f'  Extracting chain(s) {chain_ids} from PDB {struct_id} ({locus_tag})')
+                    try:
+                        extract_chain_from_pdb(
+                            pdb_file_path, chain_ids, output_chain_file
+                        )
+                    except Exception as e:
+                        logging.exception(
+                            f'Failed to extract chains {chain_ids} from {pdb_file_path}: {e}'
+                        )
+                else:
+                    print(f'  Chain file already exists: {output_chain_file}')
+
+            elif cif_valid:
+                if not files.file_check(output_chain_file):
+                    print(f'  Extracting chain(s) {chain_ids} from CIF {struct_id} ({locus_tag})')
+                    try:
+                        extract_chain_from_cif(
+                            cif_file_path, chain_ids, output_chain_file
+                        )
+                    except Exception as e:
+                        logging.exception(
+                            f'Failed to extract chains {chain_ids} from {cif_file_path}: {e}'
+                        )
+                else:
+                    print(f'  Chain file already exists: {output_chain_file}')
+
+            else:
+                print(
+                    f'  ERROR: No valid PDB or CIF file for {struct_id} '
+                    f'in locus_tag {locus_tag}.'
+                )
+
+
 def get_chain_reference_structure(output_path, organism_name):
     """
     For each locus_tag, get the reference structure chain(s) and save to a separate PDB file.
     
     Handles both:
     - Single chains (homooligomers or monomers): extracts one chain
-    - Multiple chains (heterooligomers): extracts ALL functional subunits
+    - Multiple chains (fragmented proteins): extracts ALL functional subunits
     
     IMPORTANT: Only ONE structure should be marked as reference per locus_tag.
     This function extracts the chain(s) from that single reference structure.
@@ -1706,15 +1829,19 @@ def get_chain_reference_structure(output_path, organism_name):
             struct_id = ref_row['structure_id']
             chain_field = ref_row['chain']
             uniprot_id = ref_row['uniprot_id']
+
+            if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+                print(f"  Warning: Missing UniProt ID for reference structure {struct_id} in {locus_tag}, skipping.")
+                continue
             
-            # Parse chain field - can be single "A" or multiple "A;B;C" for heterooligomers
+            # Parse chain field - can be single "A" or multiple "A;B;C"
             if not chain_field or pd.isna(chain_field):
                 chain_ids = ['A']
                 print(f'  Warning: No chain ID specified for {struct_id} in {locus_tag}, defaulting to chain A.')
             elif ';' in str(chain_field):
-                # Heterooligomer - multiple chains
+                # Multiple chains
                 chain_ids = [c.strip() for c in str(chain_field).split(';')]
-                print(f'  Heterooligomer detected for {locus_tag}: extracting chains {chain_ids}')
+                print(f'  Warning: Multiple chains detected for {locus_tag}: extracting chains {chain_ids}')
             else:
                 # Single chain
                 chain_ids = [str(chain_field)]
