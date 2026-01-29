@@ -1286,7 +1286,7 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
                 summary_df['structure_id'] = summary_df['structure_id'].astype(str)
                 summary_df.to_csv(summary_table_path, sep='\t', index=False)
             else:
-                print(f'No structure data found for {locus_tag}, summary table not created.')
+                print(f'No structure data found for {locus_tag}')
 
         else:
             print(f'Structure summary table already exists for {locus_tag}.')
