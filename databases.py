@@ -14,6 +14,8 @@ import tarfile
 import shutil
 import os
 import time
+import sys
+import datetime
 from ftscripts import programs,files, structures
 import tqdm
 import requests
@@ -624,7 +626,7 @@ def download_microbiome_protein_catalogue(database_path):
     else:
         print(f'{faa_file_path} already exists.')
 
-def download_human_PDB (database_path, cpus=multiprocessing.cpu_count()):
+def download_human_PDB (database_path, cpus=None):
     """
     Downloads Human PDB structures.
     The PDB files are located in "databases/human_structures/PDB_files" folder.
@@ -632,16 +634,20 @@ def download_human_PDB (database_path, cpus=multiprocessing.cpu_count()):
     The IDs that could not be downloaded are saved in "databases/human_structures/PDB_files/Failed_Human_PDB_ids.txt".
 
     :param database_path =  Path to the databases folder.
-    :param cpus = Number of CPUs to use for downloading.
+    :param cpus = Number of CPUs to use for downloading. Default is min(16, cpu_count()) to avoid issues on clusters.
 
     :return: all_pdb_ids = List with all PDB IDs.
     :return: failed_pdb = List with PDB IDs that failed to download.
 
     """
+    
+    # Set safe default for parallel workers
+    if cpus is None:
+        cpus = min(16, multiprocessing.cpu_count())
+    print(f"Using {cpus} parallel workers for downloading structures")
 
     human_structures_pdb_path = os.path.join(database_path, 'human_structures', 'PDB_files')
     os.makedirs(human_structures_pdb_path, exist_ok=True)
-    os.makedirs(os.path.join(human_structures_pdb_path, 'DB_foldseek'), exist_ok=True)
 
     human_pdb_ids_path = os.path.join(human_structures_pdb_path, 'Human_PDB_ids.txt')
     human_ids_without_pdb_path = os.path.join(human_structures_pdb_path, 'Human_prots_without_PDB.txt')
@@ -736,7 +742,6 @@ def download_human_AF (database_path):
     """
     human_structures_AF_path = os.path.join(database_path, 'human_structures', 'AlphaFold_files')
     os.makedirs(human_structures_AF_path, exist_ok=True)
-    os.makedirs(os.path.join(human_structures_AF_path, 'DB_foldseek'), exist_ok=True)
 
     af_ids_file = os.path.join(human_structures_AF_path, 'Human_AF_ids.txt')
 
@@ -790,84 +795,276 @@ def download_human_AF (database_path):
     print('Number of AlphaFold structures:', len(AF_models))
     
     return AF_models
+
+
+def find_latest_human_pdb_index(database_path):
+    pattern = os.path.join(database_path, "human_pdb_index_all_*.csv")
+    candidates = glob.glob(pattern)
+    if not candidates:
+        raise FileNotFoundError(
+            f"No human PDB index found. Expected files like {pattern}"
+        )
+    return max(candidates, key=os.path.getmtime)
+
+
+def parse_chain_ids(chain_str):
+    if chain_str is None or (isinstance(chain_str, float) and pd.isna(chain_str)):
+        return []
+    return [c.strip() for c in str(chain_str).split(';') if c.strip()]
     
 
-def download_human(database_path, cpus=multiprocessing.cpu_count()):
+def download_human_sequences(database_path):
     """
     Downloads Human proteome form Uniprot (UP000005640). 
-    Obtains fasta sequences and structures from AlphaFold and PDB.
     The fasta file and annotations are located in "databases" folder.
-    The structures are located in "databases/human_structures" folder.
 
     :param database_path =  Path to the databases folder.
-
-    :return: human_ann_dict = Dictionary with Uniprot annotations for human proteome.
-    :return: human_failed_pdb = List with PDB IDs that failed to download.
-    :return: human_failed_AF = List with AlphaFold IDs that failed to download.
+    :return: download_status = True if download was successful, False otherwise.
 
     """
+    download_status = False
+
     #Download fasta sequences
     humanprot_path = os.path.join(database_path, 'human_uniprot_UP000005640.faa')
 
-    if not os.path.exists(humanprot_path):
-    
-        url = 'https://rest.uniprot.org/uniprotkb/stream?format=fasta&query=%28%28proteome%3AUP000005640%29%29'
+    if not files.file_check(humanprot_path):
         
-        print('Downloading human proteome: fasta sequences.')
-        download_with_wget(url, humanprot_path)
-        print('Finished.')
+        try:
+            url = 'https://rest.uniprot.org/uniprotkb/stream?format=fasta&query=%28%28proteome%3AUP000005640%29%29'
+            
+            print('Downloading human proteome: fasta sequences.')
+            download_with_wget(url, humanprot_path)
+            print('Finished.')
 
-        print(f'File {humanprot_path} downloaded successfully')
+            if files.file_check(humanprot_path):
+                print(f'File {humanprot_path} downloaded successfully.')
+                download_status = True
+            else:
+                print(f'Failed to download human fasta proteome from {url}.')
+                print('Please check your internet connection or try to download it manually'
+                    ' and place it in the databases folder.')
+                download_status = False
+
+        except Exception as e:
+            print(f'Error downloading human proteome: {e}')
+            download_status = False
+
     else:
         print(f'{humanprot_path} already exists.')
+        download_status = True
 
-    #Download structures
+    return download_status
+
+
+def download_human_structures(database_path, cpus=None, index_csv=None):
+    """
+    Download representative human structures based on a precomputed index CSV.
+    Uses only rows with is_reference == True and stores all structures in a single folder.
+
+    :param database_path =  Path to the databases folder.
+    :param cpus = Number of CPUs to use for downloading. Default is min(16, cpu_count()) to avoid issues on clusters.
+    :param index_csv = Optional path to human_pdb_index_all_<release>.csv.
+    """
+    
+    # Set safe default for parallel workers
+    if cpus is None:
+        cpus = min(16, multiprocessing.cpu_count())
+    logging.info(f"Using {cpus} parallel workers for downloading structures")
+
     human_structures_path = os.path.join(database_path, 'human_structures')
+    os.makedirs(human_structures_path, exist_ok=True)
 
-    try:
-        print('Downloading human PDB structures.')
-        human_pdb_ids, human_failed_pdb = retry_on_timeout(download_human_PDB, database_path, cpus)
-        print('PDB structures downloaded.')
-    except Exception as e:
-        print(f'Error downloading human PDB structures: {e}')
+    if index_csv is None:
+        index_csv = find_latest_human_pdb_index(database_path)
 
-    try:
-        print('Downloading AlphaFold structures.')
-        human_alphafold_ids = retry_on_timeout(download_human_AF, database_path)
-        print('AlphaFold structures downloaded.')
-    except Exception as e:
-        print(f'Error downloading AlphaFold structures: {e}')
+    # Keep "NA" as string (valid chain name) instead of treating it as NaN
+    df = pd.read_csv(index_csv, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+    ref_mask = df.get("is_reference", False).astype(str).str.lower() == "true"
+    ref_df = df[ref_mask].drop_duplicates(subset=["uniprot_id"])
 
-    #Check if all structures were downloaded
+    if ref_df.empty:
+        raise ValueError(f"No reference structures found in {index_csv}.")
 
-    human_downloaded_pdb_files = glob.glob(os.path.join(human_structures_path, 'PDB_files', '*.pdb'))
-    human_downloaded_cif_files = glob.glob(os.path.join(human_structures_path, 'PDB_files', '*.cif'))
+    logging.info(f"Using reference index: {index_csv}")
+    logging.info(f"Number of reference structures: {len(ref_df)}")
+    
+    # Check if AlphaFold structures are needed and download them first
+    has_af_structures = (ref_df.get("structure_type", "") == "AlphaFold").any()
+    if has_af_structures:
+        af_source_dir = os.path.join(human_structures_path, 'AlphaFold_files')
+        if not os.path.isdir(af_source_dir):
+            logging.info("Downloading AlphaFold structures (needed for some references)...")
+            download_human_AF(database_path)
+        else:
+            logging.info("AlphaFold files already available.")
 
-    human_downloaded_AF_files = glob.glob(os.path.join(human_structures_path, 'AlphaFold_files', '*.pdb'))
+    def download_reference(row):
+        uniprot_id = row.get("uniprot_id")
+        struct_type = row.get("structure_type")
+        struct_id = row.get("structure_id")
+        chain_str = row.get("chain")
 
-    check = False
-    PDB_complete = len(human_pdb_ids) == len(human_downloaded_pdb_files) + len(human_downloaded_cif_files) + len(human_failed_pdb)
-    AF_complete = len(human_alphafold_ids) == len(human_downloaded_AF_files)
+        if struct_type == "PDB":
+            chain_ids = parse_chain_ids(chain_str)
+            if not chain_ids:
+                print(f"Missing chain for PDB {struct_id} ({uniprot_id}).")
+                return None
 
-    if PDB_complete and AF_complete:
-        print(f'All structures downloaded correctly in {human_structures_path}.')
-        check = True
-        # Save the list of downloaded PDB and AlphaFold files to a text file
-        downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
-        with open(downloaded_files_path, 'w') as f:
-            for pdb_file in human_downloaded_pdb_files:
-                f.write(f'{pdb_file}\n')
-            for af_file in human_downloaded_AF_files:
-                f.write(f'{af_file}\n')
-        print(f'List of downloaded files saved to {downloaded_files_path}')
-    else:
-        print(f'PDB complete: {PDB_complete}, AlphaFold complete: {AF_complete}')
-        print(f'Number of downloaded PDB files: {len(human_downloaded_pdb_files) + len(human_downloaded_cif_files)} / total: {len(human_pdb_ids)}')
-        print(f'Number of downloaded AlphaFold files: {len(human_downloaded_AF_files)} / total: {len(human_alphafold_ids)}')
+            # Check if any chain ID is multi-character (will need CIF format output)
+            has_multichar_chains = any(len(chain_id) > 1 for chain_id in chain_ids)
+            file_ext = "cif" if has_multichar_chains else "pdb"
+            
+            chain_suffix = "_".join(chain_ids)
+            output_file = os.path.join(human_structures_path, f"PDB_{uniprot_id}_{struct_id}_{chain_suffix}.{file_ext}")
+            if files.file_check(output_file):
+                return None
 
-        raise Exception(f'Error downloading structures in {human_structures_path}. Check the failed files.')
+            pdb_path = os.path.join(human_structures_path, f"PDB_{struct_id}.pdb")
+            cif_path = os.path.join(human_structures_path, f"PDB_{struct_id}.cif")
 
-    return check
+            # Check if any chain ID is multi-character (requires mmCIF format)
+            has_multichar_chains = any(len(chain_id) > 1 for chain_id in chain_ids)
+            
+            if not files.file_check(pdb_path) and not files.file_check(cif_path):
+                # Prefer CIF for multi-character chains
+                if has_multichar_chains:
+                    cif_res = structures.get_structure_CIF(human_structures_path, struct_id)
+                    if not cif_res:
+                        logging.warning(f"Failed to download CIF {struct_id} for {uniprot_id} (multi-char chains). Will try AlphaFold fallback.")
+                        return uniprot_id  # Return uniprot_id for AlphaFold fallback
+                else:
+                    pdb_res = structures.get_structure_PDB(human_structures_path, struct_id)
+                    if not pdb_res:
+                        cif_res = structures.get_structure_CIF(human_structures_path, struct_id)
+                        if not cif_res:
+                            logging.warning(f"Failed to download PDB {struct_id} for {uniprot_id}. Will try AlphaFold fallback.")
+                            return uniprot_id  # Return uniprot_id for AlphaFold fallback
+
+            try:
+                # Use CIF format for multi-character chains, or if only CIF is available
+                if has_multichar_chains or (not files.file_check(pdb_path) and files.file_check(cif_path)):
+                    if not files.file_check(cif_path):
+                        # Need to download CIF if we only have PDB but need CIF
+                        cif_res = structures.get_structure_CIF(human_structures_path, struct_id)
+                        if not cif_res:
+                            logging.warning(f"Failed to download CIF {struct_id} for {uniprot_id} (needed for multi-char chains). Will try AlphaFold fallback.")
+                            return uniprot_id  # Return uniprot_id for AlphaFold fallback
+                    structures.extract_chain_from_cif(cif_path, chain_ids, output_file)
+                    # Remove original CIF file after successful extraction
+                    if os.path.exists(cif_path):
+                        os.remove(cif_path)
+                elif files.file_check(pdb_path):
+                    structures.extract_chain_from_pdb(pdb_path, chain_ids, output_file)
+                    # Remove original PDB file after successful extraction
+                    if os.path.exists(pdb_path):
+                        os.remove(pdb_path)
+            except Exception as e:
+                logging.error(f"Failed to extract chain(s) {chain_ids} from PDB {struct_id} for {uniprot_id}: {e}. Will try AlphaFold fallback.")
+                return uniprot_id  # Return uniprot_id for AlphaFold fallback
+
+        elif struct_type == "AlphaFold":
+            output_file = os.path.join(human_structures_path, f"AF_{uniprot_id}.pdb")
+            if files.file_check(output_file):
+                return None
+
+            af_source_dir = os.path.join(human_structures_path, 'AlphaFold_files')
+            
+            # Try multiple filename patterns for AlphaFold structures
+            af_pattern = os.path.join(af_source_dir, f"AF-{uniprot_id}-F1-model_*.pdb")
+            af_matches = glob.glob(af_pattern)
+            
+            if not af_matches:
+                af_pattern_second = os.path.join(af_source_dir, f"AF-{uniprot_id}*.pdb")
+                af_matches = glob.glob(af_pattern_second)
+            
+            if not af_matches:
+                af_alt = os.path.join(af_source_dir, f"AF_{uniprot_id}.pdb")
+                if os.path.exists(af_alt):
+                    af_matches = [af_alt]
+
+            if af_matches:
+                shutil.copyfile(af_matches[0], output_file)
+                logging.debug(f"Copied AlphaFold structure for {uniprot_id}")
+            else:
+                # If not found in pre-downloaded files, structure is not available
+                logging.warning(f"AlphaFold structure not found for {uniprot_id} in pre-downloaded files")
+                return uniprot_id
+
+        else:
+            logging.warning(f"Unsupported structure type {struct_type} for {uniprot_id}.")
+            return uniprot_id
+
+        return None
+
+    failed = []
+    logging.info('----Downloading representative human structures----')
+    with ThreadPoolExecutor(max_workers=cpus) as executor:
+        futures = {executor.submit(download_reference, row): row for _, row in ref_df.iterrows()}
+        for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Downloading structures", unit="struct", 
+                                 position=0, leave=True, ncols=80, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'):
+            result = future.result()
+            if result:
+                failed.append(result)
+
+    failed_file = os.path.join(human_structures_path, 'Failed_Human_ref_structures.txt')
+    files.list_to_file(failed_file, failed)
+    logging.info(f'Number of structures that could not be downloaded: {len(failed)}')
+    logging.info(f"The failures are saved in {failed_file}")
+
+    # Last attempt: Try downloading failed IDs from AlphaFold as a fallback
+    if failed:
+        logging.info('----Attempting to download failed structures from AlphaFold as fallback----')
+        
+        def download_af_fallback(uniprot_id):
+            """Try downloading AlphaFold structure for failed ID using robust structures.get_structure_alphafold"""
+            output_file = os.path.join(human_structures_path, f"AF_{uniprot_id}.pdb")
+            
+            # Skip if already exists
+            if files.file_check(output_file):
+                return None
+            
+            # Use the robust function from structures module (has retry logic, proper error handling, v6)
+            result = structures.get_structure_alphafold(human_structures_path, uniprot_id)
+            
+            if result:
+                logging.info(f"Successfully downloaded AlphaFold structure for {uniprot_id}")
+                return None
+            else:
+                logging.debug(f"AlphaFold structure not available for {uniprot_id}")
+                return uniprot_id
+        
+        final_failed = []
+        with ThreadPoolExecutor(max_workers=cpus) as executor:
+            futures = {executor.submit(download_af_fallback, uid): uid for uid in failed}
+            for future in tqdm.tqdm(as_completed(futures), total=len(futures), 
+                                   desc="Downloading from AlphaFold", unit="struct"):
+                result = future.result()
+                if result:
+                    final_failed.append(result)
+        
+        # Update failed file with only the structures that couldn't be downloaded from AlphaFold either
+        files.list_to_file(failed_file, final_failed)
+        logging.info(f'After AlphaFold fallback: {len(final_failed)} structures still could not be downloaded')
+        logging.info(f'Successfully recovered {len(failed) - len(final_failed)} structures from AlphaFold')
+
+    # Regenerate the structure index file AFTER the fallback (to include AF-downloaded structures)
+    downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
+    all_structure_files = (
+        glob.glob(os.path.join(human_structures_path, '*.pdb')) +
+        glob.glob(os.path.join(human_structures_path, '*.cif'))
+    )
+    with open(downloaded_files_path, 'w') as f:
+        for struct_file in tqdm.tqdm(all_structure_files, desc="Indexing structure files", unit="file"):
+            f.write(f'{struct_file}\n')
+    logging.info(f'List of downloaded files saved to {downloaded_files_path} ({len(all_structure_files)} total structures)')
+
+    af_source_dir = os.path.join(human_structures_path, 'AlphaFold_files')
+    if os.path.isdir(af_source_dir):
+        shutil.rmtree(af_source_dir)
+        logging.info(f'Removed AlphaFold cache folder {af_source_dir}')
+
+    return True
+
 
 def index_db_blast_human (database_path):
 
@@ -896,7 +1093,7 @@ def index_db_blast_human (database_path):
 def index_db_foldseek_human_structures (database_path, container_engine='docker'):
 
     """
-    Makes a FOLDSEEK db for human proteome PDB and AlphaFold structures. 
+    Makes a FOLDSEEK db for representative human structures. 
 
     :param database_path =  Path to the databases folder.
     :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
@@ -904,23 +1101,17 @@ def index_db_foldseek_human_structures (database_path, container_engine='docker'
     """
 
     human_structures_path = os.path.join(database_path, 'human_structures')
-    human_PDB_path = os.path.join(human_structures_path, 'PDB_files')
-    human_AF_path = os.path.join(human_structures_path, 'AlphaFold_files')
+    representative_path = human_structures_path
 
-    #Index PDB structures
     try:
-        programs.run_foldseek_create_index_db(human_PDB_path, 'DB_human_PDB', container_engine=container_engine)
-
-        print('Foldseek PDB database created successfully.')
+        programs.run_foldseek_create_index_db(
+            representative_path,
+            'DB_human_reference',
+            container_engine=container_engine,
+        )
+        print('Foldseek reference database created successfully.')
     except Exception as e:
-        print('Error indexing human PDB structures for Foldseek:', e)
-
-    #Index AlphaFold structures
-    try:
-        programs.run_foldseek_create_index_db(human_AF_path, 'DB_human_AF', container_engine=container_engine)
-        print('Foldseek AF database created successfully.')
-    except Exception as e:
-        print('Error indexing human AlphaFold structures for Foldseek.', e)
+        print('Error indexing human reference structures for Foldseek:', e)
 
 
 def index_db_blast_microbiome_protein_catalogue (database_path):
@@ -1010,54 +1201,111 @@ def index_db_blast_deg (database_path):
         print('Error indexing DEG database:', e)
 
 
-
-def download_and_index_human(database_path):
+def download_and_index_human_sequences(database_path):
     """
-    Downloads and indexes Human proteome.
+    Downloads Human proteome fasta sequences and indexes them.
 
     :param database_path =  Path to the 'databases' folder.
 
     """
     
-    # Download and index Human proteome
-    print('----- 1. Downloading and indexing human proteome -----')
+    # Download and index Human proteome sequences
+    print('----- 1. Downloading and indexing human sequences -----')
     
     humanprot_path = os.path.join(database_path, 'human_uniprot_UP000005640.faa')
-    human_structures_path = os.path.join(database_path, 'human_structures')
-    downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
 
-    if not files.file_check(humanprot_path) or not files.file_check(downloaded_files_path):
+    if not files.file_check(humanprot_path):
         try:
-            check = download_human(database_path)
+            check = download_human_sequences(database_path)
             print('Human proteome downloaded')
 
             if check:
                 print('Download complete.')
+                try:
+                    index_db_blast_human(database_path)
+                    print('Human blast db created')
+                except Exception as e:
+                    print(f'Error indexing human proteome: {e}')
             else:
                 print('Error downloading human proteome. Check the failed files.')
-            # Index human proteome
-            index_db_blast_human(database_path)
-            print('Human blast db created')
-            index_db_foldseek_human_structures(database_path)
-            print('Human foldseek db created')
-            print('Human proteome downloaded and indexed')
+
         except Exception as e:
             print(f'Error downloading human proteome: {e}')  
     else:
         print('Human proteome already exists.')
         if not files.file_check(os.path.join(database_path, 'HUMAN_DB.phr')):
             print('Indexing human proteome')
-            index_db_blast_human(database_path)
-            print('Human proteome indexed')
+            try:
+                index_db_blast_human(database_path)
+                print('Human blast db created')
+            except Exception as e:
+                print(f'Error indexing human proteome: {e}')
         else:
             print('Human proteome already indexed')
 
-        human_PDB_db = os.path.join(human_structures_path, 'PDB_files', 'DB_foldseek', 'DB_human_PDB')
-        human_AF_db = os.path.join(human_structures_path, 'AlphaFold_files', 'DB_foldseek', 'DB_human_AF')
+    print('----- 1. Finished -----')
 
-        if force or not os.path.exists(human_PDB_db) or not os.path.exists(human_AF_db):
-            print('Indexing human proteome for Foldseek')
-            index_db_foldseek_human_structures(database_path)
+def download_and_index_human_structures(database_path, cpus=None, container_engine='docker'):
+    """
+    Downloads and indexes Human proteome structures.
+
+    :param database_path =  Path to the 'databases' folder.
+    :param cpus = Number of CPUs to use for downloading. Default is min(16, cpu_count()).
+    :param container_engine = 'docker' or 'singularity'. Default is 'docker'.
+
+    """
+    
+    # Download and index Human proteome structures
+    print('----- 1. Downloading and indexing human structures -----')
+    
+    human_structures_path = os.path.join(database_path, 'human_structures')
+    downloaded_files_path = os.path.join(human_structures_path, 'human_structures.txt')
+    failed_file = os.path.join(human_structures_path, 'Failed_Human_ref_structures.txt')
+
+    # Check if we need to download structures
+    needs_download = False
+    
+    if not files.file_check(downloaded_files_path):
+        # No index file exists, need to download everything
+        needs_download = True
+        print('No structure index found, will download structures.')
+    elif os.path.exists(failed_file):
+        # Check if there are failed structures that we should retry
+        with open(failed_file, 'r') as f:
+            failed_ids = [line.strip() for line in f if line.strip()]
+        
+        if failed_ids:
+            print(f'Found {len(failed_ids)} failed structures from previous run, will retry.')
+            needs_download = True
+        else:
+            print('All structures already downloaded successfully.')
+    else:
+        print('Structure index exists and no failed structures found.')
+    
+    if needs_download:
+        try:
+            check = download_human_structures(database_path, cpus=cpus)
+            print('Human structures downloaded')
+
+            if check:
+                print('Download complete.')
+            else:
+                print('Error downloading human structures. Check the failed files.')
+
+            index_db_foldseek_human_structures(database_path, container_engine=container_engine)
+            print('Human foldseek db created')
+            print('Human structures downloaded and indexed')
+        except Exception as e:
+            print(f'Error downloading human structures: {e}')  
+    else:
+        print('Human structures already exist.')
+
+        # Check for DB in correct location (DB_foldseek subdirectory)
+        human_ref_db = os.path.join(human_structures_path, 'DB_foldseek', 'DB_human_reference')
+
+        if not os.path.exists(human_ref_db):
+            print('Indexing human structures for Foldseek')
+            index_db_foldseek_human_structures(database_path, container_engine=container_engine)
             print('Human foldseek db created')
         else:
             print('Human foldseek db already created')
@@ -1160,10 +1408,11 @@ def download_and_index_deg(database_path):
 
 
 
-def main_download(database_path, selected_databases):
+def main_download(database_path, selected_databases, cpus=None, container_engine='docker'):
     """Main download function"""
 
     print(f"📥 Downloading databases: {', '.join(selected_databases)}")
+    print(f"🐳 Container engine: {container_engine}")
     
     if not os.path.exists(database_path):
         os.makedirs(database_path)
@@ -1173,10 +1422,14 @@ def main_download(database_path, selected_databases):
         try:
             print(f"\n{'='*20} {db_name.upper()} {'='*20}")
             
-            if db_name == 'human':
-                download_and_index_human(database_path)
+            if db_name == 'human-sequences':
+                download_and_index_human_sequences(database_path)
                 success_count += 1
-                    
+            
+            elif db_name == 'human-structures':
+                download_and_index_human_structures(database_path, cpus=cpus, container_engine=container_engine)
+                success_count += 1
+
             elif db_name == 'microbiome':
                 download_and_index_microbiome(database_path)
                 success_count += 1
@@ -1192,11 +1445,22 @@ def main_download(database_path, selected_databases):
 
 
 if __name__ == '__main__':
+    # Set up logging to both file and console
+    logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'log_databases')
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    log_file = os.path.join(logs_dir, f'databases_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    
     logging.basicConfig(
         level=logging.INFO, 
-        format='%(levelname)s: %(message)s',
-        handlers=[logging.StreamHandler()]  # Console output
+        format='%(asctime)s - %(levelname)s: %(message)s',
+        handlers=[
+            logging.StreamHandler(),  # Console output
+            logging.FileHandler(log_file, mode='w')  # File output
+        ]
     )
+    
+    logging.info(f"Log file created: {log_file}")
     
     default_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'databases')
 
@@ -1206,21 +1470,22 @@ if __name__ == '__main__':
         epilog="""
         Examples:
         python databases.py --download all          # Download all databases
-        python databases.py --download human --database-path /home/fasttarget/databases   # Download only human proteome
+        python databases.py --download human-sequences --database-path /home/fasttarget/databases   # Download only human sequences
+        python databases.py --download human-structures  # Download only human structures (needed for foldseek)
         python databases.py --download microbiome     # Download microbiome database
-        python databases.py --verify                # Check all databases
+        python databases.py --download deg            # Download DEG database
                 """
         )
     
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--download', choices=['human', 'microbiome', 'deg', 'all'], 
+    group.add_argument('--download', choices=['human-sequences', 'human-structures', 'microbiome', 'deg', 'all'], 
                       help="Download specified database(s)")
-    group.add_argument('--update', choices=['human', 'microbiome', 'deg', 'all'],
-                      help="Update specified database(s)")
-    group.add_argument('--verify', action='store_true',
-                      help="Verify all databases are complete and indexed")
     parser.add_argument('--database-path', type=str, default=default_base_path,
                        help="Path to the database folder (default: ./databases)")
+    parser.add_argument('--cpus', type=int, default=None,
+                       help="Number of parallel workers for downloads (default: min(16, cpu_count()) - safe for clusters)")
+    parser.add_argument('--container-engine', type=str, choices=['docker', 'singularity'], default='docker',
+                       help="Container engine to use for Foldseek (default: docker)")
 
     args = parser.parse_args()
     
@@ -1229,10 +1494,5 @@ if __name__ == '__main__':
 
     # Determine databases to process
     if hasattr(args, 'download') and args.download:
-        databases_to_process = ['human', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
-        main_download(database_path, databases_to_process)
-    elif hasattr(args, 'update') and args.update:
-        databases_to_process = ['human', 'microbiome', 'deg'] if args.update == 'all' else [args.update]
-        main_update(database_path, databases_to_process)
-    elif args.verify:
-        verify_databases(database_path)
+        databases_to_process = ['human-sequences', 'human-structures', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
+        main_download(database_path, databases_to_process, cpus=args.cpus, container_engine=args.container_engine)
