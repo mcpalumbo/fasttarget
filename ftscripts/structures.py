@@ -482,20 +482,24 @@ def cluster_uniprot_specie(output_path, organism_name, specie_taxid):
     """
     uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
     uniprot_species_rest_faa = os.path.join(uniprot_dir, f"uniprot_species_taxid_{specie_taxid}_rest.faa")
+    output_cdhit_file = uniprot_species_rest_faa.replace('.faa', '_cdhit100.faa')
 
-    try:
-        programs.run_cd_hit(
-            input_fasta= uniprot_species_rest_faa,
-            output_fasta= uniprot_species_rest_faa.replace('.faa', '_cdhit100.faa'),
-            identity= 1.0,
-            aln_coverage_short= 0.9,
-            aln_coverage_long= 0.9,
-            use_global_seq_identity= True,
-            accurate_mode= True,
-            cpus= multiprocessing.cpu_count()
-        )
-    except Exception as e:
-        logging.exception(f"Failed to run CD-HIT on file {uniprot_species_rest_faa}: {e}")
+    if not files.file_check(output_cdhit_file):
+        try:
+            programs.run_cd_hit(
+                input_fasta= uniprot_species_rest_faa,
+                output_fasta= output_cdhit_file,
+                identity= 1.0,
+                aln_coverage_short= 0.9,
+                aln_coverage_long= 0.9,
+                use_global_seq_identity= True,
+                accurate_mode= True,
+                cpus= multiprocessing.cpu_count()
+            )
+        except Exception as e:
+            logging.exception(f"Failed to run CD-HIT on file {uniprot_species_rest_faa}: {e}")
+    else:
+        print(f'Clustered uniprot species-level rest proteome already exists: {output_cdhit_file}')
 
 def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_taxid):
     
