@@ -462,12 +462,12 @@ def download_microbiome_species_catalogue(database_path):
 
     # Download README file
     info_path = os.path.join(species_path, 'README_uhgp_v2.0.2.txt')
-    info_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
+    info_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
     download_with_wget(info_url, info_path)
 
     # Download metadata file
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
-    meta_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/genomes-all_metadata.tsv'
+    meta_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/genomes-all_metadata.tsv'
     download_with_wget(meta_url, meta_path)
 
     # Download species catalogue
@@ -517,7 +517,7 @@ def download_microbiome_species_catalogue(database_path):
                 genome_list.append(genome[:-1])
 
                 faa_url = f"{sp_url}{genome}genome/{genome[:-1]}.faa"
-                faa_ftp_url = faa_url.replace("http://", "ftp://")
+                faa_ftp_url = faa_url.replace("http://", "https://")
 
                 genome_path = os.path.join(species_path, genome[:-1])
                 os.makedirs(genome_path, exist_ok=True)
@@ -601,12 +601,12 @@ def download_microbiome_protein_catalogue(database_path):
     faa_file_path = os.path.join(extracted_dir, 'uhgp-90.faa')
 
     info_path = os.path.join(database_path, 'README_uhgp_v2.0.2.txt')
-    info_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
+    info_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
     download_with_wget(info_url, info_path)
 
     if not files.file_check(os.path.join(database_path, 'uhgp-90.faa')):
         uhgp_path = os.path.join(database_path, 'uhgp-90.tar.gz')
-        uhgp_url = 'ftp://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/protein_catalogue/uhgp-90.tar.gz'
+        uhgp_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/protein_catalogue/uhgp-90.tar.gz'
         
         print('Downloading UHGP database.')
         download_with_wget(uhgp_url, uhgp_path)
@@ -745,7 +745,7 @@ def download_human_AF (database_path):
         human_AF_path = os.path.join(human_structures_AF_path, 'UP000005640_9606_HUMAN_v6.tar')
 
         if not os.path.exists(human_AF_path):       
-            url_human_AF = 'ftp://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v6.tar'
+            url_human_AF = 'https://ftp.ebi.ac.uk/pub/databases/alphafold/latest/UP000005640_9606_HUMAN_v6.tar'
             try:
                 print('Downloading AlphaFold human database with progress bar.')
                 download_with_wget(url_human_AF, human_AF_path)
