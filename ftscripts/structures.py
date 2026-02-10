@@ -3795,7 +3795,8 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     
     else:
         print(f'Final structure summary table already exists at {final_table_path}, loading existing data.')
-        final_df = pd.read_csv(final_table_path, sep='\t', dtype={'structure': str})
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        final_df = pd.read_csv(final_table_path, sep='\t', dtype={'structure': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
 
     return final_df
 
