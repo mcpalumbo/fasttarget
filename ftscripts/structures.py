@@ -57,9 +57,8 @@ def count_fasta_sequences(fasta_file):
                 count += 1
         return count
     except Exception as e:
-        logger.logger.warning(f"Could not count sequences in {fasta_file}: {e}")
+        logging.warning(f"Could not count sequences in {fasta_file}: {e}")
         return 0
-
 
 @databases.retry_with_backoff(max_retries=10, initial_delay=2, backoff_factor=2, max_delay=80)
 def fetch_uniprot_xml(uniprot_id):
