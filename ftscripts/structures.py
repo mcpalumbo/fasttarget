@@ -1461,7 +1461,8 @@ def download_single_structure(structure_dir, locus_tag):
 
     if files.file_check(summary_table_path):
         # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
 
         uniprot_ids = summary_df['uniprot_id'].unique()
 
