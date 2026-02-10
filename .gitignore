@@ -1,4 +1,8 @@
-databases/
+databases/human_structures
+databases/species_catalogue
+databases/DEG*
+databases/HUMAN*
+databases/*.faa
 singularity_sfi_files/
 ftscripts/*.pyc
 organism/
