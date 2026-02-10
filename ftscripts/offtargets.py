@@ -1,6 +1,7 @@
 
 from ftscripts import programs, metadata, files, structures
 import os
+import json
 import pandas as pd
 import multiprocessing
 import glob
@@ -333,14 +334,15 @@ def microbiome_protein_clusters_parse (output_path, organism_name, identity_filt
 def run_foldseek_human_structures (databases_path, output_path, organism_name, container_engine='docker'):
 
     """
-    Runs Foldseek easy-search for human proteome PDB and AlphaFold structures.
+    Runs Foldseek easy-search against unified human reference structures database.
     Uses ONLY the reference structures for each locus_tag.
     
     Reference structures are obtained via structures.get_all_reference_structures():
-    - PDB reference structures: *_ref.pdb (extracted chains)
-    - AlphaFold models: AF_*.pdb (full predictions)
+    - PDB reference structures: PDB_{uniprot}_{pdb_id}_{chain}.pdb (extracted chains)
+    - AlphaFold models: AF_{uniprot}.pdb (full predictions)
     
-    Each reference structure is searched against both human PDB and AlphaFold databases.
+    Each reference structure is searched against the unified human reference database
+    containing both PDB and AlphaFold structures.
 
     :param output_path: Directory of the organism output.
     :param databases_path: Directory where FOLDSEEK structure databases are stored.
@@ -354,9 +356,9 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name, c
     print('FOLDSEEK HUMAN OFFTARGET ANALYSIS')
     print(f'{"="*80}\n')
 
-    # Human databases of PDB and AlphaFold structures
-    db_human_PDB_path = os.path.join(databases_path, 'human_structures', 'PDB_files', 'DB_foldseek')
-    db_human_AF_path = os.path.join(databases_path, 'human_structures', 'AlphaFold_files', 'DB_foldseek')
+    # Human unified reference database (PDB + AlphaFold structures)
+    # DB is created in DB_foldseek subdirectory by programs.run_foldseek_create_index_db
+    db_human_path = os.path.join(databases_path, 'human_structures', 'DB_foldseek')
 
     # Get all reference structures using helper function
     print('Getting reference structures for all locus_tags...')
@@ -367,16 +369,16 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name, c
     
     print(f'Found {len(reference_dict)} locus_tags with reference structures')
     
-    if not reference_dict:
-        print('ERROR: No reference structures found. Make sure to run structures pipeline first.')
-        return
-    
-    # Offtarget path
+    # Offtarget path - create directory before any early returns
     offtarget_path = os.path.join(output_path, organism_name, 'offtarget')
     foldseek_results_path = os.path.join(offtarget_path, 'foldseek_results')
 
     if not os.path.exists(foldseek_results_path):
         os.makedirs(foldseek_results_path, exist_ok=True)
+    
+    if not reference_dict:
+        print('ERROR: No reference structures found. Make sure to run structures pipeline first.')
+        return {}
 
     # Run Foldseek for each reference structure
     success_count = 0
@@ -389,28 +391,29 @@ def run_foldseek_human_structures (databases_path, output_path, organism_name, c
         
         print(f'\n[{locus_tag}] Processing {struct_name}')
         
-        # Search with human PDB database
+        # Search against unified human reference database (PDB + AlphaFold)
         try:
-            programs.run_foldseek_search(struct_dir, db_human_PDB_path, 'DB_human_PDB', struct_name, foldseek_results_path, container_engine=container_engine)
-            print(f'  ✓ Foldseek vs human PDB completed')
-            success_count += 1
-            filename = f'{struct_name.split(".")[0]}_vs_DB_human_PDB_foldseek_results.tsv'
-            foldseek_results_mapping[locus_tag] = [os.path.join(foldseek_results_path, filename)]
+            programs.run_foldseek_search(struct_dir, db_human_path, 'DB_human_reference', struct_name, foldseek_results_path, container_engine=container_engine)
+            
+            # Validate output file exists before reporting success
+            struct_basename = struct_name.split('.')[0]
+            result_file = os.path.join(foldseek_results_path, f'{struct_basename}_output_foldseek', f'{struct_basename}_vs_DB_human_reference_foldseek_results.tsv')
+            
+            if os.path.exists(result_file) and os.path.getsize(result_file) > 0:
+                print(f'  ✓ Foldseek search completed')
+                success_count += 1
+                foldseek_results_mapping[locus_tag] = [result_file]
+            else:
+                print(f'  ✗ Foldseek search failed: output file not found or empty')
+                logging.error(f'Foldseek output file missing or empty: {result_file}')
+                error_count += 1
+                foldseek_results_mapping[locus_tag] = []
 
         except Exception as e:
-            logging.exception(f'Error running Foldseek vs human PDB: {e}')
+            print(f'  ✗ Foldseek search failed')
+            logging.exception(f'Error running Foldseek search: {e}')
             error_count += 1
-        
-        # Search with human AlphaFold database
-        try:
-            programs.run_foldseek_search(struct_dir, db_human_AF_path, 'DB_human_AF', struct_name, foldseek_results_path, container_engine=container_engine)
-            print(f'  ✓ Foldseek vs human AlphaFold completed')
-            success_count += 1
-            filename = f'{struct_name.split(".")[0]}_vs_DB_human_AF_foldseek_results.tsv'
-            foldseek_results_mapping[locus_tag].append(os.path.join(foldseek_results_path, filename))
-        except Exception as e:
-            logging.exception(f'Error running Foldseek vs human AlphaFold: {e}')
-            error_count += 1
+            foldseek_results_mapping[locus_tag] = []
     
     print(f'\n{"="*80}')
     print('FOLDSEEK SUMMARY')
@@ -448,9 +451,28 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
         print('\nParsing Foldseek results...')
         results_foldseek_dict = {}
         
+        # Guard against empty mapping (no structures found)
+        if not map_foldseek:
+            print('No Foldseek results to parse (empty mapping)')
+            with open(foldseek_dict_file, 'w') as f:
+                json.dump({}, f)
+            return {}
+        
         # Parse results for each locus_tag
         for locus_tag, result_files in map_foldseek.items():
             dfs = []
+            
+            # Skip if no result files (e.g., foldseek search failed)
+            if not result_files:
+                results_foldseek_dict[locus_tag] = {
+                    'query_structure': None,
+                    'target_foldseek': None,
+                    'rmsd_foldseek': None,
+                    'prob_foldseek': None,
+                    'pident_foldseek': None
+                }
+                print(f'  {locus_tag}: Foldseek search failed, no results')
+                continue
             
             # Read all result files for this locus_tag
             for file in result_files:
@@ -513,7 +535,8 @@ def merge_foldseek_data (output_path, organism_name):
     """
 
     offtargets_dir = os.path.join(output_path, organism_name, 'offtarget')
-    foldseek_res_file = os.path.join(offtargets_dir, 'human_foldseek_dict.json')
+    foldseek_results_path = os.path.join(offtargets_dir, 'foldseek_results')
+    foldseek_res_file = os.path.join(foldseek_results_path, 'human_foldseek_dict.json')
     foldseek_mapped_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.json')
 
     if not files.file_check(foldseek_mapped_file):
@@ -540,6 +563,7 @@ def merge_foldseek_data (output_path, organism_name):
             print(f'Total genes with foldseek results: {len([v for v in mapped_dict.values() if v["target"] is not None])}')
         else:
             print(f'File {foldseek_res_file} not found.')
+            mapped_dict = {}
     else:
         mapped_dict = files.json_to_dict(foldseek_mapped_file)
         print(f'Foldseek results in {foldseek_mapped_file}.')

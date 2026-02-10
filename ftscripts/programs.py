@@ -177,6 +177,7 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None,
         print(container.decode('utf-8'))
     except docker.errors.ContainerError as e:
         print(f"Error running container: {e}")
+        raise  # Re-raise the exception so caller can handle it properly
 
 def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None, sif_dir='singularity_sfi_files'):
     """
@@ -724,8 +725,16 @@ def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='dock
         work_dir = structures_dir
         bind_dir = '/data'
         image_name = 'mcpalumbo/foldseek:1'
-        command_create = ["createdb", "/data", f"/data/DB_foldseek/{DB_name}"]
-        command_index = ["createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
+        
+        # Singularity needs explicit entrypoint call (Docker uses ENTRYPOINT automatically)
+        if container_engine == 'singularity':
+            command_create = ["/usr/local/bin/entrypoint", "createdb", "/data", f"/data/DB_foldseek/{DB_name}"]
+            command_index = ["/usr/local/bin/entrypoint", "createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
+            env_vars = {'PATH': '/usr/local/bin:/usr/bin:/bin'}
+        else:
+            command_create = ["createdb", "/data", f"/data/DB_foldseek/{DB_name}"]
+            command_index = ["createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
+            env_vars = None
 
         try:
             run_container(
@@ -733,7 +742,8 @@ def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='dock
                 bind_dir=bind_dir,
                 image_name=image_name,
                 command=command_create,
-                container_engine=container_engine
+                container_engine=container_engine,
+                env_vars=env_vars
             )
             try:
                 run_container(
@@ -741,7 +751,8 @@ def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='dock
                     bind_dir=bind_dir,
                     image_name=image_name,
                     command=command_index,
-                    container_engine=container_engine
+                    container_engine=container_engine,
+                    env_vars=env_vars
                 )
             except Exception as e:
                 logging.exception(f'Error running foldseek createindex: {e}')
@@ -790,16 +801,37 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
                 work_dir = structures_dir
                 bind_dir = '/media'
                 image_name = 'mcpalumbo/foldseek:1'
-                command = [
-                    "easy-search",
-                    f"/media/{query}",
-                    f"/data/{DB_name}",
-                    f"/media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv",
-                    "/data/tmp",
-                    "--exhaustive-search", "1",
-                    "--format-mode", "4",
-                    "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
-                ]
+                
+                # Singularity needs explicit entrypoint call (Docker uses ENTRYPOINT automatically)
+                # Create unique temp directory for this Foldseek run to avoid conflicts
+                import uuid
+                unique_tmp = f"/data/tmp_{uuid.uuid4().hex[:8]}"
+                
+                if container_engine == 'singularity':
+                    command = [
+                        "/usr/local/bin/entrypoint",
+                        "easy-search",
+                        f"/media/{query}",
+                        f"/data/{DB_name}",
+                        f"/media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv",
+                        unique_tmp,
+                        "--exhaustive-search", "1",
+                        "--format-mode", "4",
+                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
+                    ]
+                    env_vars = {'PATH': '/usr/local/bin:/usr/bin:/bin'}
+                else:
+                    command = [
+                        "easy-search",
+                        f"/media/{query}",
+                        f"/data/{DB_name}",
+                        f"/media/{query_basename}_output_foldseek/{query_basename}_vs_{DB_name}_foldseek_results.tsv",
+                        unique_tmp,
+                        "--exhaustive-search", "1",
+                        "--format-mode", "4",
+                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
+                    ]
+                    env_vars = None
 
                 try:
                     run_container(
@@ -808,6 +840,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
                         bind_dir=bind_dir,
                         image_name=image_name,
                         command=command,
+                        env_vars=env_vars,
                         container_engine=container_engine
                     )
 
