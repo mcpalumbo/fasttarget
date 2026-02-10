@@ -172,16 +172,19 @@ def parse_uniprot_entry_xml(entry_element):
         
         # Extract RefSeq IDs
         refseq = entry_element.findall('.//up:dbReference[@type="RefSeq"]', namespaces)
-        result[accession]['Refseq_ProtID_nd'] = None
         result[accession]['Refseq_ProtID'] = None
         if refseq:
+            refseq_ids = []
             for refseq_id in refseq:
-                id_val = refseq_id.get('id')
-                if id_val.startswith('WP_'):
-                    result[accession]['Refseq_ProtID_nd'] = id_val
-                else:
-                    result[accession]['Refseq_ProtID'] = id_val
-        
+                id_refseq = refseq_id.get('id')
+                if id_refseq:
+                    refseq_ids.append(id_refseq)
+            refseq_ids = list(set(refseq_ids))  # Remove duplicates   
+            if refseq_ids:
+                result[accession]['Refseq_ProtID'] = refseq_ids if len(refseq_ids) > 1 else refseq_ids[0]
+            else:
+                result[accession]['Refseq_ProtID'] = None 
+
         # Extract AlphaFold IDs
         alphafold = entry_element.findall('.//up:dbReference[@type="AlphaFoldDB"]', namespaces)
         result[accession]['AlphaFoldDB'] = alphafold[0].get('id') if alphafold else None
