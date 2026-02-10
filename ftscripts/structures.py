@@ -277,14 +277,17 @@ def uniprot_protein_annotations(uniprot_id):
         # Find Refseq references
         refseq = root.findall('.//up:dbReference[@type="RefSeq"]', namespaces)
         if refseq:
+            refseq_ids = []
             for refseq_id in refseq:
-                id = refseq_id.get('id')
-                if id.startswith('WP_'):
-                    result[accession]['Refseq_ProtID_nd'] = id
-                else:
-                    result[accession]['Refseq_ProtID'] = id
+                id_refseq = refseq_id.get('id')
+                if id_refseq:
+                    refseq_ids.append(id_refseq)
+            refseq_ids = list(set(refseq_ids))  # Remove duplicates
+            if refseq_ids:
+                result[accession]['Refseq_ProtID'] = refseq_ids if len(refseq_ids) > 1 else refseq_ids[0]
+            else:
+                result[accession]['Refseq_ProtID'] = None
         else:
-            result[accession]['Refseq_ProtID_nd'] = None
             result[accession]['Refseq_ProtID'] = None
 
         # Find Alphafold ids
