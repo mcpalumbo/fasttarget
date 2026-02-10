@@ -794,7 +794,9 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
                                     coverage_cutoff=90, 
                                     all_hits=True)
         else:
-            raise FileNotFoundError(f'{blast_output_pdb_path} not found.')
+            parse_pdb = {}
+            logging.warning(f'No PDB BLAST results found. Continuing with strain/species-level data only.')
+            print(f'WARNING: No PDB BLAST results found. Continuing with strain/species-level data only.')
         
         # 2) Map with IDs within the strain
         if files.file_check(blast_output_strain_path):
@@ -802,9 +804,11 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
                                     identity_cutoff=95, 
                                     coverage_cutoff=90, 
                                     all_hits=False)
+            logging.info(f'Mapped {len(parse_strain)} genes to strain-specific UniProt IDs')
             print(f'Mapped {len(parse_strain)} genes to strain-specific UniProt IDs')
         else:
             parse_strain = {}
+            logging.warning(f'No strain-specific BLAST results found. Continuing with species-level data only.')
             print(f'WARNING: No strain-specific BLAST results found. Continuing with species-level data only.')
      
         # 3) Map with IDs within the specie
@@ -814,6 +818,7 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
                                     coverage_cutoff=90, 
                                     all_hits=False)
         else:
+            logging.error(f'No species-level REST BLAST results found. Cannot proceed with mapping.')
             raise FileNotFoundError(f'{blast_output_species_rest_path} not found.')
 
         # Merge mapping results
