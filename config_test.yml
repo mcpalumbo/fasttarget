@@ -38,6 +38,13 @@ metabolism-SBML:
 structures: 
   enabled: True
   proteome_uniprot: UP000000808
+  pocket_full_mode: True
+
+colabfold:
+  enabled: False
+  amber: False
+  gpu: False
+  colabfold_run_all: False
 
 # ---- Core ----
 core:
