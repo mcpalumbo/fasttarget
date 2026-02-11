@@ -406,8 +406,10 @@ def download_species_uniprot_data(output_path, organism_name, specie_taxid):
     Download all UniProt data for a taxonomic ID (species-level)
     Including sequences, strain information and structure availability
     
-    :param tax_id: NCBI Taxonomy ID
     :param output_path: Directory to save the data
+    :param organism_name: Name of organism.
+    :param specie_taxid: Species Taxonomy ID (e.g. 287 for P. aeruginosa)
+
     """
     structure_dir = os.path.join(output_path, organism_name, 'structures')
     output_path = os.path.join(structure_dir, 'uniprot_files')
