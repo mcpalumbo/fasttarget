@@ -1934,8 +1934,10 @@ def get_chain_all_pdbs(output_path, organism_name):
             print(f'  Structure summary table not found for {locus_tag}, skipping.')
             continue
 
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
         summary_df = pd.read_csv(
-            summary_table_path, sep='\t', dtype={'structure_id': str}
+            summary_table_path, sep='\t', dtype={'structure_id': str},
+            keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
         )
 
         # Keep only PDB entries
@@ -2059,7 +2061,8 @@ def get_chain_reference_structure(output_path, organism_name):
 
         if files.file_check(summary_table_path):
             # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
+            # Keep "NA" as string (valid chain name) instead of treating it as NaN
+            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
 
             ref_rows = summary_df[summary_df['is_reference'] == True]
 
@@ -2395,7 +2398,8 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
     # Check if summary table exists
     if os.path.exists(summary_table_path):
         # Read existing table
-        summary_df = pd.read_csv(summary_table_path, sep='\t')
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        summary_df = pd.read_csv(summary_table_path, sep='\t', keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
         
         # Check for existing ColabFold entry
         existing_cf = summary_df[
@@ -2678,7 +2682,8 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
         elegible_pdbs = False
         elegible_af = False
         if files.file_check(summary_table_path):
-            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str})
+            # Keep "NA" as string (valid chain name) instead of treating it as NaN
+            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
             #DF of PDBS
             PDBs_summary_df = summary_df[summary_df['structure_type'] == 'PDB']
             AFs_summary_df = summary_df[summary_df['structure_type'] == 'AlphaFold']
@@ -3851,7 +3856,8 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
     
     else:
         # Read structure column as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-        final_df = pd.read_csv(final_table_file, sep='\t', dtype={'structure': str})
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        final_df = pd.read_csv(final_table_file, sep='\t', dtype={'structure': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
