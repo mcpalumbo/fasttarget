@@ -976,6 +976,9 @@ def parse_chain_string(chains_str):
         
         result.append((chain_id, start, end))
     
+    if len(result) > 1 and has_significant_overlap(result, overlap_threshold=0.5):
+        result = pick_longest_fragment(result)
+
     return result
 
 def compute_coverage(start, end, seq_len):
