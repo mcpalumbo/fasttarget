@@ -2208,13 +2208,16 @@ def find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=F
         print(f"  ERROR: Found {len(ref_files)} '*_ref.pdb' files in {locus_dir}. There should be only ONE reference.")
         print(f"  Files found: {ref_files}")
         print(f"  Using first file: {ref_files[0]}")
-        return ref_files
+        return [ref_files[0]]
     elif len(ref_files) == 1:
         print(f"  Using PDB reference: {ref_files[0]}")
-        return ref_files
-    elif len(ref_files) == 0 and len(pdb_files) > 1:
-        print(f"  ERROR: Found {len(pdb_files)} PDB files in {locus_dir} but no '*_ref.pdb' file.")
-        logging.warning(f" Error with reference structures in {locus_dir}. Please ensure that one PDB structure is marked as reference.")
+        return [ref_files[0]]
+    elif len(ref_files) == 0:
+        if len(pdb_files) == 0:
+            print(f"  No PDB files found in {locus_dir}. Checking for CIF files...")
+        else:
+            print(f"  ERROR: Found {len(pdb_files)} PDB files in {locus_dir} but no '*_ref.pdb' file.")
+            logging.warning(f" Error with reference structures in {locus_dir}. Please ensure that one PDB structure is marked as reference.")
         cif_files = glob.glob(os.path.join(locus_dir, '**', 'PDB_*.cif'), recursive=True)
         cif_ref_files = glob.glob(os.path.join(locus_dir, '**', 'PDB*_ref.cif'), recursive=True)
         cif_ref_files = [f for f in cif_ref_files if 'pockets' not in f.split(os.sep)]
