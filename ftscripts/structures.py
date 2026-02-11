@@ -293,9 +293,15 @@ def uniprot_protein_annotations(uniprot_id):
         # Find Alphafold ids
         alphafold = root.findall('.//up:dbReference[@type="AlphaFoldDB"]', namespaces)
         if alphafold:
+            alphafold_ids = []
             for alphafold_id in alphafold:
-                id = alphafold_id.get('id')
-                result[accession]['AlphaFoldDB'] = id
+                id_af = alphafold_id.get('id')
+                alphafold_ids.append(id_af)
+            alphafold_ids = list(set(alphafold_ids))  # Remove duplicates
+            if alphafold_ids:
+                result[accession]['AlphaFoldDB'] = alphafold_ids if len(alphafold_ids) > 1 else alphafold_ids[0]
+            else:
+                result[accession]['AlphaFoldDB'] = None
         else:
             result[accession]['AlphaFoldDB'] = None
 
