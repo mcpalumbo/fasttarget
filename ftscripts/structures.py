@@ -1489,7 +1489,7 @@ def get_structure_PDB (output_path, PDB_id):
     res = False
     file_path = os.path.join(output_path, f"PDB_{PDB_id}.pdb")
 
-    if not os.path.exists(file_path):
+    if not files.file_check(file_path):
 
         pdb_url = f"https://files.rcsb.org/download/{PDB_id}.pdb"
 
