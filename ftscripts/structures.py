@@ -1006,6 +1006,14 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
     :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
     :return: List of dicts with structure information.
     """
+
+    if resolution_cutoff is None:
+        logging.warning("  [WARNING] No resolution cutoff provided, using default of 3.5 Å.")
+        resolution_cutoff = 3.5
+    if coverage_cutoff is None:
+        logging.warning("  [WARNING] No coverage cutoff provided, using default of 40%.")
+        coverage_cutoff = 40.0
+
     seq = uni_info.get("Sequence", "")
     seq_len = len(seq)
 
