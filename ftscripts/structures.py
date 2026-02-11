@@ -2355,6 +2355,9 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
     """
     Update or create the structure summary table to include ColabFold model.
     
+    ColabFold is added when NO other structure is already marked as reference
+    (no eligible PDB/AF).
+
     :param locus_dir: Directory of the locus_tag.
     :param locus_tag: Locus tag identifier.
     :param uniprot_id: UniProt ID associated with the locus_tag.
@@ -2363,6 +2366,16 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
     """
     summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
 
+    # Check if there's already a reference structure marked in the table
+    colabfold_is_reference = True  
+
+    if os.path.exists(summary_table_path):
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        summary_df = pd.read_csv(summary_table_path, sep='\t', keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+        has_reference = (summary_df['is_reference'] == True).any()
+        if has_reference:
+            colabfold_is_reference = False  # Another structure is already reference
+    
     # Create a new entry for the ColabFold model
     colabfold_entry = {
         "locus_tag": locus_tag,
@@ -2375,7 +2388,7 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
         "residue_range": None,
         "coverage": 100.0,
         "sequence_length": None,
-        "is_reference": True,
+        "is_reference": colabfold_is_reference,
         "plddt": plddt_score
     }
     
