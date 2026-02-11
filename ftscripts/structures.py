@@ -871,6 +871,7 @@ def parse_chain_string(chains_str):
     - Single chain: "A=1-139" → [('A', 1, 139)]
     - Homooligomer (identical chains): "A/B/C=1-139" → [('A', 1, 139)]  # Only first chain
     - Fragmented protein (different subunits): "A=24-193, B=217-762" → [('A', 24, 193), ('B', 217, 762)]  # ALL chains
+        Examples: Different chains: Uniprot ID Q9Y251 and PDB ID 5E9C. Same chain: Uniprot ID Q9Y265 and PDB ID 6K0R. 
     - Mixed format: "A/B=27-512, C/P=528-536" → [('A', 27, 512), ('C', 528, 536)]  # First from each group
     - Chain without range: "A" → [('A', None, None)]
     
