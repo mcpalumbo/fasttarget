@@ -598,14 +598,14 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
             programs.run_makeblastdb(
             input= uniprot_species_rest_faa,
             output= uniprot_species_rest_index_path,
-            title= f'uniprot_species_taxid_{specie_taxid}_rest',
+            title= f'uniprot_species_taxid_{specie_taxid}_rest_cdhit100',
             dbtype= 'prot'
             )
-            print(f'Index finished for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest')
+            print(f'Index finished for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest_cdhit100')
         except Exception as e:
             logging.exception(f"Failed to run makeblastdb to file {uniprot_species_rest_faa}: {e}")
     else:
-        print(f'Index already exists for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest')   
+        print(f'Index already exists for species-level rest uniprot proteome: uniprot_species_taxid_{specie_taxid}_rest_cdhit100')   
 
 def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count()):
     """
