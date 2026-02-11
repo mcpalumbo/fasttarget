@@ -4143,6 +4143,7 @@ def get_all_reference_structures(output_path, organism_name, path_mode=True):
     
     :param output_path: Path to output directory.
     :param organism_name: Name of organism.
+    :param path_mode: If True, return full file paths. If False, return only structure names.
     
     :return: Dictionary with locus_tag as key and reference structure path as value.
              Locus tags without structures will have None as value.
@@ -4157,7 +4158,10 @@ def get_all_reference_structures(output_path, organism_name, path_mode=True):
     for locus_tag in all_locus_tags:
         if path_mode:
             ref_path = get_reference_structure_path(output_path, organism_name, locus_tag)
-            reference_structures[locus_tag] = ref_path
+            if ref_path:
+                reference_structures[locus_tag] = ref_path
+            else:
+                reference_structures[locus_tag] = None
         else:
             #get the name of the reference structure only
             ref_path = get_reference_structure_path(output_path, organism_name, locus_tag)
@@ -4168,4 +4172,3 @@ def get_all_reference_structures(output_path, organism_name, path_mode=True):
                 reference_structures[locus_tag] = None
 
     return reference_structures
-
