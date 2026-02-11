@@ -1439,6 +1439,7 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
     print(f'Creating structure summary table for each locus_tag in {structure_dir}...')
 
     all_uniprot_ids = []
+
     for uniprot_ids in map_results.values():
         if isinstance(uniprot_ids, list):
             all_uniprot_ids.extend(uniprot_ids)
@@ -1738,8 +1739,6 @@ def download_single_structure(structure_dir, locus_tag):
 
     else:
         print(f'Structure summary table not found for {locus_tag}, skipping download check.')
-
-
 
 def download_structures(output_path, organism_name):
 
