@@ -1021,8 +1021,8 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
 
     # --- PDBs ---
     pdb_entries = uni_info.get("PDB_id")
-    has_good_resolution_pdb = False  # Track if any PDB passes resolution cutoff
-    
+    good_pdb = 0  # Track if any PDB passes cutoffs
+
     if pdb_entries:
 
         best_by_id = {}
@@ -1041,6 +1041,9 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
             best_by_id[pdb_id] = merged
 
         for pdb_id, entry in best_by_id.items():
+            has_good_resolution_pdb = False
+            has_good_coverage_pdb = False
+
             method = entry.get("method")
             resolution_str = entry.get("resolution")
             chains_str = entry.get("chains")
@@ -1048,28 +1051,57 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
             resolution = parse_resolution(resolution_str)
             chain_info_list = parse_chain_string(chains_str)
 
-            # Check if this PDB has good resolution
-            if resolution is not None and resolution <= resolution_cutoff:
-                has_good_resolution_pdb = True
-
-            # For fragmented proteins: store ALL chains as semicolon-separated string
+            # Calculate correct coverage for fragmented proteins or single chains
             if chain_info_list:
                 if len(chain_info_list) > 1:
+                    
+                    start = end = None  # Not a single continuous range
+
                     # Multiple different subunits
-                    chain_ids = [c[0] for c in chain_info_list]
-                    chain_id_str = ';'.join(chain_ids)
+                    chain_ids = []
+                    chain_lens = []
+                    chain_starts = []
+                    chain_ends = []
+                    for chain_id, ch_start, ch_end in chain_info_list:
+                        chain_starts.append(ch_start)
+                        chain_ends.append(ch_end)
+                        chain_ids.append(chain_id)
+                        chain_lens.append((ch_end - ch_start + 1) if ch_start is not None and ch_end is not None else 0)
+                    
+                    coverage = sum(chain_lens) / seq_len * 100.0 if seq_len > 0 else None
+                    if coverage > 100.0:
+                        coverage = 100.0
+                    start = min([s for s in chain_starts if s is not None], default=None)
+                    end = max([e for e in chain_ends if e is not None], default=None)
+
+                    #Remove if repeated chain IDs
+                    chain_ids = list(set(chain_ids))
+                    if chain_ids and len(chain_ids) > 1:
+                        chain_id_str = ';'.join(chain_ids)
+                    else:
+                        chain_id_str = chain_ids[0]
+                    
                     print(f"Protein fragmented detected for {pdb_id}: chains {chain_id_str}")
-                    # Use range from all chain for coverage calculation
-                    start, end = chain_info_list[0][1], chain_info_list[len(chain_info_list)-1][2]
+
                 else:
                     # Single chain or homooligomer
                     chain_id_str = chain_info_list[0][0]
                     start, end = chain_info_list[0][1], chain_info_list[0][2]
+                    coverage = compute_coverage(start, end, seq_len)
             else:
                 chain_id_str = None
                 start = end = None
+                coverage = None
 
-            coverage = compute_coverage(start, end, seq_len)
+            # Check if this PDB passes cutoffs (with the correct coverage)
+            if resolution is not None and resolution <= resolution_cutoff:
+                has_good_resolution_pdb = True
+            
+            if coverage is not None and coverage >= coverage_cutoff:
+                has_good_coverage_pdb = True
+
+            if has_good_resolution_pdb and has_good_coverage_pdb:
+                good_pdb += 1            
 
             rows.append({
                 "uniprot_id": uniprot_id,
@@ -1084,22 +1116,25 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
                 "is_reference": False,
             })
 
-        # Add AlphaFold only if NO PDB passed the resolution cutoff
-        if not has_good_resolution_pdb:
+        # Add AlphaFold only if NO PDB passed the resolution/coverage cutoff
+        if good_pdb == 0:
             af_id = uni_info.get("AlphaFoldDB")
-            if af_id:
-                rows.append({
-                    "uniprot_id": uniprot_id,
-                    "structure_type": "AlphaFold",
-                    "structure_id": af_id,
-                    "method": "AlphaFold",
-                    "resolution": None,
-                    "chain": "A",
-                    "residue_range": f"1-{seq_len}" if seq_len > 0 else None,
-                    "coverage": 100.0 if seq_len > 0 else None,
-                    "sequence_length": seq_len,
-                    "is_reference": False,
-                })
+            if not af_id:
+                print(f"  [INFO] No AlphaFoldDB ID in UniProt for {uniprot_id}, will attempt direct AlphaFold download")
+                af_id = uniprot_id  # Use UniProt ID as structure ID for fallback
+
+            rows.append({
+                "uniprot_id": uniprot_id,
+                "structure_type": "AlphaFold",
+                "structure_id": af_id,
+                "method": "AlphaFold",
+                "resolution": None,
+                "chain": "A",
+                "residue_range": f"1-{seq_len}" if seq_len > 0 else None,
+                "coverage": 100.0 if seq_len > 0 else None,
+                "sequence_length": seq_len,
+                "is_reference": False,
+            })
     else:
         # --- AlphaFold ---
         af_id = uni_info.get("AlphaFoldDB")
