@@ -991,7 +991,7 @@ def compute_coverage(start, end, seq_len):
     covered = max(0, end - start + 1)
     return (covered / seq_len) * 100.0
 
-def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5):
+def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5, coverage_cutoff = 40.0):
     """
     Given a Uniprot ID and its info dict from Uniprot,
     collects all structure entries (PDB and AlphaFold) and returns
@@ -1003,6 +1003,7 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
     :param uniprot_id: Uniprot accession ID.
     :param uni_info: Dict with Uniprot info.
     :param resolution_cutoff: Resolution (Å) above which AlphaFold is also added alongside PDB.
+    :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
     :return: List of dicts with structure information.
     """
     seq = uni_info.get("Sequence", "")
@@ -1126,7 +1127,7 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
 
     return rows
 
-def select_reference_structure(structs, resolution_cutoff= 3.5):
+def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Given a list of structure dicts (from collect_structures_for_uniprot),
     selects the best structure to use as reference according to criteria:
@@ -1137,6 +1138,8 @@ def select_reference_structure(structs, resolution_cutoff= 3.5):
       4) Otherwise, None.
     Returns the index of the selected structure in the list, or None.
     :param structs: List of structure dicts.
+    :param resolution_cutoff: Maximum resolution (Å) to consider (default 3.5).
+    :param coverage_cutoff: Minimum coverage (%) to consider (default 40).
     :return: Index of selected structure, or None.
     """
     if not structs:
@@ -1232,7 +1235,7 @@ def create_subfolder_structures(output_path, organism_name):
     else:
         raise FileNotFoundError(f'{proteome_ids_file} not found.')
 
-def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, resolution_cutoff = 3.5):
+def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, resolution_cutoff = 3.5, coverage_cutoff = 40.0):
     """
     Create a summary table with structure information for a locus_tag.
     Only ONE structure will be marked as reference across all UniProt IDs.
@@ -1245,6 +1248,9 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
     :param mapping_dict: Dictionary mapping locus_tags to UniProt IDs.
     :param batch_annotations: Dictionary with UniProt annotations for all UniProt IDs.
     :param locus_tag: Locus tag to create summary for.
+    :param resolution_cutoff: Resolution (Å) above to consider a PDB valid reference.
+    :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
+
     :return: DataFrame with structure summary.
     """
     uniprot_id = None
@@ -1261,7 +1267,7 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
         for uniprot_id in uniprot_ids:    
             if uniprot_id in batch_annotations:
                 uni_info = batch_annotations[uniprot_id]
-                structures_info = collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff)
+                structures_info = collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff, coverage_cutoff)
                 for struct in structures_info:
                     summary_data.append(struct)
             else:
@@ -1270,7 +1276,7 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
 
     if summary_data:
         # Select ONE reference structure across ALL UniProt IDs for this locus_tag
-        ref_idx = select_reference_structure(summary_data, resolution_cutoff)
+        ref_idx = select_reference_structure(summary_data, resolution_cutoff, coverage_cutoff)
         if ref_idx is not None:
             summary_data[ref_idx]["is_reference"] = True
             print(f'  Selected reference: {summary_data[ref_idx]["structure_id"]} (UniProt: {summary_data[ref_idx]["uniprot_id"]})')
@@ -1298,7 +1304,7 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
 
     return summary_df
 
-def create_summary_structure_file(output_path, organism_name, resolution_cutoff= 3.5):
+def create_summary_structure_file(output_path, organism_name, resolution_cutoff= 3.5, coverage_cutoff=40.0):
 
     """
     Create a TSV summary file with structure information for each locus_tag.
@@ -1309,6 +1315,8 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
+    :param resolution_cutoff: Resolution (Å) above to consider a PDB valid reference.
+    :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
 
     """
     structure_dir = os.path.join(output_path, organism_name, 'structures')
@@ -1344,7 +1352,7 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
 
         if not files.file_check(summary_table_path):
             
-            summary_df = create_summary_structure_table(batch_annotations, map_results, locus_tag, resolution_cutoff)
+            summary_df = create_summary_structure_table(batch_annotations, map_results, locus_tag, resolution_cutoff, coverage_cutoff)
             if not summary_df.empty:
                 # Ensure structure_id is stored as string to prevent scientific notation issues
                 summary_df['structure_id'] = summary_df['structure_id'].astype(str)
@@ -1354,6 +1362,7 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
 
         else:
             print(f'Structure summary table already exists for {locus_tag}.')
+
 
 ##  ------------------- Download structures functions ------------------- ## 
 def get_structure_PDB (output_path, PDB_id):
@@ -2485,7 +2494,7 @@ def make_models_colabfold_all_proteins(output_path, organism_name, amber_option=
 
 ##  ------------------- Pocket functions ------------------- ##
 
-def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=3.5, colabfold=False, colabfold_all_models=False):
+def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=3.5, coverage_cutoff=40.0, colabfold=False, colabfold_all_models=False):
     """
     Select structures for pocket prediction based on the specified mode.
     
@@ -2496,11 +2505,20 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
     :param locus_dir: Path to the locus_tag directory.
     :param full_mode: Boolean, if True processes all structures in each locus directory.
     :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
+    :param coverage_cutoff: Float, minimum coverage to consider for selecting structures.
     :param colabfold: Boolean, if True includes ColabFold models in the selection.
     :param colabfold_all_models: Boolean, if True includes all ColabFold models instead of just the top-ranked one.
     
     :return: Both lists: 1) paths to selected structures, 2) their IDs.
     """
+
+    if resolution_cutoff == None:
+        resolution_cutoff = 3.5
+        print(f"  No resolution cutoff provided, using default: {resolution_cutoff} Å")
+    if coverage_cutoff == None:
+        coverage_cutoff = 40.0
+        print(f"  No coverage cutoff provided, using default: {coverage_cutoff} %")
+
     selected_structures_path = []
     selected_structures_ids = []
 
@@ -2537,7 +2555,7 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
                 
                 uniprot_dir = os.path.join(locus_dir, uniprot_id)
                 
-                if coverage > 50 and (resolution is not None and resolution <= resolution_cutoff):
+                if (coverage is not None and coverage >= coverage_cutoff) and (resolution is not None and resolution <= resolution_cutoff):
                     
                     # PDB files - look for chain extracted files
                     pdb_glob = os.path.join(uniprot_dir, f"PDB_{struct_id}_*.pdb")
@@ -2686,7 +2704,7 @@ def fpocket_for_structure(pdb, output_path, pockets_dir, container_engine='docke
 
 
 
-def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
+def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Run Fpocket for the selected structures in a locus_tag directory.
 
@@ -2700,6 +2718,7 @@ def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=Fal
     :param colabfold: If True, consider ColabFold as fallback in default track.
     :param colabfold_all_models: If True, run parallel CB track for ALL proteins.
     :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
+    :param coverage_cutoff: Float, minimum coverage to consider for selecting structures.
     """
 
     if os.path.exists(locus_dir):
@@ -2728,7 +2747,7 @@ def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=Fal
                         fpocket_for_structure(cb_file, cb_parent_dir, pockets_dir, container_engine=container_engine)
         else:
             # FULL MODE: Process ALL PDB structures
-            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
+            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
             if not selected_structures_path:
                 print(f"No structures to process in {locus_dir}")
             else:
@@ -2766,7 +2785,7 @@ def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=Fal
         logging.error(f"The directory '{locus_dir}' was not found.")
 
 
-def pockets_finder_for_all_loci(output_path, organism_name, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
+def pockets_finder_for_all_loci(output_path, organism_name, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Run Fpocket for all locus_tag directories under the 'structures' folder.
 
@@ -2776,6 +2795,7 @@ def pockets_finder_for_all_loci(output_path, organism_name, container_engine='do
     :param full_mode: If True, process all PDB files in each locus directory instead of just the reference or AlphaFold models.
     :param colabfold: If True, include ColabFold models in the processing.
     :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
+    :param coverage_cutoff: Float, minimum coverage to consider for selecting structures.
     """
 
     structures_dir = os.path.join(output_path, organism_name, "structures")
@@ -2789,7 +2809,7 @@ def pockets_finder_for_all_loci(output_path, organism_name, container_engine='do
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            pockets_finder_for_locus(locus_dir, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
+            pockets_finder_for_locus(locus_dir, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -2952,7 +2972,7 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False, co
         print(f'P2Rank results directory for {pdb} already present.')
 
 
-def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
+def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Run P2Rank for the selected structures in a locus_tag directory.
 
@@ -3000,7 +3020,7 @@ def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mod
                         p2rank_for_structure(cb_file, cb_parent_dir, p2rank_dir, cpus, alphafold=True, container_engine=container_engine)
         else:
             # FULL MODE: Process ALL PDB structures
-            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
+            selected_structures_path = select_structures_for_pockets(locus_dir, full_mode=full_mode, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff, colabfold=colabfold, colabfold_all_models=False)[0]
             if not selected_structures_path:
                 print(f"No structures to process in {locus_dir}")
             else:
@@ -3024,7 +3044,7 @@ def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mod
     else:
         logging.error(f"The directory '{locus_dir}' was not found.")
 
-def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5):
+def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine='docker', full_mode=False, colabfold=False, colabfold_all_models=False, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Run P2Rank for all locus_tag directories under the 'structures' folder.
 
@@ -3035,6 +3055,7 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engin
     :param full_mode: Boolean, if True processes all structures in each locus directory.
     :param colabfold: Boolean indicating whether to run ColabFold or not (default: False).
     :param resolution_cutoff: Float, maximum resolution to consider for selecting structures.
+    :param coverage_cutoff: Float, minimum coverage to consider for selecting structures.
     """
 
     structures_dir = os.path.join(output_path, organism_name, "structures")
@@ -3048,7 +3069,7 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engin
     for locus_tag in tqdm(all_locus, desc='Locus tags'):
         locus_dir = os.path.join(structures_dir, locus_tag)
         if os.path.exists(locus_dir):
-            p2rank_finder_for_locus(locus_dir, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
+            p2rank_finder_for_locus(locus_dir, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
         else:
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
@@ -3692,7 +3713,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
-def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False):
+def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, coverage_cutoff=40.0, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False):
     """
     Complete pipeline to obtain and process structures for drug target identification.
     
@@ -3709,6 +3730,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     :param strain_taxid: Strain-level NCBI Taxonomy ID (e.g., 208964 for PAO1).
     :param cpus: Number of CPU cores to use. Default is all available cores.
     :param resolution_cutoff: Resolution cutoff for structure selection (default: 3.5 Å).
+    :param coverage_cutoff: Coverage cutoff for structure selection (default: 40.0 %).
     :param container_engine: Container engine to use ('docker' or 'singularity').
     :param full_mode: Boolean indicating whether to run the pipeline in full mode (default: False).
     :param amber_option: Boolean indicating whether to use Amber refinement (default: False).
@@ -3771,7 +3793,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
             create_subfolder_structures(output_path, organism_name)
             
             print(f'\n[2.2] Generating structure summary tables...')
-            create_summary_structure_file(output_path, organism_name, resolution_cutoff=resolution_cutoff)
+            create_summary_structure_file(output_path, organism_name, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
             
             print(f'\n[2.3] Downloading PDB and AlphaFold structures...')
             download_structures(output_path, organism_name)
@@ -3819,10 +3841,10 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         try:
             print(f'\n[3.1] Running FPocket for all structures...')
             structures_dir = os.path.join(output_path, organism_name, 'structures')
-            pockets_finder_for_all_loci(output_path, organism_name, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
+            pockets_finder_for_all_loci(output_path, organism_name, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
             
             print(f'\n[3.2] Running P2Rank for all structures...')
-            p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff)
+            p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engine=container_engine, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
             
             print(f'\n[3.3] Merging structure and pocket data...')
             merged_data = merge_structure_data(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
