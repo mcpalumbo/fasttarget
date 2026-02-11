@@ -1445,6 +1445,10 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
         elif uniprot_ids:
             all_uniprot_ids.append(uniprot_ids)
 
+    # Remove None and duplicates
+    all_uniprot_ids = [uid for uid in all_uniprot_ids if uid]
+    all_uniprot_ids = list(set(all_uniprot_ids))
+
     # Fetch all annotations at once
     if not files.file_check(os.path.join(structure_dir, 'uniprot_files', f'uniprot_{organism_name}_annotations.json')):
         print(f'Fetching UniProt annotations for {len(set(all_uniprot_ids))} unique UniProt IDs...')
