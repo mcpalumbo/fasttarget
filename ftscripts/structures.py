@@ -1833,9 +1833,10 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
 
     :param cif_file: Path to the input CIF file.
     :param chain_ids: Single chain ID (str) or list of chain IDs to extract.
-    :param output_file: Path to the output CIF file where the extracted chain(s) will be saved.
+    :param output_file: Path to the output file where the extracted chain(s) will be saved.
+                        If multi-character chains are present, output will be in CIF format.
     """
-    from Bio.PDB import MMCIFParser
+    from Bio.PDB import MMCIFParser, MMCIFIO
     
     # Normalize to list
     if isinstance(chain_ids, str):
@@ -1876,11 +1877,24 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
         if not chain_ids:
             raise ValueError(f"None of the requested chains found in {cif_file}")
 
-    io = PDBIO()  # PDBIO can save in PDB format even from CIF input
-    io.set_structure(structure)
-
-    selector = MultiChainSelect(chain_ids)
-    io.save(output_file, select=selector)
+    # Check if any chain ID has more than 1 character (requires CIF output format)
+    has_multichar_chains = any(len(str(c)) > 1 for c in chain_ids)
+    
+    if has_multichar_chains:
+        # Use MMCIFIO to preserve multi-character chain IDs
+        io = MMCIFIO()
+        io.set_structure(structure)
+        selector = MultiChainSelect(chain_ids)
+        # Ensure output file has .cif extension
+        if not output_file.endswith('.cif'):
+            output_file = output_file.rsplit('.', 1)[0] + '.cif'
+        io.save(output_file, select=selector)
+    else:
+        # Use PDBIO for single-character chains (standard PDB format)
+        io = PDBIO()
+        io.set_structure(structure)
+        selector = MultiChainSelect(chain_ids)
+        io.save(output_file, select=selector)
     
     # Verify output file was created and has content
     if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
