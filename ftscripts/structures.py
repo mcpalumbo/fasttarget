@@ -1173,13 +1173,22 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
 def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=40.0):
     """
     Given a list of structure dicts (from collect_structures_for_uniprot),
-    selects the best structure to use as reference according to criteria:
-      1) Prefer PDB X-ray structures, best resolution, best coverage.
-      2) If no X-ray, prefer PDB EM structures, best resolution, best coverage.
-         If best EM res > resolution_cutoff and AlphaFold exists, prefer AlphaFold.
-      3) If no PDB, use AlphaFold if exists.
-      4) Otherwise, None.
-    Returns the index of the selected structure in the list, or None.
+    selects the best structure to use as reference according to new criteria:
+    
+    Reference structure have BOTH:
+      - Resolution < resolution_cutoff (default 3.5Å)
+      - Coverage > coverage_cutoff (default 40%)
+    
+    Selection priority from PDB structures that pass both cutoffs.
+    Always X-ray has priority over EM:
+      1) X-ray or EM with res <= 2Å → pick highest coverage (tie-break by lowest resolution)
+      2) X-ray or EM with res 2-2.5Å → pick highest coverage (tie-break by lowest resolution)
+      3) X-ray or EM with res 2.5-3.5Å → prefer coverage > 70%, then pick best resolution
+    
+    If no PDB passes cutoffs:
+      4) Use AlphaFold if available
+      5) If no AlphaFold in dict, use UniProt ID as fallback
+    
     :param structs: List of structure dicts.
     :param resolution_cutoff: Maximum resolution (Å) to consider (default 3.5).
     :param coverage_cutoff: Minimum coverage (%) to consider (default 40).
@@ -1189,6 +1198,9 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
         return None
 
     def method_class(s):
+        """
+        Classify method into 'xray', 'em', 'alphafold', or 'other'.
+        """
         m = (s.get("method") or "").lower()
         if "x-ray" in m or "xray" in m or "x-ray diffraction" in m:
             return "xray"
@@ -1198,6 +1210,7 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
             return "alphafold"
         return "other"
 
+    # Separate structures by type
     pdb_xray_idx = []
     pdb_em_idx = []
     alphafold_idx = []
@@ -1213,38 +1226,90 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
         elif stype == "AlphaFold":
             alphafold_idx.append(i)
 
-    def sort_key(idx):
+    # Filter PDB structures that pass BOTH cutoffs (resolution AND coverage)
+    def passes_cutoffs(idx):
         s = structs[idx]
         res = s.get("resolution")
         cov = s.get("coverage")
-        if res is None:
-            res = float("inf")
-        if cov is None:
-            cov = -1.0
-        return (res, -cov)
+        if res is None or cov is None:
+            return False
+        return res <= resolution_cutoff and cov >= coverage_cutoff
 
-    # 1) If there are X-ray structures, pick the best
-    if pdb_xray_idx:
-        return sorted(pdb_xray_idx, key=sort_key)[0]
+    eligible_xray = [i for i in pdb_xray_idx if passes_cutoffs(i)]
+    eligible_em = [i for i in pdb_em_idx if passes_cutoffs(i)]
+    eligible_pdb = eligible_xray + eligible_em
 
-    # 2) If no X-ray, look at EM
-    if pdb_em_idx:
-        # best EM
-        best_em_idx = sorted(pdb_em_idx, key=sort_key)[0]
-        best_em = structs[best_em_idx]
-        best_em_res = best_em.get("resolution")
+    if not eligible_pdb:
+        # No PDB passes cutoffs, use AlphaFold if available
+        if alphafold_idx:
+            return alphafold_idx[0]
+        # If no AlphaFold, return None (caller will handle UniProt ID fallback)
+        return None
 
-        # if best EM res > resolution_cutoff and AlphaFold exists, prefer AlphaFold
-        if best_em_res is not None and best_em_res > resolution_cutoff and alphafold_idx:
-            return sorted(alphafold_idx, key=sort_key)[0]
+    # Categorize eligible PDB structures by resolution range
+    ultra_high_res = []  # res <= 2Å
+    high_res = []        # 2Å < res <= 2.5Å
+    good_res = []        # 2.5Å < res <= resolution_cutoff
+
+    for idx in eligible_pdb:
+        res = structs[idx].get("resolution")
+        if res <= 2.0:
+            ultra_high_res.append(idx)
+        elif res <= 2.5:
+            high_res.append(idx)
         else:
-            return best_em_idx
+            good_res.append(idx)
 
-    # 3) If no PDB, use AlphaFold if exists
+    # 1) Prefer X-ray < 2Å with highest coverage (tie-break by lowest resolution)
+    ultra_high_xray = [i for i in ultra_high_res if i in eligible_xray]
+    if ultra_high_xray:
+        # Pick highest coverage, then lowest resolution
+        best = max(ultra_high_xray, key=lambda i: (structs[i].get("coverage") or 0, -structs[i].get("resolution") or 0))
+        return best
+
+    # 2) If no X-ray < 2Å, prefer EM < 2Å with highest coverage (tie-break by lowest resolution)
+    ultra_high_em = [i for i in ultra_high_res if i in eligible_em]
+    if ultra_high_em:
+        # Pick highest coverage, then lowest resolution
+        best = max(ultra_high_em, key=lambda i: (structs[i].get("coverage") or 0, -structs[i].get("resolution") or 0))
+        return best
+
+    # 3) If no structures < 2Å, check 2-2.5Å range → pick highest coverage (tie-break by lowest resolution), X-ray first, then EM
+    high_res_xray = [i for i in high_res if i in eligible_xray]
+    if high_res_xray:
+        best = max(high_res_xray, key=lambda i: (structs[i].get("coverage") or 0, -structs[i].get("resolution") or 0))
+        return best
+    
+    high_res_em = [i for i in high_res if i in eligible_em]
+    if high_res_em:
+        best = max(high_res_em, key=lambda i: (structs[i].get("coverage") or 0, -structs[i].get("resolution") or 0))
+        return best
+
+    # 4) If no structures <= 2.5Å, use any eligible PDB 2.5-3.5Å → prefer coverage > 70%, then pick best resolution (X-ray first, then EM)
+    good_res_xray = [i for i in good_res if i in eligible_xray]
+    if good_res_xray:
+        # Prefer structures with coverage > 70% if available
+        high_cov_xray = [i for i in good_res_xray if structs[i].get("coverage", 0) > 70]
+        if high_cov_xray:
+            best = min(high_cov_xray, key=lambda i: structs[i].get("resolution") or float("inf"))
+        else:
+            best = min(good_res_xray, key=lambda i: structs[i].get("resolution") or float("inf"))
+        return best
+    
+    good_res_em = [i for i in good_res if i in eligible_em]
+    if good_res_em:
+        # Prefer structures with coverage > 70% if available
+        high_cov_em = [i for i in good_res_em if structs[i].get("coverage", 0) > 70]
+        if high_cov_em:
+            best = min(high_cov_em, key=lambda i: structs[i].get("resolution") or float("inf"))
+        else:
+            best = min(good_res_em, key=lambda i: structs[i].get("resolution") or float("inf"))
+        return best
+
+    # Fallback (shouldn't reach here if eligible_pdb is not empty)
     if alphafold_idx:
-        return sorted(alphafold_idx, key=sort_key)[0]
-
-    # 4) Otherwise, None
+        return alphafold_idx[0]
+    
     return None
 
 def create_subfolder_structures(output_path, organism_name):
