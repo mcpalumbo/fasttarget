@@ -3600,8 +3600,14 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
 def final_structure_table(output_path, organism_name, full_mode=False, colabfold=False, colabfold_all_models=False):
     """
     Create a final summary table with structure and pocket information for each locus_tag.
-    The table columns are ['gene', 'uniprot', 'druggability_score', 'pocket', 'structure']
-    
+    The table columns are as follows:
+    -Not full_mode: gene, uniprot, structure, druggability_score, fpocket_pocket, p2rank_probability, p2rank_pocket
+    -Full_mode: gene, uniprot, structure, best_fpocket_structure, druggability_score, fpocket_pocket, 
+    best_p2rank_structure, p2rank_probability, p2rank_pocket
+    -If colabfold_all_models (added to either mode): colabfold_plddt, colabfold_druggability_score, 
+    colabfold_fpocket_pocket, colabfold_p2rank_probability, colabfold_p2rank_pocket
+
+
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param full_mode: Boolean indicating whether to use full pocket mode for processing.
@@ -3704,29 +3710,30 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                 structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv"
             )
             
+            # Initialize all variables before conditional blocks
             structure_id = None
             structure_ids = None
             structure_type = None
+            druggability_score = None
+            fpocket_pocket = None
+            p2rank_probability = None
+            p2rank_pocket = None
+            colabfold_best_pocket = None
+            colabfold_plddt = None
+            fp_uniprot_id = None
+            pr_uniprot_id = None
+            CB_druggability_score = None
+            CB_fpocket_pocket = None
+            CB_p2rank_probability = None
+            CB_p2rank_pocket = None
+            best_fpocket_id = None
+            best_p2rank_id = None
             
             if files.file_check(structure_summary_path):
                 # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str})
-                
-                druggability_score = None
-                fpocket_pocket = None
-                p2rank_probability = None
-                p2rank_pocket = None
-                colabfold_best_pocket = None
-                colabfold_plddt = None
-                fp_uniprot_id = None
-                pr_uniprot_id = None
-                CB_druggability_score = None
-                CB_fpocket_pocket = None
-                CB_p2rank_probability = None
-                CB_p2rank_pocket = None
-
-                
-
+                # Keep "NA" as string (valid chain name) instead of treating it as NaN
+                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+              
                 if not full_mode:
                 
                     ref_rows = struct_df[struct_df['is_reference'] == True]
@@ -3787,7 +3794,9 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                                 locus_tag, pr_uniprot_id, pr_structure_id, pr_structure_type, data, colabfold_track=pr_use_colabfold
                             )
                                         
-                    uniprot_id = "|".join(set(x for x in [uniprot_id, fp_uniprot_id, pr_uniprot_id] if x is not None))
+                    candidates = [uniprot_id, fp_uniprot_id, pr_uniprot_id]
+                    candidates = [x for x in candidates if x is not None and not pd.isna(x)]
+                    uniprot_id = "|".join(sorted({str(x) for x in candidates if str(x).strip() != ""}))
 
                 if colabfold_all_models:
                     colab_rows = struct_df[struct_df['structure_type'] == 'ColabFold']
