@@ -2266,7 +2266,7 @@ def find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=F
             return cb_pdbs
     
     # 4) No reference structure found
-    print(f"  Warning: No reference structure found in {locus_dir} (checked: *_ref.pdb, AF_*.pdb, CB_*.pdb)")
+    print(f"  Warning: No reference structure found in {locus_dir} (checked: *_ref.pdb, *_ref.cif, AF_*.pdb, CB_*.pdb)")
     return None
 
 
