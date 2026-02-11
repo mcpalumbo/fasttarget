@@ -882,6 +882,44 @@ def parse_chain_string(chains_str):
     :param chains_str: Chain string from UniProt (e.g., "A/B=1-100, C=101-200")
     :return: List of (chain_id, start, end) tuples representing unique functional chains.
     """
+
+    def range_len(start, end):
+        if start is None or end is None:
+            return 0
+        return max(0, end - start + 1)
+
+    def overlap_len(a_start, a_end, b_start, b_end):
+        if a_start is None or a_end is None or b_start is None or b_end is None:
+            return 0
+        return max(0, min(a_end, b_end) - max(a_start, b_start) + 1)
+
+    def has_significant_overlap(frags, overlap_threshold=0.3):
+        for i in range(len(frags)):
+            for j in range(i + 1, len(frags)):
+                _, a_start, a_end = frags[i]
+                _, b_start, b_end = frags[j]
+                ov = overlap_len(a_start, a_end, b_start, b_end)
+                if ov <= 0:
+                    continue
+                len_a = range_len(a_start, a_end)
+                len_b = range_len(b_start, b_end)
+                denom = min(len_a, len_b) if min(len_a, len_b) > 0 else 0
+                if denom and (ov / denom) >= overlap_threshold:
+                    return True
+        return False
+
+    def pick_longest_fragment(frags):
+        best = None
+        best_len = -1
+        for frag in frags:
+            _, start, end = frag
+            length = range_len(start, end)
+            if length > best_len:
+                best_len = length
+                best = frag
+        return [best] if best else frags
+
+
     if not chains_str:
         return []
 
