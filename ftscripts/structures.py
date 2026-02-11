@@ -3093,10 +3093,10 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False, co
     """
     pdb_basename = os.path.basename(os.path.splitext(pdb)[0])
     
-    otput_folder = pdb_basename + "_p2rank"
+    output_folder = pdb_basename + "_p2rank"
     
-    p2rank_output_dir_tmp = os.path.join(output_path, otput_folder)
-    p2rank_output_dir_final = os.path.join(p2rank_dir, otput_folder)
+    p2rank_output_dir_tmp = os.path.join(output_path, output_folder)
+    p2rank_output_dir_final = os.path.join(p2rank_dir, output_folder)
 
     if os.path.exists(p2rank_output_dir_tmp):
         shutil.rmtree(p2rank_output_dir_tmp)
