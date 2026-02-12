@@ -2031,8 +2031,7 @@ def get_chain_all_pdbs(output_path, organism_name):
                     f'in locus_tag {locus_tag}.'
                 )
 
-
-def get_chain_reference_structure(output_path, organism_name):
+def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
     """
     For each locus_tag, get the reference structure chain(s) and save to a separate PDB file.
     
@@ -2043,6 +2042,139 @@ def get_chain_reference_structure(output_path, organism_name):
     IMPORTANT: Only ONE structure should be marked as reference per locus_tag.
     This function extracts the chain(s) from that single reference structure.
 
+    :param locus_tag: Locus tag identifier.
+    :param structure_dir: Directory of the structures.
+    """
+
+    locus_dir = os.path.join(structure_dir, locus_tag)
+    
+    if not os.path.isdir(locus_dir):
+        continue
+        
+    summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
+
+    if files.file_check(summary_table_path):
+        # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
+        # Keep "NA" as string (valid chain name) instead of treating it as NaN
+        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+
+        ref_rows = summary_df[summary_df['is_reference'] == True]
+
+        if ref_rows.empty:
+            print(f'  Warning: No reference structure found for locus_tag {locus_tag}.')
+            continue
+        
+        if len(ref_rows) > 1:
+            print(f'  ERROR: Multiple reference structures found for {locus_tag}. There should be only ONE.')
+            print(f'  Found {len(ref_rows)} reference structures. Using first one.')
+            ref_row = ref_rows.iloc[0]
+        else:
+            ref_row = ref_rows.iloc[0]
+        
+        struct_type = ref_row['structure_type']
+        struct_id = ref_row['structure_id']
+        chain_field = ref_row['chain']
+        uniprot_id = ref_row['uniprot_id']
+
+        if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+            print(f"  Warning: Missing UniProt ID for reference structure {struct_id} in {locus_tag}, skipping.")
+            continue
+        
+        # Parse chain field - can be single "A" or multiple "A;B;C"
+        if not chain_field or pd.isna(chain_field):
+            chain_ids = ['A']
+            print(f'  Warning: No chain ID specified for {struct_id} in {locus_tag}, defaulting to chain A.')
+        elif ';' in str(chain_field):
+            # Multiple chains
+            chain_ids = [c.strip() for c in str(chain_field).split(';')]
+            print(f'  Warning: Multiple chains detected for {locus_tag}: extracting chains {chain_ids}')
+        else:
+            # Single chain
+            chain_ids = [str(chain_field)]
+        
+        uniprot_dir = os.path.join(locus_dir, uniprot_id)
+        
+        # Check if uniprot_dir exists
+        if not os.path.isdir(uniprot_dir):
+            print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
+            continue
+
+        # Only extract chain(s) for PDB structures (AlphaFold doesn't need extraction)
+        if struct_type == 'PDB':
+            pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
+            cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
+            
+            # Create filename with chain notation
+            # Limit filename length for many chains
+            if len(chain_ids) > 1:
+                if len(chain_ids) <= 5:  # Reasonable limit
+                    chains_suffix = '_'.join(chain_ids)
+                else:
+                    # For structures with many chains, use compact notation
+                    chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
+            else:
+                chains_suffix = chain_ids[0]
+                
+            output_chain_file = os.path.join(uniprot_dir, f"PDB_{struct_id}_{chains_suffix}_ref.pdb")
+            
+            # Try PDB format first, then CIF format
+            # Verify files exist AND have content (not empty/corrupt)
+            try:
+                pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
+            except OSError:
+                pdb_valid = False
+            
+            try:
+                cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
+            except OSError:
+                cif_valid = False
+            
+            if pdb_valid:
+                if not files.file_check(output_chain_file):
+                    print(f'  Extracting chain(s) {chain_ids} from {struct_id} for {locus_tag}')
+                    try:
+                        extract_chain_from_pdb(pdb_file_path, chain_ids, output_chain_file)
+                    except Exception as e:
+                        logging.exception(f'Failed to extract chain(s) {chain_ids} from {pdb_file_path}: {e}')
+                else:
+                    print(f'  Chain file already exists: {output_chain_file}')
+            elif cif_valid:
+                # Use CIF file if PDB not available (common for cryo-EM)
+                if not files.file_check(output_chain_file):
+                    print(f'  Extracting chain(s) {chain_ids} from {struct_id} CIF for {locus_tag}')
+                    try:
+                        extract_chain_from_cif(cif_file_path, chain_ids, output_chain_file)
+                    except Exception as e:
+                        logging.exception(f'Failed to extract chain(s) {chain_ids} from {cif_file_path}: {e}')
+                else:
+                    print(f'  Chain file already exists: {output_chain_file}')
+            else:
+                print(f'  ERROR: Neither PDB nor CIF file found (or files are empty) for {struct_id} in locus_tag {locus_tag}.')
+                if files.file_check(pdb_file_path):
+                    try:
+                        size = os.path.getsize(pdb_file_path)
+                        print(f'    Note: {pdb_file_path} exists but is empty (size: {size} bytes)')
+                    except OSError:
+                        print(f'    Note: {pdb_file_path} exists but size cannot be determined')
+                if files.file_check(cif_file_path):
+                    try:
+                        size = os.path.getsize(cif_file_path)
+                        print(f'    Note: {cif_file_path} exists but is empty (size: {size} bytes)')
+                    except OSError:
+                        print(f'    Note: {cif_file_path} exists but size cannot be determined')
+        
+        elif struct_type == 'AlphaFold':
+            af_file_path = os.path.join(uniprot_dir, f"AF_{uniprot_id}.pdb")
+            if not files.file_check(af_file_path):
+                print(f'  ERROR: AlphaFold file {af_file_path} not found for locus_tag {locus_tag}.')
+    else:
+        print(f'  Structure summary table not found for {locus_tag}, skipping chain extraction.')
+
+def get_chain_reference_structure(output_path, organism_name):
+    """
+    For each locus_tag, get the reference structure chain(s) and save to a separate PDB file.
+    Uses get_chain_reference_structure_for_locus for each locus_tag.
+
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     """
@@ -2051,130 +2183,10 @@ def get_chain_reference_structure(output_path, organism_name):
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
     
     for locus_tag in all_locus_tags:
-        locus_dir = os.path.join(structure_dir, locus_tag)
-        
-        if not os.path.isdir(locus_dir):
-            continue
-            
-        summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
-
-        if files.file_check(summary_table_path):
-            # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
-            # Keep "NA" as string (valid chain name) instead of treating it as NaN
-            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
-
-            ref_rows = summary_df[summary_df['is_reference'] == True]
-
-            if ref_rows.empty:
-                print(f'  Warning: No reference structure found for locus_tag {locus_tag}.')
-                continue
-            
-            if len(ref_rows) > 1:
-                print(f'  ERROR: Multiple reference structures found for {locus_tag}. There should be only ONE.')
-                print(f'  Found {len(ref_rows)} reference structures. Using first one.')
-                ref_row = ref_rows.iloc[0]
-            else:
-                ref_row = ref_rows.iloc[0]
-            
-            struct_type = ref_row['structure_type']
-            struct_id = ref_row['structure_id']
-            chain_field = ref_row['chain']
-            uniprot_id = ref_row['uniprot_id']
-
-            if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
-                print(f"  Warning: Missing UniProt ID for reference structure {struct_id} in {locus_tag}, skipping.")
-                continue
-            
-            # Parse chain field - can be single "A" or multiple "A;B;C"
-            if not chain_field or pd.isna(chain_field):
-                chain_ids = ['A']
-                print(f'  Warning: No chain ID specified for {struct_id} in {locus_tag}, defaulting to chain A.')
-            elif ';' in str(chain_field):
-                # Multiple chains
-                chain_ids = [c.strip() for c in str(chain_field).split(';')]
-                print(f'  Warning: Multiple chains detected for {locus_tag}: extracting chains {chain_ids}')
-            else:
-                # Single chain
-                chain_ids = [str(chain_field)]
-            
-            uniprot_dir = os.path.join(locus_dir, uniprot_id)
-            
-            # Check if uniprot_dir exists
-            if not os.path.isdir(uniprot_dir):
-                print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
-                continue
-
-            # Only extract chain(s) for PDB structures (AlphaFold doesn't need extraction)
-            if struct_type == 'PDB':
-                pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
-                cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
-                
-                # Create filename with chain notation
-                # Limit filename length for many chains
-                if len(chain_ids) > 1:
-                    if len(chain_ids) <= 5:  # Reasonable limit
-                        chains_suffix = '_'.join(chain_ids)
-                    else:
-                        # For structures with many chains, use compact notation
-                        chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
-                else:
-                    chains_suffix = chain_ids[0]
-                    
-                output_chain_file = os.path.join(uniprot_dir, f"PDB_{struct_id}_{chains_suffix}_ref.pdb")
-                
-                # Try PDB format first, then CIF format
-                # Verify files exist AND have content (not empty/corrupt)
-                try:
-                    pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
-                except OSError:
-                    pdb_valid = False
-                
-                try:
-                    cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
-                except OSError:
-                    cif_valid = False
-                
-                if pdb_valid:
-                    if not files.file_check(output_chain_file):
-                        print(f'  Extracting chain(s) {chain_ids} from {struct_id} for {locus_tag}')
-                        try:
-                            extract_chain_from_pdb(pdb_file_path, chain_ids, output_chain_file)
-                        except Exception as e:
-                            logging.exception(f'Failed to extract chain(s) {chain_ids} from {pdb_file_path}: {e}')
-                    else:
-                        print(f'  Chain file already exists: {output_chain_file}')
-                elif cif_valid:
-                    # Use CIF file if PDB not available (common for cryo-EM)
-                    if not files.file_check(output_chain_file):
-                        print(f'  Extracting chain(s) {chain_ids} from {struct_id} CIF for {locus_tag}')
-                        try:
-                            extract_chain_from_cif(cif_file_path, chain_ids, output_chain_file)
-                        except Exception as e:
-                            logging.exception(f'Failed to extract chain(s) {chain_ids} from {cif_file_path}: {e}')
-                    else:
-                        print(f'  Chain file already exists: {output_chain_file}')
-                else:
-                    print(f'  ERROR: Neither PDB nor CIF file found (or files are empty) for {struct_id} in locus_tag {locus_tag}.')
-                    if files.file_check(pdb_file_path):
-                        try:
-                            size = os.path.getsize(pdb_file_path)
-                            print(f'    Note: {pdb_file_path} exists but is empty (size: {size} bytes)')
-                        except OSError:
-                            print(f'    Note: {pdb_file_path} exists but size cannot be determined')
-                    if files.file_check(cif_file_path):
-                        try:
-                            size = os.path.getsize(cif_file_path)
-                            print(f'    Note: {cif_file_path} exists but is empty (size: {size} bytes)')
-                        except OSError:
-                            print(f'    Note: {cif_file_path} exists but size cannot be determined')
-            
-            elif struct_type == 'AlphaFold':
-                af_file_path = os.path.join(uniprot_dir, f"AF_{uniprot_id}.pdb")
-                if not files.file_check(af_file_path):
-                    print(f'  ERROR: AlphaFold file {af_file_path} not found for locus_tag {locus_tag}.')
-        else:
-            print(f'  Structure summary table not found for {locus_tag}, skipping chain extraction.')
-
+        try:
+            get_chain_reference_structure_for_locus(locus_tag, structure_dir)
+        except Exception as e:
+            logging.error(f"Error extracting reference structure for {locus_tag}: {e}")
 
 def find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False):
     """
