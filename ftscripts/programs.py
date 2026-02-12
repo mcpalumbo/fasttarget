@@ -681,6 +681,12 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
         if not gff_files:
             raise Exception(f"No .gff files found in {input}")
 
+        # Convert absolute paths to relative paths from work_dir
+        # This is necessary for Singularity/Apptainer containers
+        work_dir_abs = os.path.abspath(work_dir)
+        output_rel = os.path.relpath(output, work_dir_abs)
+        gff_files_rel = [os.path.relpath(gff, work_dir_abs) for gff in gff_files]
+
         ROARY_image = "sangerpathogens/roary"
         ROARY_command = [
             "roary",
@@ -688,8 +694,8 @@ def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_n
             "-g", str(cluster_number),
             "-cd", str(core_threshold),
             "-i", str(identity),
-            "-f", output
-        ] + gff_files
+            "-f", output_rel
+        ] + gff_files_rel
 
         run_container(work_dir, work_dir, ROARY_image, ROARY_command, container_engine=container_engine)
     else:
