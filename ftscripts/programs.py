@@ -154,10 +154,28 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None,
     :param volumes: Dictionary of volumes to mount in the container.
 
     """
+    # Convert work_dir to absolute path for consistency
+    work_dir = os.path.abspath(work_dir)
+    
+    # Convert bind_dir to absolute path if it's relative
+    if not os.path.isabs(bind_dir):
+        bind_dir = os.path.abspath(bind_dir)
+    
     client = docker.from_env()
 
     if volumes == None:
         volumes = {work_dir: {'bind': bind_dir, 'mode': 'rw'}}
+    else:
+        # Ensure all volume paths are absolute
+        abs_volumes = {}
+        for host_path, mount_info in volumes.items():
+            abs_host_path = os.path.abspath(host_path)
+            container_path = mount_info['bind']
+            # Ensure container path is absolute
+            if not os.path.isabs(container_path):
+                container_path = os.path.abspath(container_path)
+            abs_volumes[abs_host_path] = {'bind': container_path, 'mode': mount_info.get('mode', 'rw')}
+        volumes = abs_volumes
     
     user_str = f"{os.getuid()}:{os.getgid()}"
 
@@ -192,6 +210,14 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     :param sif_dir: Directory where Singularity .sif files are stored.
 
     """
+    # Convert work_dir to absolute path to avoid path duplication issues with bind mounts
+    work_dir = os.path.abspath(work_dir)
+    
+    # Convert bind_dir to absolute path if it's relative
+    # Singularity requires both source and destination paths to be absolute
+    if not os.path.isabs(bind_dir):
+        bind_dir = os.path.abspath(bind_dir)
+    
     # Convert Docker image name to Singularity .sif filename
     # e.g., "fpocket/fpocket" -> "fpocket_fpocket.sif"
     # e.g., "mcpalumbo/p2rank:latest" -> "mcpalumbo_p2rank_latest.sif"
@@ -216,8 +242,13 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     bind_mounts = []
     if volumes:
         for host_path, mount_info in volumes.items():
+            # Convert host_path to absolute path to avoid path duplication
+            abs_host_path = os.path.abspath(host_path)
             container_path = mount_info['bind']
-            bind_mounts.append(f"{host_path}:{container_path}")
+            # Ensure container path is absolute for Singularity
+            if not os.path.isabs(container_path):
+                container_path = os.path.abspath(container_path)
+            bind_mounts.append(f"{abs_host_path}:{container_path}")
     else:
         bind_mounts.append(f"{work_dir}:{bind_dir}")
     
