@@ -3,6 +3,7 @@ import json
 import sys
 import pandas as pd
 import logging
+import math
 
 def file_to_list(file_path):
     
@@ -117,11 +118,24 @@ def dict_to_json(output_path, file_name, my_dict):
 
     """
 
+    def _sanitize_for_json(obj):
+        if isinstance(obj, dict):
+            return {k: _sanitize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize_for_json(v) for v in obj]
+        if isinstance(obj, tuple):
+            return [_sanitize_for_json(v) for v in obj]
+        if hasattr(obj, "item"):
+            return _sanitize_for_json(obj.item())
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        return obj
+
     full_path = os.path.join(output_path, file_name)
     
     if os.path.exists(output_path):
         with open(full_path, 'w') as file:
-            json.dump(my_dict, file)
+            json.dump(_sanitize_for_json(my_dict), file, allow_nan=False)
         print(f"File '{full_path}' saved.")
     else:
         print(f"The directory '{output_path}' does not exist.")
