@@ -602,6 +602,13 @@ def merge_foldseek_data (output_path, organism_name):
                     'query_structure': foldseek_data.get('query_structure'),
                     'structure': foldseek_data.get('query_structure'),  # The reference structure used
                     'target': foldseek_data.get('target_foldseek'),
+                    'alnlen': foldseek_data.get('alnlen_foldseek'),
+                    'qcov': foldseek_data.get('qcov_foldseek'),
+                    'tcov': foldseek_data.get('tcov_foldseek'),
+                    'lddt': foldseek_data.get('lddt_foldseek'),
+                    'qtmscore': foldseek_data.get('qtmscore_foldseek'),
+                    'ttmscore': foldseek_data.get('ttmscore_foldseek'),
+                    'alntmscore': foldseek_data.get('alntmscore_foldseek'),
                     'rmsd': foldseek_data.get('rmsd_foldseek'),
                     'prob': foldseek_data.get('prob_foldseek'),
                     'pident': foldseek_data.get('pident_foldseek')
@@ -647,12 +654,19 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             if locus_tag in mapped_dict:
                 rows.append(mapped_dict[locus_tag])
             else:
-                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'rmsd': None, 'prob': None, 'pident': None })
+                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'alnlen': None, 'qcov': None, 'tcov': None, 'lddt': None, 'qtmscore': None, 'ttmscore': None, 'alntmscore': None, 'rmsd': None, 'prob': None, 'pident': None })
 
         final_foldseek_df = pd.DataFrame(rows).rename(columns={
             'query_structure': 'FS_query_structure',
             'structure': 'FS_organism_structure_query',
             'target': 'FS_human_structure_hit',
+            'alnlen': 'FS_alnlen',
+            'qcov': 'FS_qcov',
+            'tcov': 'FS_tcov',
+            'lddt': 'FS_lddt',
+            'qtmscore': 'FS_qtmscore',
+            'ttmscore': 'FS_ttmscore',
+            'alntmscore': 'FS_alntmscore',
             'rmsd': 'FS_rmsd',
             'prob': 'FS_prob',
             'pident': 'FS_pident'
