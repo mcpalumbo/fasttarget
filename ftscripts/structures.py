@@ -1902,7 +1902,7 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
     chains_str = ','.join(chain_ids)
     print(f"    Extracted chain(s) {chains_str} from {Path(cif_file).name} (CIF)")
 
-def get_chain_all_pdbs_for_locus(locus_tag, structure_dir):
+def get_chain_all_pdbs_for_locus(locus_tag, locus_dir):
     """
     For each locus_tag, extract chain(s) from ALL downloaded PDB structures
     listed in the structure summary table (not only the reference one).
@@ -1917,18 +1917,13 @@ def get_chain_all_pdbs_for_locus(locus_tag, structure_dir):
     :param structure_dir: Directory of the structures.
     """
 
-    locus_dir = os.path.join(structure_dir, locus_tag)
-
-    if not os.path.isdir(locus_dir):
-        continue
-
     summary_table_path = os.path.join(
         locus_dir, f"{locus_tag}_structure_summary.tsv"
     )
 
     if not files.file_check(summary_table_path):
         print(f'  Structure summary table not found for {locus_tag}, skipping.')
-        continue
+        return
 
     # Keep "NA" as string (valid chain name) instead of treating it as NaN
     summary_df = pd.read_csv(
@@ -1941,7 +1936,7 @@ def get_chain_all_pdbs_for_locus(locus_tag, structure_dir):
 
     if pdb_rows.empty:
         print(f'  No PDB structures found for {locus_tag}.')
-        continue
+        return
 
     for _, row in pdb_rows.iterrows():
         struct_id = row['structure_id']
@@ -2046,12 +2041,17 @@ def get_chain_all_pdbs(output_path, organism_name):
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in all_locus_tags:
+        locus_dir = os.path.join(structure_dir, locus_tag)
+
+        if not os.path.isdir(locus_dir):
+            continue
+        
         try:
-            get_chain_all_pdbs_for_locus(locus_tag, structure_dir)
+            get_chain_all_pdbs_for_locus(locus_tag, locus_dir)
         except Exception as e:
             logging.error(f"Error extracting chains for {locus_tag}: {e}")
 
-def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
+def get_chain_reference_structure_for_locus (locus_tag, locus_dir):
     """
     For each locus_tag, get the reference structure chain(s) and save to a separate PDB file.
     
@@ -2063,13 +2063,8 @@ def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
     This function extracts the chain(s) from that single reference structure.
 
     :param locus_tag: Locus tag identifier.
-    :param structure_dir: Directory of the structures.
+    :param locus_dir: Directory of the locus.
     """
-
-    locus_dir = os.path.join(structure_dir, locus_tag)
-    
-    if not os.path.isdir(locus_dir):
-        continue
         
     summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
 
@@ -2082,7 +2077,7 @@ def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
 
         if ref_rows.empty:
             print(f'  Warning: No reference structure found for locus_tag {locus_tag}.')
-            continue
+            return
         
         if len(ref_rows) > 1:
             print(f'  ERROR: Multiple reference structures found for {locus_tag}. There should be only ONE.')
@@ -2098,7 +2093,7 @@ def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
 
         if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
             print(f"  Warning: Missing UniProt ID for reference structure {struct_id} in {locus_tag}, skipping.")
-            continue
+            return
         
         # Parse chain field - can be single "A" or multiple "A;B;C"
         if not chain_field or pd.isna(chain_field):
@@ -2117,7 +2112,7 @@ def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
         # Check if uniprot_dir exists
         if not os.path.isdir(uniprot_dir):
             print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
-            continue
+            return
 
         # Only extract chain(s) for PDB structures (AlphaFold doesn't need extraction)
         if struct_type == 'PDB':
@@ -2203,8 +2198,13 @@ def get_chain_reference_structure(output_path, organism_name):
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
     
     for locus_tag in all_locus_tags:
+        locus_dir = os.path.join(structure_dir, locus_tag)
+    
+        if not os.path.isdir(locus_dir):
+            continue
+
         try:
-            get_chain_reference_structure_for_locus(locus_tag, structure_dir)
+            get_chain_reference_structure_for_locus(locus_tag, locus_dir)
         except Exception as e:
             logging.error(f"Error extracting reference structure for {locus_tag}: {e}")
 
