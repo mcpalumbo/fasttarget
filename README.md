@@ -11,7 +11,7 @@
    cd fasttarget
    conda env create -f requirements.yml
    conda activate fasttarget
-   bash setup_docker.sh  # or setup_singularity.sh
+   bash setup_docker.sh  # or setup_containers.sh for apptainer/singularity
    ```
 
 2. **Download databases:**
@@ -135,7 +135,7 @@ Pull container images using the provided scripts:
 bash setup_docker.sh
 
 # Singularity images (if preferred or Nextflow)
-bash setup_singularity.sh
+bash setup_containers.sh
 ```
 
 > **Note:** This pipeline is designed to run Docker commands without `sudo`.
@@ -317,7 +317,7 @@ The `config.yml` file is the **central configuration file** for this repository.
    - `cpus`: Specify the number of CPUs to be used for running this pipeline. Use `null` for auto-detection, or specify a number (e.g., `4`, `8`, `16`).
 
 3. **Container Engine:**
-   - `container_engine`: Choose `docker` or `singularity` for running containerized tools. Make sure to run the appropriate setup script (`setup_docker.sh` or `setup_singularity.sh`) before using.
+   - `container_engine`: Choose `docker`, `singularity`, or `apptainer` for running containerized tools. Make sure to run the appropriate setup script (`setup_docker.sh` or `setup_containers.sh`) before using.
 
 4. **Structures:**
    - `structures.enabled`: Set to `True` if structural data is to be used; otherwise, set to `False`.
@@ -545,7 +545,8 @@ The Nextflow wrappers call the same Python functions in `ftscripts` and add para
 
 ### Setup Scripts
 - `setup_docker.sh` — pulls required Docker container images
-- `setup_singularity.sh` — pulls required Singularity container images
+- `setup_containers.sh` — pulls required Singularity/Apptainer container images (auto-detects which is available)
+- `setup_singularity.sh` — legacy script, use setup_containers.sh instead
 
 ### Core Modules (`ftscripts/`)
 Package containing all analysis implementations called by both `fasttarget.py` and Nextflow:
