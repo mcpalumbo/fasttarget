@@ -199,7 +199,8 @@ def run_docker_container(work_dir, bind_dir, image_name, command, env_vars=None,
 
 def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=None, volumes=None, sif_dir='singularity_sfi_files'):
     """
-    Run a singularity container.
+    Run a singularity/apptainer container.
+    Automatically detects whether to use apptainer or singularity.
 
     :param work_dir: Working directory path.
     :param bind_dir: Binding directory path in container.
@@ -207,18 +208,21 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     :param command: The command to run.
     :param env_vars: Dictionary of environment variables to set in the container.
     :param volumes: Dictionary of volumes to mount in the container.
-    :param sif_dir: Directory where Singularity .sif files are stored.
+    :param sif_dir: Directory where Singularity/Apptainer .sif files are stored.
 
     """
+    # Detect whether to use apptainer or singularity
+    container_cmd = 'apptainer' if shutil.which('apptainer') else 'singularity'
+    
     # Convert work_dir to absolute path to avoid path duplication issues with bind mounts
     work_dir = os.path.abspath(work_dir)
     
     # Convert bind_dir to absolute path if it's relative
-    # Singularity requires both source and destination paths to be absolute
+    # Singularity/Apptainer requires both source and destination paths to be absolute
     if not os.path.isabs(bind_dir):
         bind_dir = os.path.abspath(bind_dir)
     
-    # Convert Docker image name to Singularity .sif filename
+    # Convert Docker image name to Singularity/Apptainer .sif filename
     # e.g., "fpocket/fpocket" -> "fpocket_fpocket.sif"
     # e.g., "mcpalumbo/p2rank:latest" -> "mcpalumbo_p2rank_latest.sif"
     sif_name = image_name.replace('/', '_').replace(':', '_') + '.sif'
@@ -236,7 +240,7 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     
     # Check if the .sif file exists
     if not os.path.exists(sif_path):
-        raise FileNotFoundError(f"Singularity image not found: {sif_path}. Run setup_singularity.sh first.")
+        raise FileNotFoundError(f"Container image not found: {sif_path}. Run setup_containers.sh first.")
     
     # Build bind mounts
     bind_mounts = []
@@ -252,39 +256,39 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     else:
         bind_mounts.append(f"{work_dir}:{bind_dir}")
     
-    # Build singularity command
-    singularity_cmd = ['singularity', 'exec']
+    # Build container command using detected tool
+    container_cmd_list = [container_cmd, 'exec']
     
     
     # Add isolation flags to prevent host environment contamination
-    singularity_cmd.append('--contain')  # Maximum isolation
-    singularity_cmd.append('--cleanenv')    # Don't inherit host environment variables  
+    container_cmd_list.append('--contain')  # Maximum isolation
+    container_cmd_list.append('--cleanenv')    # Don't inherit host environment variables  
 
     # Add bind mounts
     for bind in bind_mounts:
-        singularity_cmd.extend(['--bind', bind])
+        container_cmd_list.extend(['--bind', bind])
     
     # Add environment variables
     if env_vars:
         for key, value in env_vars.items():
-            singularity_cmd.extend(['--env', f'{key}={value}'])
+            container_cmd_list.extend(['--env', f'{key}={value}'])
     
     # Set working directory
-    singularity_cmd.extend(['--pwd', bind_dir])
+    container_cmd_list.extend(['--pwd', bind_dir])
     
     # Add the .sif file
-    singularity_cmd.append(sif_path)
+    container_cmd_list.append(sif_path)
     
     # Add the command (as a single string or split)
     if isinstance(command, str):
-        singularity_cmd.extend(command.split())
+        container_cmd_list.extend(command.split())
     else:
-        singularity_cmd.extend(command)
+        container_cmd_list.extend(command)
     
     try:
-        print(f'Running Singularity image {sif_name}, command: {command}')
+        print(f'Running {container_cmd} image {sif_name}, command: {command}')
         result = subprocess.run(
-            singularity_cmd,
+            container_cmd_list,
             cwd=work_dir,
             capture_output=True,
             text=True,
@@ -294,7 +298,7 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
         if result.stderr:
             print(f"STDERR: {result.stderr}")
     except subprocess.CalledProcessError as e:
-        print(f"Error running Singularity container: {e}")
+        print(f"Error running {container_cmd} container: {e}")
         print(f"STDOUT: {e.stdout}")
         print(f"STDERR: {e.stderr}")
         raise

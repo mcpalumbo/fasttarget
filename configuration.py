@@ -144,7 +144,7 @@ def validate_config(config):
     #Validate container engine
     if 'container_engine' in config:
         engine = config['container_engine']
-        valid_engines = ['docker', 'singularity']
+        valid_engines = ['docker', 'singularity', 'apptainer']
         if engine not in valid_engines:
             errors.append(f"container_engine must be one of {valid_engines} (got '{engine}')")
 
