@@ -430,16 +430,15 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
     """
     Parses Foldseek results for reference structures and maps them to locus_tags.
     
-    For each locus_tag, selects the best match (highest probability) across
-    both human PDB and AlphaFold database searches.
+    For each locus_tag, selects the best match (highest TM-score) from the unified 
+    human reference database search.
 
     :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
-    :param map_locus_tag: Dictionary mapping locus_tag to foldseek result files.
+    :param map_foldseek: Dictionary mapping locus_tag to foldseek result file (single file per locus_tag).
     
     :return: Dictionary with locus_tag as key and best foldseek match.
     """
-
 
     offtargets_dir = os.path.join(output_path, organism_name, 'offtarget')
     foldseek_results_path = os.path.join(offtargets_dir, 'foldseek_results')
@@ -460,7 +459,6 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
         
         # Parse results for each locus_tag
         for locus_tag, result_files in map_foldseek.items():
-            dfs = []
             
             # Skip if no result files (e.g., foldseek search failed)
             if not result_files:
@@ -481,40 +479,11 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                 print(f'  {locus_tag}: Foldseek search failed, no results')
                 continue
             
-            # Read all result files for this locus_tag
-            for file in result_files:
-                if files.file_check(file):
-                    try:
-                        df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'alnlen', 'qcov', 'tcov', 'lddt', 'qtmscore', 'ttmscore', 'alntmscore', 'rmsd', 'prob', 'pident'])
-                        if not df.empty:
-                            dfs.append(df)
-                    except Exception as e:
-                        logging.exception(f'Could not read {file}: {e}')
+            # Process the single result file for this locus_tag
+            result_file = result_files[0]
             
-            # Get the best match across all result files for this locus_tag
-            if len(dfs) > 0:
-                dfs_combined = pd.concat(dfs, ignore_index=True)
-                # Sort by TM score, as max of query and target->  max(qtmscore, ttmscore)
-                dfs_combined['max_tmscore'] = dfs_combined[['qtmscore', 'ttmscore']].max(axis=1)
-                best_row = dfs_combined.sort_values(by='max_tmscore', ascending=False).iloc[0]
-                
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': best_row['query'],
-                    'target_foldseek': best_row['target'],
-                    'alnlen_foldseek': best_row['alnlen'],
-                    'qcov_foldseek': best_row['qcov'],
-                    'tcov_foldseek': best_row['tcov'],
-                    'lddt_foldseek': best_row['lddt'],
-                    'qtmscore_foldseek': best_row['qtmscore'],
-                    'ttmscore_foldseek': best_row['ttmscore'],
-                    'alntmscore_foldseek': best_row['alntmscore'],
-                    'rmsd_foldseek': best_row['rmsd'],
-                    'prob_foldseek': best_row['prob'],
-                    'pident_foldseek': best_row['pident']
-                }
-                print(f'  {locus_tag}: Best match = {best_row["target"]} (prob={best_row["prob"]:.3f})')
-            else:
-                # No results found for this locus_tag
+            if not files.file_check(result_file):
+                print(f'  {locus_tag}: Result file not found: {result_file}')
                 results_foldseek_dict[locus_tag] = {
                     'query_structure': None,
                     'target_foldseek': None,
@@ -529,7 +498,65 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                     'prob_foldseek': None,
                     'pident_foldseek': None
                 }
-                print(f'  {locus_tag}: No foldseek results found')
+                continue
+            
+            try:
+                df = pd.read_csv(result_file, sep='\t', usecols=['query', 'target', 'alnlen', 'qcov', 'tcov', 'lddt', 'qtmscore', 'ttmscore', 'alntmscore', 'rmsd', 'prob', 'pident'])
+                
+                if not df.empty:
+                    # Sort by TM score (max of query and target TM-scores)
+                    df['max_tmscore'] = df[['qtmscore', 'ttmscore']].max(axis=1)
+                    best_row = df.sort_values(by='max_tmscore', ascending=False).iloc[0]
+                    
+                    results_foldseek_dict[locus_tag] = {
+                        'query_structure': best_row['query'],
+                        'target_foldseek': best_row['target'],
+                        'alnlen_foldseek': best_row['alnlen'],
+                        'qcov_foldseek': best_row['qcov'],
+                        'tcov_foldseek': best_row['tcov'],
+                        'lddt_foldseek': best_row['lddt'],
+                        'qtmscore_foldseek': best_row['qtmscore'],
+                        'ttmscore_foldseek': best_row['ttmscore'],
+                        'alntmscore_foldseek': best_row['alntmscore'],
+                        'rmsd_foldseek': best_row['rmsd'],
+                        'prob_foldseek': best_row['prob'],
+                        'pident_foldseek': best_row['pident']
+                    }
+                    print(f'  {locus_tag}: Best match = {best_row["target"]} (TM-score={best_row["max_tmscore"]:.3f})')
+                else:
+                    # Empty result file
+                    results_foldseek_dict[locus_tag] = {
+                        'query_structure': None,
+                        'target_foldseek': None,
+                        'alnlen_foldseek': None,
+                        'qcov_foldseek': None,
+                        'tcov_foldseek': None,
+                        'lddt_foldseek': None,
+                        'qtmscore_foldseek': None,
+                        'ttmscore_foldseek': None,
+                        'alntmscore_foldseek': None,
+                        'rmsd_foldseek': None,
+                        'prob_foldseek': None,
+                        'pident_foldseek': None
+                    }
+                    print(f'  {locus_tag}: No hits found in foldseek results')
+                    
+            except Exception as e:
+                logging.exception(f'Could not read {result_file}: {e}')
+                results_foldseek_dict[locus_tag] = {
+                    'query_structure': None,
+                    'target_foldseek': None,
+                    'alnlen_foldseek': None,
+                    'qcov_foldseek': None,
+                    'tcov_foldseek': None,
+                    'lddt_foldseek': None,
+                    'qtmscore_foldseek': None,
+                    'ttmscore_foldseek': None,
+                    'alntmscore_foldseek': None,
+                    'rmsd_foldseek': None,
+                    'prob_foldseek': None,
+                    'pident_foldseek': None
+                }
         
         # Save results
         files.dict_to_json(foldseek_results_path, 'human_foldseek_dict.json', results_foldseek_dict)
