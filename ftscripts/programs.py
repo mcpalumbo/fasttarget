@@ -16,6 +16,12 @@ from pathlib import Path
 import shutil
 import logging
 
+def _is_singularity_like_engine(container_engine):
+    """
+    Return True for engines that use Singularity-compatible .sif execution.
+    """
+    return str(container_engine).lower() in ('singularity', 'apptainer')
+
 
 def change_permission_user_file(file_path):
     """
@@ -222,11 +228,22 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     if not os.path.isabs(bind_dir):
         bind_dir = os.path.abspath(bind_dir)
     
-    # Convert Docker image name to Singularity/Apptainer .sif filename
+    # Build candidate .sif names from Docker image name
     # e.g., "fpocket/fpocket" -> "fpocket_fpocket.sif"
     # e.g., "mcpalumbo/p2rank:latest" -> "mcpalumbo_p2rank_latest.sif"
-    sif_name = image_name.replace('/', '_').replace(':', '_') + '.sif'
-    
+    image_no_tag = image_name.split(':', 1)[0]
+    tag = image_name.split(':', 1)[1] if ':' in image_name else None
+    sif_candidates = [image_name.replace('/', '_').replace(':', '_') + '.sif']
+
+    # Also allow no-tag naming (legacy/manual pulls)
+    sif_candidates.append(image_no_tag.replace('/', '_') + '.sif')
+
+    # If image includes registry prefix (e.g. ghcr.io/org/img:tag), also try without it
+    image_parts = image_name.split('/')
+    if len(image_parts) > 2 and ('.' in image_parts[0] or ':' in image_parts[0]):
+        no_registry = '/'.join(image_parts[1:])
+        sif_candidates.append(no_registry.replace('/', '_').replace(':', '_') + '.sif')
+
     # Get the base path (assuming sif_dir is relative to project root)
     if not os.path.isabs(sif_dir):
         # Try to find the base path from the current working directory
@@ -234,13 +251,37 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
         # If we're in a subfolder, go up to find the project root
         while not os.path.exists(os.path.join(base_path, 'fasttarget.py')) and base_path != os.path.dirname(base_path):
             base_path = os.path.dirname(base_path)
-        sif_path = os.path.join(base_path, sif_dir, sif_name)
+        sif_base_dir = os.path.join(base_path, sif_dir)
     else:
-        sif_path = os.path.join(sif_dir, sif_name)
-    
+        sif_base_dir = sif_dir
+
+    # Resolve first existing candidate
+    sif_path = None
+    for sif_name in dict.fromkeys(sif_candidates):
+        candidate = os.path.join(sif_base_dir, sif_name)
+        if os.path.exists(candidate):
+            sif_path = candidate
+            break
+
+    # Fallback: fuzzy match by repo name and optional tag
+    if sif_path is None and os.path.isdir(sif_base_dir):
+        repo_name = image_no_tag.split('/')[-1].lower()
+        all_sifs = [f for f in os.listdir(sif_base_dir) if f.endswith('.sif')]
+        repo_matches = [f for f in all_sifs if repo_name in f.lower()]
+        if tag:
+            tag_matches = [f for f in repo_matches if tag.lower() in f.lower()]
+            if tag_matches:
+                sif_path = os.path.join(sif_base_dir, sorted(tag_matches)[0])
+        if sif_path is None and repo_matches:
+            sif_path = os.path.join(sif_base_dir, sorted(repo_matches)[0])
+
     # Check if the .sif file exists
-    if not os.path.exists(sif_path):
-        raise FileNotFoundError(f"Container image not found: {sif_path}. Run setup_containers.sh first.")
+    if sif_path is None:
+        expected = ", ".join(dict.fromkeys(sif_candidates))
+        raise FileNotFoundError(
+            f"Container image not found in {sif_base_dir}. "
+            f"Tried: {expected}. Run setup_containers.sh first."
+        )
     
     # Build bind mounts
     bind_mounts = []
@@ -286,7 +327,7 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
         container_cmd_list.extend(command)
     
     try:
-        print(f'Running {container_cmd} image {sif_name}, command: {command}')
+        print(f'Running {container_cmd} image {os.path.basename(sif_path)}, command: {command}')
         result = subprocess.run(
             container_cmd_list,
             cwd=work_dir,
@@ -316,12 +357,12 @@ def run_container(work_dir, bind_dir, image_name, command, env_vars=None, volume
     :param container_engine: 'docker' or 'singularity'. Default is 'docker'.
 
     """
-    if container_engine.lower() == 'singularity':
+    if _is_singularity_like_engine(container_engine):
         return run_singularity_container(work_dir, bind_dir, image_name, command, env_vars, volumes)
     elif container_engine.lower() == 'docker':
         return run_docker_container(work_dir, bind_dir, image_name, command, env_vars, volumes)
     else:
-        raise ValueError(f"Unknown container engine: {container_engine}. Use 'docker' or 'singularity'.")
+        raise ValueError(f"Unknown container engine: {container_engine}. Use 'docker', 'singularity', or 'apptainer'.")
 
 
 def run_fpocket(work_dir, pdb_file, container_engine='docker'):
@@ -777,7 +818,7 @@ def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='dock
         image_name = 'mcpalumbo/foldseek:1'
         
         # Singularity needs explicit entrypoint call (Docker uses ENTRYPOINT automatically)
-        if container_engine == 'singularity':
+        if _is_singularity_like_engine(container_engine):
             command_create = ["/usr/local/bin/entrypoint", "createdb", "/data", f"/data/DB_foldseek/{DB_name}"]
             command_index = ["/usr/local/bin/entrypoint", "createindex", f"/data/DB_foldseek/{DB_name}", "/data/DB_foldseek/tmp"]
             env_vars = {'PATH': '/usr/local/bin:/usr/bin:/bin'}
@@ -857,7 +898,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
                 import uuid
                 unique_tmp = f"/data/tmp_{uuid.uuid4().hex[:8]}"
                 
-                if container_engine == 'singularity':
+                if _is_singularity_like_engine(container_engine):
                     command = [
                         "/usr/local/bin/entrypoint",
                         "easy-search",
@@ -1159,4 +1200,3 @@ def run_psort(input, organism_type, output_dir, output_format='terse', container
             logging.error(f"Directory '{output_dir}' not found.")
     else:
         logging.error(f"Directory '{input}' not found.")
-
