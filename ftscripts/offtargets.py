@@ -467,6 +467,13 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                 results_foldseek_dict[locus_tag] = {
                     'query_structure': None,
                     'target_foldseek': None,
+                    'alnlen_foldseek': None,
+                    'qcov_foldseek': None,
+                    'tcov_foldseek': None,
+                    'lddt_foldseek': None,
+                    'qtmscore_foldseek': None,
+                    'ttmscore_foldseek': None,
+                    'alntmscore_foldseek': None,
                     'rmsd_foldseek': None,
                     'prob_foldseek': None,
                     'pident_foldseek': None
@@ -478,7 +485,7 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
             for file in result_files:
                 if files.file_check(file):
                     try:
-                        df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'rmsd', 'prob', 'pident'])
+                        df = pd.read_csv(file, sep='\t', usecols=['query', 'target', 'alnlen', 'qcov', 'tcov', 'lddt', 'qtmscore', 'ttmscore', 'alntmscore', 'rmsd', 'prob', 'pident'])
                         if not df.empty:
                             dfs.append(df)
                     except Exception as e:
@@ -487,12 +494,20 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
             # Get the best match across all result files for this locus_tag
             if len(dfs) > 0:
                 dfs_combined = pd.concat(dfs, ignore_index=True)
-                # Sort by probability (descending) and get the best match
-                best_row = dfs_combined.sort_values(by='prob', ascending=False).iloc[0]
+                # Sort by TM score, as max of query and target->  max(qtmscore, ttmscore)
+                dfs_combined['max_tmscore'] = dfs_combined[['qtmscore', 'ttmscore']].max(axis=1)
+                best_row = dfs_combined.sort_values(by='max_tmscore', ascending=False).iloc[0]
                 
                 results_foldseek_dict[locus_tag] = {
                     'query_structure': best_row['query'],
                     'target_foldseek': best_row['target'],
+                    'alnlen_foldseek': best_row['alnlen'],
+                    'qcov_foldseek': best_row['qcov'],
+                    'tcov_foldseek': best_row['tcov'],
+                    'lddt_foldseek': best_row['lddt'],
+                    'qtmscore_foldseek': best_row['qtmscore'],
+                    'ttmscore_foldseek': best_row['ttmscore'],
+                    'alntmscore_foldseek': best_row['alntmscore'],
                     'rmsd_foldseek': best_row['rmsd'],
                     'prob_foldseek': best_row['prob'],
                     'pident_foldseek': best_row['pident']
@@ -503,6 +518,13 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                 results_foldseek_dict[locus_tag] = {
                     'query_structure': None,
                     'target_foldseek': None,
+                    'alnlen_foldseek': None,
+                    'qcov_foldseek': None,
+                    'tcov_foldseek': None,
+                    'lddt_foldseek': None,
+                    'qtmscore_foldseek': None,
+                    'ttmscore_foldseek': None,
+                    'alntmscore_foldseek': None,
                     'rmsd_foldseek': None,
                     'prob_foldseek': None,
                     'pident_foldseek': None
