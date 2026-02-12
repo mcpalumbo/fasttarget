@@ -17,3 +17,4 @@ __pycache__/
 nextflow/work
 nextflow/bin
 nextflow/.nextflow.log*
+!nextflow/config_nextflow_test.yml
