@@ -61,7 +61,7 @@ offtarget:
   microbiome: True
   microbiome_identity_filter: 50
   microbiome_coverage_filter: 70
-  foldseek_human: False
+  foldseek_human: True
 
 # ---- DEG ----
 deg:
