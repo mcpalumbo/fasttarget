@@ -516,7 +516,7 @@ def merge_final_tables(config, output_path, tables):
     print_stylized('RESULTS')
     current_date = datetime.now().strftime('%Y-%m-%d-%H-%M')
     results_path = os.path.join(output_path, organism_name, f'{organism_name}_results_{current_date}')
-    results_table_path = os.path.join(output_path, organism_name, results_path, f'{organism_name}_results_table.tsv')
+    results_table_path = os.path.join(results_path, f'{organism_name}_results_table.tsv')
 
     if not os.path.exists(results_path):
         os.makedirs(results_path, exist_ok=True)
