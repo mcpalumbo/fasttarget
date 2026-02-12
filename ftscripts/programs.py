@@ -336,8 +336,12 @@ def run_fpocket(work_dir, pdb_file, container_engine='docker'):
     """
 
     if os.path.exists(pdb_file):
+        # Convert to relative path from work_dir for Singularity compatibility
+        work_dir_abs = os.path.abspath(work_dir)
+        pdb_file_rel = os.path.relpath(pdb_file, work_dir_abs)
+        
         FPOCKET_image = "fpocket/fpocket"
-        FPOCKET_command = ["fpocket", "-f", pdb_file]
+        FPOCKET_command = ["fpocket", "-f", pdb_file_rel]
 
         run_container(work_dir, work_dir, FPOCKET_image, FPOCKET_command, container_engine=container_engine)
 
@@ -371,8 +375,13 @@ def run_p2rank(work_dir, pdb_file, cpus, alphafold=False, container_engine='dock
         os.makedirs(pdb_output_dir, exist_ok=True)
 
     if os.path.exists(pdb_file):
+        # Convert to relative paths from work_dir for Singularity compatibility
+        work_dir_abs = os.path.abspath(work_dir)
+        pdb_file_rel = os.path.relpath(pdb_file, work_dir_abs)
+        pdb_output_dir_rel = os.path.relpath(pdb_output_dir, work_dir_abs)
+        
         P2RANK_image = "mcpalumbo/p2rank:latest"
-        P2RANK_command = ["prank", "predict", "-f", pdb_file, "-o", pdb_output_dir, "-threads", str(cpus)]
+        P2RANK_command = ["prank", "predict", "-f", pdb_file_rel, "-o", pdb_output_dir_rel, "-threads", str(cpus)]
         if alphafold:
             P2RANK_command.extend(["-c", "alphafold"])
 
