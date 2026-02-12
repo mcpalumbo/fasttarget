@@ -1902,6 +1902,132 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
     chains_str = ','.join(chain_ids)
     print(f"    Extracted chain(s) {chains_str} from {Path(cif_file).name} (CIF)")
 
+def get_chain_all_pdbs_for_locus(locus_tag, structure_dir):
+    """
+    For each locus_tag, extract chain(s) from ALL downloaded PDB structures
+    listed in the structure summary table (not only the reference one).
+
+    Handles:
+    - Single chains (monomers / homooligomers)
+    - Multiple chains (fragmented proteins)
+
+    AlphaFold structures are skipped (no chain extraction needed).
+
+    :param locus_tag: Locus tag identifier.
+    :param structure_dir: Directory of the structures.
+    """
+
+    locus_dir = os.path.join(structure_dir, locus_tag)
+
+    if not os.path.isdir(locus_dir):
+        continue
+
+    summary_table_path = os.path.join(
+        locus_dir, f"{locus_tag}_structure_summary.tsv"
+    )
+
+    if not files.file_check(summary_table_path):
+        print(f'  Structure summary table not found for {locus_tag}, skipping.')
+        continue
+
+    # Keep "NA" as string (valid chain name) instead of treating it as NaN
+    summary_df = pd.read_csv(
+        summary_table_path, sep='\t', dtype={'structure_id': str},
+        keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
+    )
+
+    # Keep only PDB entries
+    pdb_rows = summary_df[summary_df['structure_type'] == 'PDB']
+
+    if pdb_rows.empty:
+        print(f'  No PDB structures found for {locus_tag}.')
+        continue
+
+    for _, row in pdb_rows.iterrows():
+        struct_id = row['structure_id']
+        chain_field = row['chain']
+        uniprot_id = row['uniprot_id']
+
+        if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
+            print(f"  Warning: Missing UniProt ID for structure {struct_id} in {locus_tag}, skipping.")
+            continue
+
+        # Parse chain field
+        if not chain_field or pd.isna(chain_field):
+            chain_ids = ['A']
+            print(f'  Warning: No chain ID for {struct_id} in {locus_tag}, defaulting to A.')
+        elif ';' in str(chain_field):
+            chain_ids = [c.strip() for c in str(chain_field).split(';')]
+        else:
+            chain_ids = [str(chain_field)]
+
+        uniprot_dir = os.path.join(locus_dir, uniprot_id)
+
+        if not os.path.isdir(uniprot_dir):
+            print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
+            continue
+
+        pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
+        cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
+
+        # Build output filename
+        if len(chain_ids) > 1:
+            if len(chain_ids) <= 5:
+                chains_suffix = '_'.join(chain_ids)
+            else:
+                chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
+        else:
+            chains_suffix = chain_ids[0]
+
+        output_chain_file = os.path.join(
+            uniprot_dir, f"PDB_{struct_id}_chain_{chains_suffix}.pdb"
+        )
+
+        # Check file validity
+        try:
+            pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
+        except OSError:
+            pdb_valid = False
+
+        try:
+            cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
+        except OSError:
+            cif_valid = False
+
+        if pdb_valid:
+            if not files.file_check(output_chain_file):
+                print(f'  Extracting chain(s) {chain_ids} from PDB {struct_id} ({locus_tag})')
+                try:
+                    extract_chain_from_pdb(
+                        pdb_file_path, chain_ids, output_chain_file
+                    )
+                except Exception as e:
+                    logging.exception(
+                        f'Failed to extract chains {chain_ids} from {pdb_file_path}: {e}'
+                    )
+            else:
+                print(f'  Chain file already exists: {output_chain_file}')
+
+        elif cif_valid:
+            if not files.file_check(output_chain_file):
+                print(f'  Extracting chain(s) {chain_ids} from CIF {struct_id} ({locus_tag})')
+                try:
+                    extract_chain_from_cif(
+                        cif_file_path, chain_ids, output_chain_file
+                    )
+                except Exception as e:
+                    logging.exception(
+                        f'Failed to extract chains {chain_ids} from {cif_file_path}: {e}'
+                    )
+            else:
+                print(f'  Chain file already exists: {output_chain_file}')
+
+        else:
+            print(
+                f'  ERROR: No valid PDB or CIF file for {struct_id} '
+                f'in locus_tag {locus_tag}.'
+            )
+
 def get_chain_all_pdbs(output_path, organism_name):
     """
     For each locus_tag, extract chain(s) from ALL downloaded PDB structures
@@ -1920,116 +2046,10 @@ def get_chain_all_pdbs(output_path, organism_name):
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
     for locus_tag in all_locus_tags:
-        locus_dir = os.path.join(structure_dir, locus_tag)
-
-        if not os.path.isdir(locus_dir):
-            continue
-
-        summary_table_path = os.path.join(
-            locus_dir, f"{locus_tag}_structure_summary.tsv"
-        )
-
-        if not files.file_check(summary_table_path):
-            print(f'  Structure summary table not found for {locus_tag}, skipping.')
-            continue
-
-        # Keep "NA" as string (valid chain name) instead of treating it as NaN
-        summary_df = pd.read_csv(
-            summary_table_path, sep='\t', dtype={'structure_id': str},
-            keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
-        )
-
-        # Keep only PDB entries
-        pdb_rows = summary_df[summary_df['structure_type'] == 'PDB']
-
-        if pdb_rows.empty:
-            print(f'  No PDB structures found for {locus_tag}.')
-            continue
-
-        for _, row in pdb_rows.iterrows():
-            struct_id = row['structure_id']
-            chain_field = row['chain']
-            uniprot_id = row['uniprot_id']
-
-            if not uniprot_id or not isinstance(uniprot_id, str) or pd.isna(uniprot_id) or uniprot_id.strip() == '':
-                print(f"  Warning: Missing UniProt ID for structure {struct_id} in {locus_tag}, skipping.")
-                continue
-
-            # Parse chain field
-            if not chain_field or pd.isna(chain_field):
-                chain_ids = ['A']
-                print(f'  Warning: No chain ID for {struct_id} in {locus_tag}, defaulting to A.')
-            elif ';' in str(chain_field):
-                chain_ids = [c.strip() for c in str(chain_field).split(';')]
-            else:
-                chain_ids = [str(chain_field)]
-
-            uniprot_dir = os.path.join(locus_dir, uniprot_id)
-
-            if not os.path.isdir(uniprot_dir):
-                print(f'  ERROR: UniProt directory {uniprot_dir} not found for {locus_tag}.')
-                continue
-
-            pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
-            cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
-
-            # Build output filename
-            if len(chain_ids) > 1:
-                if len(chain_ids) <= 5:
-                    chains_suffix = '_'.join(chain_ids)
-                else:
-                    chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
-            else:
-                chains_suffix = chain_ids[0]
-
-            output_chain_file = os.path.join(
-                uniprot_dir, f"PDB_{struct_id}_chain_{chains_suffix}.pdb"
-            )
-
-            # Check file validity
-            try:
-                pdb_valid = files.file_check(pdb_file_path) and os.path.getsize(pdb_file_path) > 0
-            except OSError:
-                pdb_valid = False
-
-            try:
-                cif_valid = files.file_check(cif_file_path) and os.path.getsize(cif_file_path) > 0
-            except OSError:
-                cif_valid = False
-
-            if pdb_valid:
-                if not files.file_check(output_chain_file):
-                    print(f'  Extracting chain(s) {chain_ids} from PDB {struct_id} ({locus_tag})')
-                    try:
-                        extract_chain_from_pdb(
-                            pdb_file_path, chain_ids, output_chain_file
-                        )
-                    except Exception as e:
-                        logging.exception(
-                            f'Failed to extract chains {chain_ids} from {pdb_file_path}: {e}'
-                        )
-                else:
-                    print(f'  Chain file already exists: {output_chain_file}')
-
-            elif cif_valid:
-                if not files.file_check(output_chain_file):
-                    print(f'  Extracting chain(s) {chain_ids} from CIF {struct_id} ({locus_tag})')
-                    try:
-                        extract_chain_from_cif(
-                            cif_file_path, chain_ids, output_chain_file
-                        )
-                    except Exception as e:
-                        logging.exception(
-                            f'Failed to extract chains {chain_ids} from {cif_file_path}: {e}'
-                        )
-                else:
-                    print(f'  Chain file already exists: {output_chain_file}')
-
-            else:
-                print(
-                    f'  ERROR: No valid PDB or CIF file for {struct_id} '
-                    f'in locus_tag {locus_tag}.'
-                )
+        try:
+            get_chain_all_pdbs_for_locus(locus_tag, structure_dir)
+        except Exception as e:
+            logging.error(f"Error extracting chains for {locus_tag}: {e}")
 
 def get_chain_reference_structure_for_locus (locus_tag, structure_dir):
     """
