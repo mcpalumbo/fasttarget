@@ -253,13 +253,16 @@ workflow FASTTARGET {
         // 4.1: Download genomes
         def min_identity = config.core.min_identity ?: 95
         def min_core_freq = config.core.min_core_freq ?: 99
+        def accession_file_path = config.core.accession_file ?: 'null'
+        def accession_file = (accession_file_path && accession_file_path != 'null' && accession_file_path != '') ? file(accession_file_path) : file('NO_FILE')
         
         CONSERVATION_DOWNLOAD_GENOMES(
             organism_name,
             output_path,
             tax_id,
             container_engine,
-            GENOME_PREPARATION.out.all_genome_files
+            GENOME_PREPARATION.out.all_genome_files,
+            accession_file
         )
         
         if (roary_enabled) {

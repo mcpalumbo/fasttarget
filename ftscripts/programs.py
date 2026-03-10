@@ -1095,6 +1095,70 @@ def run_ncbi_accession(accession, output_dir):
     
     print(f'NCBI {accession} download complete in {output_dir }')
 
+def run_ncbi_datasets_accessions(accession_list, organism_name, output_dir):
+    """
+    Downloads specific genomes from NCBI by accession list, in gbff format.
+    More info: https://www.ncbi.nlm.nih.gov/datasets/docs/v2/download-and-install/
+
+    :param accession_list: List of NCBI assembly accessions (e.g., ['GCF_000006945.2', 'GCF_000027345.1']).
+    :param organism_name: Name given to directories to download (eg. PAO).
+    :param output_dir: Output directory path.
+    """
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created directory: {output_dir}")
+
+    dehydrated_file = os.path.join(output_dir, f'{organism_name}_dehydrated.zip')
+    dehydrated_dir = os.path.join(output_dir, f'{organism_name}_dataset')
+    checkpoint_file = os.path.join(output_dir, f'{organism_name}_checkpoint_ncbi_datasets.txt')
+
+    if not files.file_check(checkpoint_file):
+        if not os.path.exists(dehydrated_file):
+            # Build command with all accessions
+            datasets_command = [
+                'datasets', 'download', 'genome', 'accession'
+            ]
+            # Add all accessions
+            datasets_command.extend(accession_list)
+            # Add remaining parameters
+            datasets_command.extend([
+                '--include', 'gbff,gff3',
+                '--exclude-atypical',
+                '--dehydrated',
+                '--filename', dehydrated_file
+            ])
+            
+            print(f'Downloading {len(accession_list)} genomes from accession list')
+            run_bash_command(datasets_command)
+            print(f'Download a dehydrated data package in {dehydrated_file}')
+        else:
+            print(f'Dehydrated data package in {dehydrated_file}')
+        
+        if not os.path.exists(dehydrated_dir):
+            os.makedirs(dehydrated_dir)
+            print(f"Created directory: {dehydrated_dir}")
+            run_unzip(dehydrated_file, dehydrated_dir)
+            print(f'Unzip a dehydrated data package in {dehydrated_dir}')
+        else:
+            print(f'Dehydrated data package in {dehydrated_dir}')
+        
+        rehydrate_command = ['datasets', 'rehydrate', '--directory', dehydrated_dir]
+        run_bash_command_with_retries(rehydrate_command)
+        print(f'Rehydrated complete')
+        
+        print('NCBI accession list download complete')
+
+        with open(checkpoint_file, 'w') as f:
+            f.write(f"Download complete from accession list: {len(accession_list)} genomes\n")
+            f.write("Accessions:\n")
+            for acc in accession_list:
+                f.write(f"  - {acc}\n")
+            f.close()
+    else:
+        logging.info(f"Checkpoint file '{checkpoint_file}' already exists.")
+        logging.info(f"NCBI datasets download from accession list already completed.")
+
 def run_ubiquitous(sbml_file, out_dir):
     
     """

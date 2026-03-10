@@ -305,18 +305,26 @@ def id_to_locustag_gff(file_path:str, ids, fix=False):
     list_locus = list(locus_tags.values())
     return list_locus
 
-def core_download_genomes_ncbi(output_path, organism_name, tax_id):
+def core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=None):
     """
-    Download genomes from a TAX ID from NCBI.
-    This function uses the `run_ncbi_datasets` function from the `programs` module.
+    Download genomes from NCBI.
+    Can download either by taxonomy ID (all genomes) or from a specific list of accessions.
+    This function uses the `run_ncbi_datasets` or `run_ncbi_datasets_accessions` function from the `programs` module.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param tax_id: Taxonomy ID from ncbi.
+    :param accession_list: Optional list of specific assembly accessions to download. If provided, only these genomes will be downloaded.
     """
 
     conservation_dir = os.path.join(output_path, organism_name, 'conservation')
-    programs.run_ncbi_datasets(tax_id, organism_name, conservation_dir)
+    
+    if accession_list and len(accession_list) > 0:
+        print(f'Downloading {len(accession_list)} specific genomes from accession list')
+        programs.run_ncbi_datasets_accessions(accession_list, organism_name, conservation_dir)
+    else:
+        print(f'Downloading all genomes from taxonomy ID: {tax_id}')
+        programs.run_ncbi_datasets(tax_id, organism_name, conservation_dir)
 
 def core_check_genomes_ncbi(output_path, organism_name):
     """
@@ -365,7 +373,7 @@ def core_check_genomes_ncbi(output_path, organism_name):
 
     return missing_files_accessions
         
-def core_download_missing_accessions(output_path, organism_name, tax_id):
+def core_download_missing_accessions(output_path, organism_name, tax_id, accession_list=None):
     """
     Check for missing genome files and download them if necessary.
 
@@ -375,6 +383,7 @@ def core_download_missing_accessions(output_path, organism_name, tax_id):
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param tax_id: Taxonomy ID of the organism.
+    :param accession_list: Optional list of specific assembly accessions. If provided, only these genomes are expected.
     """
 
     conservation_dir = os.path.join(output_path, organism_name, 'conservation')
@@ -386,7 +395,7 @@ def core_download_missing_accessions(output_path, organism_name, tax_id):
         missing_files_accessions = core_check_genomes_ncbi(output_path, organism_name)
         if len(missing_files_accessions) > 0:
             # Download missing genome files
-            core_download_genomes_ncbi(output_path, organism_name, tax_id)
+            core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=accession_list)
 
         # Re-check for missing genome files after download attempt
         missing_files_accessions = core_check_genomes_ncbi(output_path, organism_name)
@@ -441,11 +450,13 @@ def core_files(output_path, organism_name, container_engine='docker'):
     if not os.path.exists(os.path.join(fasta_dir, f'{organism_name}.faa')):
         shutil.copy(ref_faa, fasta_dir)
 
-    ref_locus, ref_strain, ref_host = gbk_locus_strain_host(ref_gbk)
+    ref_locus_list, ref_strain, ref_host = gbk_locus_strain_host(ref_gbk)
 
     #Core genomes from NCBI
     for root, dirs, files_names in os.walk(ncbi_download_data):
         for i, dir_name in enumerate(dirs):
+            assembly_id = str(dir_name).split(".")[0]
+
             print(f'Genome {i} from {len(dirs)}: {dir_name}')
             gbff_pattern = os.path.join(root, dir_name, "*.gbff")
             gbff_files = glob.glob(gbff_pattern)
@@ -455,23 +466,18 @@ def core_files(output_path, organism_name, container_engine='docker'):
     
             if not len(gbff_files) > 1:
 
-                locus, strain, host = gbk_locus_strain_host(gbff_files[0])
+                locus_list, strain, host = gbk_locus_strain_host(gbff_files[0])
 
-                if locus != ref_locus and strain != ref_strain:
+                if not set(locus_list) & set(ref_locus_list) and strain != ref_strain:
                     if host == 'Homo sapiens':
-                        if locus and strain:
-                            new_name = f"{strain}_{locus}"
-                            core_genomes.append(f'{strain}_{locus}')
-                        if not strain:
-                            new_name = f"{locus}"
-                            core_genomes.append(f'{locus}')  
+                        core_genomes.append(f'{assembly_id}')  
                         
-                        new_gbk = os.path.join(root, dir_name, f'{new_name}.gbk')
-                        new_faa = os.path.join(fasta_dir, f'{new_name}.faa')
-                        new_gff = os.path.join(gff_dir, f'{new_name}.gff')
+                        new_gbk = os.path.join(root, dir_name, f'{assembly_id}.gbk')
+                        new_faa = os.path.join(fasta_dir, f'{assembly_id}.faa')
+                        new_gff = os.path.join(gff_dir, f'{assembly_id}.gff')
 
                         if not os.path.exists(new_gbk):
-                            shutil.copy(gbff_files[0], new_gbk)
+                            shutil.move(gbff_files[0], new_gbk)
                         else:
                             print(f'{new_gbk} already exists.')
 
@@ -483,16 +489,16 @@ def core_files(output_path, organism_name, container_engine='docker'):
                         if not os.path.exists(new_gff):
                             try:      
                                 programs.run_genbank2gff3(new_gbk, gff_dir, container_engine=container_engine)
-                                print(f"Processed {new_name}.gff")
+                                print(f"Processed {assembly_id}.gff")
                             except Exception as e:
                                 logging.exception(f"Error in run_genbank2gff3: {e}")
                                 add_sequences_to_gff3(gff_files[0], new_gbk)
                                 shutil.copy(gff_files[0], new_gff)                 
-                                print(f"Processed {new_name}.gff")
+                                print(f"Processed {assembly_id}.gff")
                         else:
-                            print(f"{new_name}.gff already exists.")      
+                            print(f"{assembly_id}.gff already exists.")      
                     else:
-                        print(f'{dir_name}: Host not Human: {host}, for {locus}, strain {strain}.')
+                        print(f'{dir_name}: Host not Human: {host}, for {assembly_id}, {locus_list}, strain {strain}.')
                         shutil.rmtree(os.path.join(root, dir_name))
                 else:
                     shutil.rmtree(os.path.join(root, dir_name))

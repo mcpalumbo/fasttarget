@@ -24,6 +24,7 @@ process CONSERVATION_DOWNLOAD_GENOMES {
     val tax_id
     val container_engine
     path genome_files
+    val accession_file
     
     output:
     path "${organism_name}/conservation/${organism_name}_dataset/", emit: dataset_dir
@@ -35,6 +36,7 @@ process CONSERVATION_DOWNLOAD_GENOMES {
     
     script:
     def base_path = workflow.projectDir.parent
+    def accession_file_arg = accession_file.toString() != 'NO_FILE' ? accession_file.toString() : 'null'
     """#!/usr/bin/env python3
 
 import sys
@@ -64,13 +66,25 @@ import glob
 for f in glob.glob('*.gbk') + glob.glob('*.faa') + glob.glob('*.gff') + glob.glob('*.fna') + glob.glob('*.ffn'):
     shutil.copy(f, genome_work_dir)
 
+# Read accession list if provided
+accession_list = None
+accession_file_path = '${accession_file_arg}'
+if accession_file_path != 'null' and os.path.exists(accession_file_path):
+    print(f'Reading accession list from: {accession_file_path}')
+    with open(accession_file_path, 'r') as f:
+        accession_list = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    print(f'Found {len(accession_list)} accessions to download')
+
 print('')
-print('[1] Downloading tax_id genomes from NCBI...')
-genome.core_download_genomes_ncbi(work_dir, '${organism_name}', ${tax_id})
+if accession_list:
+    print(f'[1] Downloading {len(accession_list)} specific genomes from accession list...')
+else:
+    print('[1] Downloading tax_id genomes from NCBI...')
+genome.core_download_genomes_ncbi(work_dir, '${organism_name}', ${tax_id}, accession_list=accession_list)
 
 print('')
 print('[2] Downloading missing accessions...')
-genome.core_download_missing_accessions(work_dir, '${organism_name}', ${tax_id})
+genome.core_download_missing_accessions(work_dir, '${organism_name}', ${tax_id}, accession_list=accession_list)
 
 print('')
 print('[3] Selecting and filtering genomes...')

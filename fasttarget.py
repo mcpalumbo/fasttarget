@@ -229,10 +229,26 @@ def conservation_module(config, databases_path, output_path, cpus):
             
             logging.info('Starting core analysis')
 
-            # Download complete NCBI genomes from organism tax id
-            print('----- 1. Downloading tax_id genomes from NCBI -----')   
-            genome.core_download_genomes_ncbi(output_path, organism_name, tax_id)
-            genome.core_download_missing_accessions(output_path, organism_name, tax_id)
+            # Read accession list if provided
+            accession_list = None
+            if config.core.get('accession_file'):
+                accession_file = config.core['accession_file']
+                if accession_file and accession_file != 'null' and os.path.exists(accession_file):
+                    print(f'Reading accession list from: {accession_file}')
+                    with open(accession_file, 'r') as f:
+                        accession_list = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                    print(f'Found {len(accession_list)} accessions to download')
+                    logging.info(f'Using accession list with {len(accession_list)} genomes')
+                else:
+                    logging.warning(f'Accession file not found or invalid: {accession_file}')
+
+            # Download complete NCBI genomes from organism tax id or accession list
+            if accession_list:
+                print('----- 1. Downloading specific genomes from accession list -----')
+            else:
+                print('----- 1. Downloading tax_id genomes from NCBI -----')
+            genome.core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=accession_list)
+            genome.core_download_missing_accessions(output_path, organism_name, tax_id, accession_list=accession_list)
             logging.info('Genomes downloaded')
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
