@@ -152,14 +152,15 @@ def gbk_locus_strain_host(gbk_file):
 
     :param gbk_file: GenBank file path.
     
-    :return: Locus tag, strain, and host.
+    :return: Locus tag list, strain, and host.
     """
     
-    locus_tag = None
+    locus_tag_list = []
     strain = None
     host = None
     for record in SeqIO.parse(gbk_file, "genbank"):
         locus_tag = record.name
+        locus_tag_list.append(locus_tag)
         print(locus_tag)
         for feature in record.features:
             if feature.type == "source":
@@ -174,7 +175,7 @@ def gbk_locus_strain_host(gbk_file):
                 if 'host' in feature.qualifiers:
                     host = feature.qualifiers['host'][0]
 
-    return locus_tag, strain, host
+    return locus_tag_list, strain, host
 
 def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_file_ffn=None):
     """
