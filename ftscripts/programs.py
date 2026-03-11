@@ -223,7 +223,6 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     # Convert work_dir to absolute path to avoid path duplication issues with bind mounts
     work_dir = os.path.abspath(work_dir)
     
-    # Convert bind_dir to absolute path if it's relative
     # Singularity/Apptainer requires both source and destination paths to be absolute
     if not os.path.isabs(bind_dir):
         bind_dir = os.path.abspath(bind_dir)
@@ -235,7 +234,7 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
     tag = image_name.split(':', 1)[1] if ':' in image_name else None
     sif_candidates = [image_name.replace('/', '_').replace(':', '_') + '.sif']
 
-    # Also allow no-tag naming (legacy/manual pulls)
+    # Also allow no-tag naming
     sif_candidates.append(image_no_tag.replace('/', '_') + '.sif')
 
     # If image includes registry prefix (e.g. ghcr.io/org/img:tag), also try without it
@@ -246,11 +245,15 @@ def run_singularity_container(work_dir, bind_dir, image_name, command, env_vars=
 
     # Get the base path (assuming sif_dir is relative to project root)
     if not os.path.isabs(sif_dir):
-        # Try to find the base path from the current working directory
-        base_path = os.getcwd()
-        # If we're in a subfolder, go up to find the project root
-        while not os.path.exists(os.path.join(base_path, 'fasttarget.py')) and base_path != os.path.dirname(base_path):
-            base_path = os.path.dirname(base_path)
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        base_path = os.path.dirname(module_dir)  # Go up from ftscripts/ to project root
+        
+        if not os.path.exists(os.path.join(base_path, 'fasttarget.py')):
+            # Fallback: search upward from current working directory
+            base_path = os.getcwd()
+            while not os.path.exists(os.path.join(base_path, 'fasttarget.py')) and base_path != os.path.dirname(base_path):
+                base_path = os.path.dirname(base_path)
+        
         sif_base_dir = os.path.join(base_path, sif_dir)
     else:
         sif_base_dir = sif_dir

@@ -461,9 +461,19 @@ def get_config(config_path):
     :return: Configuration object.
     """
 
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(base_path, config_path)
-    config = load_config(config_path)
+    # Handle config_path: if absolute, use it; if relative, check current dir first
+    if os.path.isabs(config_path):
+        # Absolute path provided by user
+        final_config_path = config_path
+    elif os.path.exists(config_path):
+        # Relative path exists in current working directory
+        final_config_path = os.path.abspath(config_path)
+    else:
+        # Fallback: look in the script's directory (for default config.yml)
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        final_config_path = os.path.join(base_path, config_path)
+    
+    config = load_config(final_config_path)
     validate_config(config)
     return Config(config)
 
