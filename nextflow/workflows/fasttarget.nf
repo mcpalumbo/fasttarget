@@ -192,7 +192,7 @@ workflow FASTTARGET {
                 organism_name,
                 output_path,
                 GENOME_PREPARATION.out.all_genome_files,
-                STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir.first(),
+                STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir,
                 colabfold_amber,
                 colabfold_gpu,
                 colabfold_all_models
@@ -201,7 +201,7 @@ workflow FASTTARGET {
 
         // 3.3: Pocket detection (parallelized per locus)
         // Use explicit upstream structures directory instead of published output path
-        def pockets_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir.first() : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir.first()
+        def pockets_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
         STRUCTURES_PREPARE.out.locus_tags_list
             .splitText()
             .map { it.trim() }
@@ -229,7 +229,7 @@ workflow FASTTARGET {
         )
         
         // 3.4: Merge structure data (waits for pockets to complete)
-        def merge_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir.first() : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir.first()
+        def merge_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
         STRUCTURES_MERGE(
             GENOME_PREPARATION.out.all_genome_files,
             merge_structures_dir,
@@ -331,7 +331,7 @@ workflow FASTTARGET {
     // Foldseek structural offtarget (requires structures enabled)
     if (offtarget_enabled && foldseek_enabled && structures_enabled) {
         // Use staged structures directory from upstream process output
-        def foldseek_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir.first() : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir.first()
+        def foldseek_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
         
         OFFTARGET_FOLDSEEK(
             GENOME_PREPARATION.out.all_genome_files,
