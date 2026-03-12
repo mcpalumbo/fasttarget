@@ -31,10 +31,10 @@ def change_permission_user_file(file_path):
     :param file_path: The file path.
     """
 
-    username = os.getenv('SUDO_USER') if os.getenv('SUDO_USER') else os.getlogin()
-    groupname = username
-    uid = pwd.getpwnam(username).pw_uid
-    gid = grp.getgrnam(groupname).gr_gid
+    username = os.getenv('SUDO_USER') if os.getenv('SUDO_USER') else getpass.getuser()
+    pw = pwd.getpwnam(username)
+    uid = pw.pw_uid
+    gid = pw.pw_gid
 
     try:
         os.chmod(file_path, 0o644)
@@ -51,9 +51,9 @@ def change_permission_user_dir(directory_path):
     """
     
     username = os.getenv('SUDO_USER') if os.getenv('SUDO_USER') else getpass.getuser()
-    groupname = username
-    uid = pwd.getpwnam(username).pw_uid
-    gid = grp.getgrnam(groupname).gr_gid
+    pw = pwd.getpwnam(username)
+    uid = pw.pw_uid
+    gid = pw.pw_gid
 
     for root, dirs, files in os.walk(directory_path):
         for dir_name in dirs:
