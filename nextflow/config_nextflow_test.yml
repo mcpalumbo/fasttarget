@@ -16,7 +16,7 @@ organism:
   gbk_file: ../organism/test/test.gbk
 
 # ---- CPU usage preferences ----
-cpus: 4
+cpus: 12
 
 # ---- Container Engine ----
 container_engine: singularity
@@ -53,6 +53,7 @@ core:
   corecruncher: True
   min_identity: 95
   min_core_freq: 99
+  accession_file: null
 
 # ---- Offtarget ----
 offtarget:
