@@ -12,7 +12,7 @@
 
 process STRUCTURES_COLABFOLD {
     tag "${organism_name}"
-    label 'high_resources'
+    label 'gpu_process'
     publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/structures/**"
 
     input:
