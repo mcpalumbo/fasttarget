@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 import shutil
 import logging
+import getpass
 
 def _is_singularity_like_engine(container_engine):
     """
@@ -49,7 +50,7 @@ def change_permission_user_dir(directory_path):
     :param directory_path: The directory path.
     """
     
-    username = os.getenv('SUDO_USER') if os.getenv('SUDO_USER') else os.getlogin()
+    username = os.getenv('SUDO_USER') if os.getenv('SUDO_USER') else getpass.getuser()
     groupname = username
     uid = pwd.getpwnam(username).pw_uid
     gid = grp.getgrnam(groupname).gr_gid
