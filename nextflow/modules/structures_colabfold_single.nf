@@ -161,8 +161,11 @@ print('=' * 80)
 print('STAGE 2.5 COLLECT: Merging ColabFold results'.center(80))
 print('─' * 80)
 
-base_path = '${structure_dir}'
 organism_name = '${organism_name}'
+base_path = os.path.join(organism_name, 'structures')
+
+# Ensure output directory exists
+os.makedirs(base_path, exist_ok=True)
 
 colabfold_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_results)}
 
@@ -172,21 +175,33 @@ colabfold_data = [(colabfold_data_flat[i], colabfold_data_flat[i+1]) for i in ra
 print(f'Processing {len(colabfold_data)} ColabFold results...')
 
 successful_count = 0
+failed_count = 0
 for locus_tag, result_dir in colabfold_data:
     colabfold_result_dir = Path(result_dir)
+    
+    if not colabfold_result_dir.exists():
+        print(f'WARNING: ColabFold output not found for {locus_tag} at {result_dir}')
+        failed_count += 1
+        continue
 
-    if colabfold_result_dir.exists():
-        # Copy models back to structure_dir
-        locus_structure_dir = os.path.join(base_path, locus_tag)
-        models_src = colabfold_result_dir / 'models'
-        models_dest = os.path.join(locus_structure_dir, 'colabfold_models')
+    # Copy models back to structure_dir
+    locus_structure_dir = os.path.join(base_path, locus_tag)
+    os.makedirs(locus_structure_dir, exist_ok=True)
+    
+    models_src = colabfold_result_dir / 'models'
+    models_dest = os.path.join(locus_structure_dir, 'colabfold_models')
 
-        if models_src.exists():
-            shutil.copytree(models_src, models_dest, dirs_exist_ok=True)
-            print(f'Merged ColabFold results for {locus_tag}')
-            successful_count += 1
+    if models_src.exists():
+        shutil.copytree(models_src, models_dest, dirs_exist_ok=True)
+        print(f'Merged ColabFold results for {locus_tag}')
+        successful_count += 1
+    else:
+        print(f'WARNING: No models directory for {locus_tag} at {models_src}')
+        failed_count += 1
 
 print(f'COLLECT: Successfully merged {successful_count}/{len(colabfold_data)} ColabFold results')
+if failed_count > 0:
+    print(f'WARNING: {failed_count} results were not merged')
 print('Stage 2.5 COLLECT completed successfully')
 """
 
