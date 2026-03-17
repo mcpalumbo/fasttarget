@@ -135,7 +135,7 @@ print(f'COLABFOLD_SINGLE completed successfully for {locus_tag}')
 process COLABFOLD_COLLECT {
     tag "${organism_name}"
     label 'low_resources'
-    publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/structures/**"
+    publishDir "${output_path}/${organism_name}", mode: 'copy', pattern: "structures/**"
 
     input:
     val organism_name
@@ -167,6 +167,23 @@ base_path = os.path.join(organism_name, 'structures')
 # Ensure output directory exists
 os.makedirs(base_path, exist_ok=True)
 
+# First, copy ALL existing structures from upstream (STRUCTURES_EXTRACT_CHAINS_COLLECT output)
+staged_structures = '${structure_dir}'
+if os.path.exists(staged_structures):
+    if os.path.islink(staged_structures):
+        staged_structures = os.path.realpath(staged_structures)
+    print(f'Copying existing structures from: {staged_structures}')
+    for item in os.listdir(staged_structures):
+        src_path = os.path.join(staged_structures, item)
+        dst_path = os.path.join(base_path, item)
+        if os.path.isdir(src_path):
+            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src_path, dst_path)
+    print(f'Copied all existing structures to {base_path}')
+else:
+    print(f'WARNING: input structures directory not found: {staged_structures}')
+
 colabfold_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_results)}
 
 # Convert flat list into pairs: [tag1, path1, tag2, path2, ...] -> [(tag1, path1), (tag2, path2), ...]
@@ -184,7 +201,7 @@ for locus_tag, result_dir in colabfold_data:
         failed_count += 1
         continue
 
-    # Copy models back to structure_dir
+    # Merge ColabFold models into existing locus structure directory
     locus_structure_dir = os.path.join(base_path, locus_tag)
     os.makedirs(locus_structure_dir, exist_ok=True)
     
@@ -193,7 +210,7 @@ for locus_tag, result_dir in colabfold_data:
 
     if models_src.exists():
         shutil.copytree(models_src, models_dest, dirs_exist_ok=True)
-        print(f'Merged ColabFold results for {locus_tag}')
+        print(f'Added ColabFold models for {locus_tag}')
         successful_count += 1
     else:
         print(f'WARNING: No models directory for {locus_tag} at {models_src}')
