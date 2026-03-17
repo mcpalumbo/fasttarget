@@ -164,7 +164,10 @@ print('─' * 80)
 base_path = '${structure_dir}'
 organism_name = '${organism_name}'
 
-colabfold_data = ${groovy.json.JsonOutput.toJson(colabfold_results)}
+colabfold_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_results)}
+
+# Convert flat list into pairs: [tag1, path1, tag2, path2, ...] -> [(tag1, path1), (tag2, path2), ...]
+colabfold_data = [(colabfold_data_flat[i], colabfold_data_flat[i+1]) for i in range(0, len(colabfold_data_flat), 2)]
 
 print(f'Processing {len(colabfold_data)} ColabFold results...')
 
