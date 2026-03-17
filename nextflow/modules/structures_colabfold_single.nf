@@ -110,15 +110,33 @@ else:
         gpu_option=${gpu_option_py}
     )
 
-# Prepare output
+# Prepare output - copy both the relaxed/unrelaxed model AND the colabfold_models directory
 os.makedirs('colabfold_output', exist_ok=True)
 colabfold_models_src = os.path.join(task_locus_dir, 'colabfold_models')
 
+# Copy the colabfold_models directory
 if os.path.exists(colabfold_models_src):
     shutil.copytree(colabfold_models_src, 'colabfold_output/models', dirs_exist_ok=True)
-    print(f'ColabFold output prepared for {locus_tag}')
+    print(f'Copied colabfold_models directory for {locus_tag}')
 else:
     print(f'WARNING: No colabfold_models directory found for {locus_tag}')
+
+# Copy the relaxed/unrelaxed model that was extracted to the root of task_locus_dir
+relaxed_file = os.path.join(task_locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
+unrelaxed_file = os.path.join(task_locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
+
+if os.path.exists(relaxed_file):
+    shutil.copy2(relaxed_file, 'colabfold_output')
+    print(f'Copied relaxed model for {locus_tag}')
+elif os.path.exists(unrelaxed_file):
+    shutil.copy2(unrelaxed_file, 'colabfold_output')
+    print(f'Copied unrelaxed model for {locus_tag}')
+else:
+    print(f'WARNING: No relaxed/unrelaxed model found for {locus_tag}')
+
+# Copy any other PDB files from task_locus_dir root (extracted chains, etc.)
+for pdb_file in glob.glob(os.path.join(task_locus_dir, '*.pdb')):
+    shutil.copy2(pdb_file, 'colabfold_output')
 
 print(f'COLABFOLD_SINGLE completed successfully for {locus_tag}')
 """
@@ -205,16 +223,25 @@ for locus_tag, result_dir in colabfold_data:
     locus_structure_dir = os.path.join(base_path, locus_tag)
     os.makedirs(locus_structure_dir, exist_ok=True)
     
+    # Copy colabfold_models directory
     models_src = colabfold_result_dir / 'models'
     models_dest = os.path.join(locus_structure_dir, 'colabfold_models')
 
     if models_src.exists():
         shutil.copytree(models_src, models_dest, dirs_exist_ok=True)
-        print(f'Added ColabFold models for {locus_tag}')
-        successful_count += 1
+        print(f'Added ColabFold models directory for {locus_tag}')
     else:
         print(f'WARNING: No models directory for {locus_tag} at {models_src}')
         failed_count += 1
+        continue
+    
+    # Copy relaxed/unrelaxed model files from colabfold_output root
+    for pdb_file in colabfold_result_dir.glob('*.pdb'):
+        dest_pdb = os.path.join(locus_structure_dir, pdb_file.name)
+        shutil.copy2(pdb_file, dest_pdb)
+        print(f'Copied model file {pdb_file.name} for {locus_tag}')
+    
+    successful_count += 1
 
 print(f'COLLECT: Successfully merged {successful_count}/{len(colabfold_data)} ColabFold results')
 if failed_count > 0:
