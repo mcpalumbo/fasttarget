@@ -47,6 +47,9 @@ sys.path.insert(0, '${base_path}')
 
 from ftscripts import structures, files, metadata
 
+# Define locus_tag first
+locus_tag = '${locus_tag}'
+
 print('=' * 80)
 print(f'COLABFOLD SINGLE: Processing {locus_tag}'.center(80))
 print('─' * 80)
@@ -69,7 +72,6 @@ else:
     print(f'WARNING: UniProt ID mapping file not found: {proteome_ids_file}')
 
 # Copy input structure to work directory
-locus_tag = '${locus_tag}'
 task_locus_dir = os.path.join(structures_dir, locus_tag)
 if os.path.exists(locus_structure_dir):
     shutil.copytree(locus_structure_dir, task_locus_dir, dirs_exist_ok=True)
