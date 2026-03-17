@@ -2454,171 +2454,56 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
     summary_df.to_csv(summary_table_path, sep='\t', index=False)
     logging.info(f"Updated summary table for {locus_tag} with ColabFold model (pLDDT: {plddt_score})")
 
-def make_models_colabfold(output_path, organism_name, amber_option=False, gpu_option=False):
+
+def generate_colabfold_missing_single(locus_tag, output_path, organism_name, structures_dir, map_results, amber_option=False, gpu_option=False):
     """
-    Run ColabFold to generate models for sequences without structures.
+    Generate ColabFold models for a SINGLE protein IF it lacks structures.
+    
+    Only runs ColabFold if no existing structures (PDB, AF, or ColabFold) are found.
+    Skips processing if structures already exist.
+    
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
-    :param amber_option: If True, generate Amber-relaxed models.
-    :param gpu_option: If True, use GPU for Amber relaxation.
+    :param structures_dir: Directory where structures are stored.
+    :param map_results: Dictionary mapping locus tags to UniProt IDs.
+    :param amber_option: If True, generate Amber-relaxed models. Default is False (unrelaxed).
+    :param gpu_option: If True, use GPU for Amber relaxation. Default is False (CPU relaxation).
     """
 
-    structures_dir = os.path.join(output_path, organism_name, "structures")
-    
-    if not os.path.exists(structures_dir):
-        logging.error(f"The directory '{structures_dir}' was not found.")
-        return
-
-    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
-
-    if files.file_check(proteome_ids_file):
-        map_results = files.json_to_dict(proteome_ids_file)
+    if locus_tag in map_results:
+        uniprot_id = map_results[locus_tag]
+        if isinstance(uniprot_id, list):
+            uniprot_id = uniprot_id[0]  # Get first UniProt ID
     else:
-        map_results = {}
-        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
+        uniprot_id = None  
 
-    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
+    locus_dir = os.path.join(structures_dir, locus_tag)
+    colab_dir = os.path.join(locus_dir, "colabfold_models")
 
-    for locus_tag in tqdm(all_locus, desc='Locus tags'):
+    relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
+    unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
 
-        if locus_tag in map_results:
-            uniprot_id = map_results[locus_tag]
-            if isinstance(uniprot_id, list):
-                uniprot_id = uniprot_id[0]  # Get first UniProt ID
-        else:
-            uniprot_id = None  
+    dest_file = relaxed_file if amber_option else unrelaxed_file
 
-        locus_dir = os.path.join(structures_dir, locus_tag)
-        colab_dir = os.path.join(locus_dir, "colabfold_models")
-
-        relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
-        unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
-
-        dest_file = relaxed_file if amber_option else unrelaxed_file
-
-        if os.path.exists(locus_dir):
-            
-            if not files.file_check(dest_file):
-                # Check if there are ANY downloaded structures (PDB or AlphaFold)
-                # This prevents ColabFold from running when structures exist but chain extraction failed
-                pdb_structures = (
-                    glob.glob(os.path.join(locus_dir, "**", "PDB_*.pdb"), recursive=True) +
-                    glob.glob(os.path.join(locus_dir, "**", "PDB_*.cif"), recursive=True)
-                )
-                af_structures = glob.glob(os.path.join(locus_dir, "**", "AF_*.pdb"), recursive=True)
-
-                if pdb_structures or af_structures:
-                    logging.info(f"Structures already exist for {locus_tag} (PDB: {len(pdb_structures)}, AF: {len(af_structures)}). Skipping ColabFold.")
-                    continue
-                
-                # Also check using find_structures_for_locus (checks for _ref.pdb)
-                pdb_file = find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False)
-                if not pdb_file:
-                    logging.info(f"No structures found for {locus_dir}")
-                    logging.info(f"Generating models with ColabFold for {locus_dir}")
-                    # Extract sequence to FASTA
-                    fasta_file = os.path.join(locus_dir, f"{locus_tag}.fasta")
-                    locus_tag_to_fasta(
-                        locus_tag,
-                        os.path.join(output_path, organism_name, "genome", f"{organism_name}.gbk"),
-                        fasta_file
-                    )
-                    
-                    os.makedirs(colab_dir, exist_ok=True)
-
-                    #Check if colab .done.txt file already exists to skip re-running
-                    output_colab_file = os.path.join(colab_dir, f"{locus_tag}.done.txt")
-                    if not os.path.exists(output_colab_file):
-                        programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
-                    else:
-                        logging.info(f"ColabFold .done.txt file found for {locus_tag}, skipping re-run.")
-                    # Expected output files:
-                    # 1BJP_1_relaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb
-                    # 1BJP_1_unrelaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb
+    if os.path.exists(locus_dir):
         
-                    model_copied = False
-                    if amber_option:
-                        #find resulting relaxed model pdb
-                        glob_pattern = os.path.join(colab_dir, "*_relaxed_rank_001*.pdb")
-                        relaxed_models = glob.glob(glob_pattern)
-                        if len(relaxed_models) == 1:
-                            logging.info(f"  ColabFold relaxed model generated for {locus_tag}: {relaxed_models[0]}")
-                            #copy to main locus_dir
-                            shutil.copy2(relaxed_models[0], dest_file)
-                            model_copied = True
-                        else:
-                            logging.warning(f"  Warning: Expected 1 relaxed model, found {len(relaxed_models)} for {locus_tag}")
-                    else:
-                        #find resulting unrelaxed model pdb
-                        glob_pattern = os.path.join(colab_dir, "*_unrelaxed_rank_001*.pdb")
-                        unrelaxed_models = glob.glob(glob_pattern)
-                        if len(unrelaxed_models) == 1:
-                            logging.info(f"  ColabFold unrelaxed model generated for {locus_tag}: {unrelaxed_models[0]}")
-                            #copy to main locus_dir
-                            shutil.copy2(unrelaxed_models[0], dest_file)
-                            model_copied = True
-                        else:
-                            logging.warning(f"  Warning: Expected 1 unrelaxed model, found {len(unrelaxed_models)} for {locus_tag}")
-                    
-                    # Update summary table with ColabFold model
-                    if model_copied:
-                        plddt_score = get_colabfold_plddt(colab_dir)
-                        update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
-                        logging.info(f"  Added ColabFold model to summary table for {locus_tag}")
-            else:
-                logging.info(f"ColabFold model already exists for {locus_tag}.")
-                plddt_score = get_colabfold_plddt(colab_dir)
-                update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
-                print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
-        else:
-            logging.error(f"The directory '{locus_dir}' was not found.")
+        if not files.file_check(dest_file):
+            # Check if there are ANY downloaded structures (PDB or AlphaFold)
+            # This prevents ColabFold from running when structures exist but chain extraction failed
+            pdb_structures = (
+                glob.glob(os.path.join(locus_dir, "**", "PDB_*.pdb"), recursive=True) +
+                glob.glob(os.path.join(locus_dir, "**", "PDB_*.cif"), recursive=True)
+            )
+            af_structures = glob.glob(os.path.join(locus_dir, "**", "AF_*.pdb"), recursive=True)
 
-def make_models_colabfold_all_proteins(output_path, organism_name, amber_option=False, gpu_option=False):
-    """
-    Run ColabFold to generate models for ALL proteins in the genome,
-    regardless of existing structures.
-    
-    :param output_path: Directory of the oraganism output.
-    :param organism_name: Name of organism.
-    :param amber_option: If True, generate Amber-relaxed models.
-    :param gpu_option: If True, use GPU for Amber relaxation.
-    """
-    structures_dir = os.path.join(output_path, organism_name, "structures")
-    
-    if not os.path.exists(structures_dir):
-        logging.error(f"The directory '{structures_dir}' was not found.")
-        return
-
-    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
-
-    if files.file_check(proteome_ids_file):
-        map_results = files.json_to_dict(proteome_ids_file)
-    else:
-        map_results = {}
-        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
-
-    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
-
-    for locus_tag in tqdm(all_locus, desc='Locus tags'):
-
-        if locus_tag in map_results:
-            uniprot_id = map_results[locus_tag]
-            if isinstance(uniprot_id, list):
-                uniprot_id = uniprot_id[0]  # Get first UniProt ID
-        else:
-            uniprot_id = None  
-
-        locus_dir = os.path.join(structures_dir, locus_tag)
-        colab_dir = os.path.join(locus_dir, "colabfold_models")
-
-        relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
-        unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
-
-        dest_file = relaxed_file if amber_option else unrelaxed_file
-
-        if os.path.exists(locus_dir):
+            if pdb_structures or af_structures:
+                logging.info(f"Structures already exist for {locus_tag} (PDB: {len(pdb_structures)}, AF: {len(af_structures)}). Skipping ColabFold.")
+                return
             
-            if not files.file_check(dest_file):
+            # Also check using find_structures_for_locus (checks for _ref.pdb)
+            pdb_file = find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False)
+            if not pdb_file:
+                logging.info(f"No structures found for {locus_dir}")
                 logging.info(f"Generating models with ColabFold for {locus_dir}")
                 # Extract sequence to FASTA
                 fasta_file = os.path.join(locus_dir, f"{locus_tag}.fasta")
@@ -2628,10 +2513,15 @@ def make_models_colabfold_all_proteins(output_path, organism_name, amber_option=
                     fasta_file
                 )
                 
-                
                 os.makedirs(colab_dir, exist_ok=True)
 
-                programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
+                #Check if colab .done.txt file already exists to skip re-running
+                output_colab_file = os.path.join(colab_dir, f"{locus_tag}.done.txt")
+                if not os.path.exists(output_colab_file):
+                    programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
+                else:
+                    logging.info(f"ColabFold .done.txt file found for {locus_tag}, skipping re-run.")
+
     
                 model_copied = False
                 if amber_option:
@@ -2656,18 +2546,175 @@ def make_models_colabfold_all_proteins(output_path, organism_name, amber_option=
                         model_copied = True
                     else:
                         logging.warning(f"  Warning: Expected 1 unrelaxed model, found {len(unrelaxed_models)} for {locus_tag}")
+                
                 # Update summary table with ColabFold model
                 if model_copied:
                     plddt_score = get_colabfold_plddt(colab_dir)
                     update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
                     logging.info(f"  Added ColabFold model to summary table for {locus_tag}")
+        else:
+            logging.info(f"ColabFold model already exists for {locus_tag}.")
+            plddt_score = get_colabfold_plddt(colab_dir)
+            update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+            print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
+    else:
+        logging.error(f"The directory '{locus_dir}' was not found.")
+
+def generate_colabfold_missing(output_path, organism_name, amber_option=False, gpu_option=False):
+    """
+    Generate ColabFold models for proteins MISSING structures.
+    
+    Scans all proteins in the genome and runs ColabFold only for those without
+    existing structures (PDB, AlphaFold, or previous ColabFold models).
+    
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param amber_option: If True, generate Amber-relaxed models. Default is False (unrelaxed).
+    :param gpu_option: If True, use GPU for Amber relaxation. Default is False (CPU relaxation).
+    """
+
+    structures_dir = os.path.join(output_path, organism_name, "structures")
+    
+    if not os.path.exists(structures_dir):
+        logging.error(f"The directory '{structures_dir}' was not found.")
+        return
+
+    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
+
+    if files.file_check(proteome_ids_file):
+        map_results = files.json_to_dict(proteome_ids_file)
+    else:
+        map_results = {}
+        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
+
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
+
+    for locus_tag in tqdm(all_locus, desc='Locus tags'):
+        try:
+            generate_colabfold_missing_single(locus_tag, output_path, organism_name, structures_dir, map_results, amber_option, gpu_option)
+        except Exception as e:
+            logging.error(f"Error occurred while running ColabFold for {locus_tag}: {e}")
+
+def generate_colabfold_all_single(locus_tag, output_path, organism_name, structures_dir, map_results, amber_option=False, gpu_option=False):
+    """
+    Generate ColabFold models for a SINGLE protein (ALL proteins mode).
+    
+    Runs ColabFold for every protein regardless of existing structures.
+        
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param structures_dir: Directory where structures are stored.
+    :param map_results: Dictionary mapping locus tags to UniProt IDs.
+    :param amber_option: If True, generate Amber-relaxed models. Default is False (unrelaxed).
+    :param gpu_option: If True, use GPU for Amber relaxation. Default is False (CPU relaxation).
+    """
+
+    if locus_tag in map_results:
+        uniprot_id = map_results[locus_tag]
+        if isinstance(uniprot_id, list):
+            uniprot_id = uniprot_id[0]  # Get first UniProt ID
+    else:
+        uniprot_id = None  
+
+    locus_dir = os.path.join(structures_dir, locus_tag)
+    colab_dir = os.path.join(locus_dir, "colabfold_models")
+
+    relaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_relaxed1.pdb")
+    unrelaxed_file = os.path.join(locus_dir, f"CB_{locus_tag}_unrelaxed1.pdb")
+
+    dest_file = relaxed_file if amber_option else unrelaxed_file
+
+    if os.path.exists(locus_dir):
+        
+        if not files.file_check(dest_file):
+            logging.info(f"Generating models with ColabFold for {locus_dir}")
+            # Extract sequence to FASTA
+            fasta_file = os.path.join(locus_dir, f"{locus_tag}.fasta")
+            locus_tag_to_fasta(
+                locus_tag,
+                os.path.join(output_path, organism_name, "genome", f"{organism_name}.gbk"),
+                fasta_file
+            )
+            
+            os.makedirs(colab_dir, exist_ok=True)
+
+            # Check if colab .done.txt file already exists to skip re-running
+            output_colab_file = os.path.join(colab_dir, f"{locus_tag}.done.txt")
+            if not os.path.exists(output_colab_file):
+                programs.run_colabfold_batch(fasta_file, colab_dir, amber=amber_option, gpu_relax=gpu_option)
             else:
+                logging.info(f"ColabFold .done.txt file found for {locus_tag}, skipping re-run.")
+
+            model_copied = False
+            if amber_option:
+                #find resulting relaxed model pdb
+                glob_pattern = os.path.join(colab_dir, "*_relaxed_rank_001*.pdb")
+                relaxed_models = glob.glob(glob_pattern)
+                if len(relaxed_models) == 1:
+                    logging.info(f"  ColabFold relaxed model generated for {locus_tag}: {relaxed_models[0]}")
+                    #copy to main locus_dir
+                    shutil.copy2(relaxed_models[0], dest_file)
+                    model_copied = True
+                else:
+                    logging.warning(f"  Warning: Expected 1 relaxed model, found {len(relaxed_models)} for {locus_tag}")
+            else:
+                #find resulting unrelaxed model pdb
+                glob_pattern = os.path.join(colab_dir, "*_unrelaxed_rank_001*.pdb")
+                unrelaxed_models = glob.glob(glob_pattern)
+                if len(unrelaxed_models) == 1:
+                    logging.info(f"  ColabFold unrelaxed model generated for {locus_tag}: {unrelaxed_models[0]}")
+                    #copy to main locus_dir
+                    shutil.copy2(unrelaxed_models[0], dest_file)
+                    model_copied = True
+                else:
+                    logging.warning(f"  Warning: Expected 1 unrelaxed model, found {len(unrelaxed_models)} for {locus_tag}")
+            # Update summary table with ColabFold model
+            if model_copied:
                 plddt_score = get_colabfold_plddt(colab_dir)
                 update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
-                logging.info(f"ColabFold model already exists for {locus_tag}.")
-                print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
+                logging.info(f"  Added ColabFold model to summary table for {locus_tag}")
         else:
-            logging.error(f"The directory '{locus_dir}' was not found.")
+            plddt_score = get_colabfold_plddt(colab_dir)
+            update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, dest_file, plddt_score)
+            logging.info(f"ColabFold model already exists for {locus_tag}.")
+            print(f"  Updated summary table with existing ColabFold model for {locus_tag} (pLDDT: {plddt_score})")
+    else:
+        logging.error(f"The directory '{locus_dir}' was not found.")
+
+def generate_colabfold_all(output_path, organism_name, amber_option=False, gpu_option=False):
+    """
+    Generate ColabFold models for ALL proteins in the genome.
+    
+    Runs ColabFold for every protein, regardless of existing structures.
+    Useful for complete proteome coverage, bulk updates, or benchmarking.
+        
+    :param output_path: Directory of the oraganism output.
+    :param organism_name: Name of organism.
+    :param amber_option: If True, generate Amber-relaxed models. Default is False (unrelaxed).
+    :param gpu_option: If True, use GPU for Amber relaxation. Default is False (CPU relaxation).
+    """
+    structures_dir = os.path.join(output_path, organism_name, "structures")
+    
+    if not os.path.exists(structures_dir):
+        logging.error(f"The directory '{structures_dir}' was not found.")
+        return
+
+    proteome_ids_file = os.path.join(structures_dir, 'uniprot_files', f'uniprot_{organism_name}_id_mapping.json')
+
+    if files.file_check(proteome_ids_file):
+        map_results = files.json_to_dict(proteome_ids_file)
+    else:
+        map_results = {}
+        logging.warning(f"UniProt ID mapping file not found: {proteome_ids_file}")
+
+    all_locus = metadata.ref_gbk_locus(output_path, organism_name)
+
+    for locus_tag in tqdm(all_locus, desc='Locus tags'):
+        try:
+            generate_colabfold_all_single(locus_tag, output_path, organism_name, structures_dir, map_results, amber_option, gpu_option)
+        except Exception as e:
+            logging.error(f"Error occurred while running ColabFold for {locus_tag}: {e}")
+
 
 ##  ------------------- Pocket functions ------------------- ##
 
@@ -4004,7 +4051,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         if colabfold and not colabfold_all_models:
             try:
                 print(f'\n[2.5.1] Generating ColabFold models for genes without structures...')
-                make_models_colabfold(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
+                generate_colabfold_missing(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
                 print(f'    ✓ ColabFold model generation complete')
                 
             except Exception as e:
@@ -4014,7 +4061,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         if colabfold and colabfold_all_models:
             try:
                 print(f'\n[2.5.1] Generating ColabFold models for ALL genes in the organism...')
-                make_models_colabfold_all_proteins(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
+                generate_colabfold_all(output_path, organism_name, amber_option=amber_option, gpu_option=gpu_option)
                 print(f'    ✓ ColabFold model generation complete')
                 
             except Exception as e:

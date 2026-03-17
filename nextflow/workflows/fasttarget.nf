@@ -16,7 +16,7 @@ include { METABOLISM_PATHWAYTOOLS } from '../modules/metabolism_pathwaytools'
 include { METABOLISM_SBML } from '../modules/metabolism_sbml'
 include { STRUCTURES_UNIPROT_MAPPING } from '../modules/structures_uniprot_mapping'
 include { STRUCTURES_PREPARE; STRUCTURES_DOWNLOAD_SINGLE; STRUCTURES_EXTRACT_CHAINS_SINGLE; STRUCTURES_EXTRACT_CHAINS_COLLECT } from '../modules/structures_download'
-include { STRUCTURES_COLABFOLD } from '../modules/structures_colabfold'
+include { COLABFOLD_SINGLE; COLABFOLD_COLLECT } from '../modules/structures_colabfold_single'
 include { STRUCTURES_POCKETS_SINGLE; STRUCTURES_POCKETS_COLLECT } from '../modules/structures_pockets'
 include { STRUCTURES_MERGE } from '../modules/structures_merge'
 include { CONSERVATION_DOWNLOAD_GENOMES } from '../modules/conservation_download'
@@ -188,20 +188,39 @@ workflow FASTTARGET {
         )
 
         if (colabfold_enabled) {
-            STRUCTURES_COLABFOLD(
+            // 3.2b: ColabFold parallelized per protein (GPU tasks in parallel)
+            // Create channel with locus_tags and their structure dirs
+            STRUCTURES_PREPARE.out.locus_tags_list
+                .splitText()
+                .map { it.trim() }
+                .filter { it.length() > 0 }
+                .combine(STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir)
+                .map { locus_tag, structures_dir -> tuple(locus_tag, file("${structures_dir}/${locus_tag}")) }
+                .set { locus_tags_for_colabfold }
+
+            COLABFOLD_SINGLE(
+                locus_tags_for_colabfold,
                 organism_name,
                 output_path,
-                GENOME_PREPARATION.out.all_genome_files,
-                STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir,
+                GENOME_PREPARATION.out.gbk,
                 colabfold_amber,
                 colabfold_gpu,
                 colabfold_all_models
+            )
+
+            COLABFOLD_COLLECT(
+                organism_name,
+                output_path,
+                STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir,
+                COLABFOLD_SINGLE.out.colabfold_results
+                    .map { locus_tag, result_dir -> [locus_tag, result_dir.toString()] }
+                    .collect()
             )
         }
 
         // 3.3: Pocket detection (parallelized per locus)
         // Use explicit upstream structures directory instead of published output path
-        def pockets_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
+        def pockets_structures_dir = colabfold_enabled ? COLABFOLD_COLLECT.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
         STRUCTURES_PREPARE.out.locus_tags_list
             .splitText()
             .map { it.trim() }
@@ -229,7 +248,7 @@ workflow FASTTARGET {
         )
         
         // 3.4: Merge structure data (waits for pockets to complete)
-        def merge_structures_dir = colabfold_enabled ? STRUCTURES_COLABFOLD.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
+        def merge_structures_dir = colabfold_enabled ? COLABFOLD_COLLECT.out.structure_dir : STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir
         STRUCTURES_MERGE(
             GENOME_PREPARATION.out.all_genome_files,
             merge_structures_dir,
