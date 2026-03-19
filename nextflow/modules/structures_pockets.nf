@@ -40,7 +40,7 @@ process STRUCTURES_POCKETS_SINGLE {
     output:
     val locus_tag, emit: completed_tag
     path "${organism_name}/structures/${locus_tag}/pockets", type: 'dir', emit: pockets_dir, optional: true
-    path "${organism_name}/structures/${locus_tag}", type: 'dir', emit: locus_structure_dir, optional: true
+    tuple val(locus_tag), path("${organism_name}/structures/${locus_tag}/pockets"), emit: locus_pockets_dir, optional: true
 
     script:
     def base_path = workflow.projectDir.parent
@@ -103,6 +103,17 @@ structures.p2rank_finder_for_locus(
     resolution_cutoff=${resolution_cutoff},
     coverage_cutoff=${coverage_cutoff}
 )
+
+# Keep only pockets in this task output.
+# This avoids restaging full structure trees into downstream merge.
+for item in os.listdir(locus_dir):
+    item_path = os.path.join(locus_dir, item)
+    if item == 'pockets':
+        continue
+    if os.path.isdir(item_path):
+        shutil.rmtree(item_path)
+    else:
+        os.remove(item_path)
 
 print(f'Completed pocket detection for ${locus_tag}')
 """

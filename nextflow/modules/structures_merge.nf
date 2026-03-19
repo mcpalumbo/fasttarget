@@ -22,7 +22,7 @@ process STRUCTURES_MERGE {
     input:
     path genome_files
     path structure_dir
-    path pocket_locus_dirs
+    val pocket_locus_dirs
     val organism_name
     val output_path
     val full_mode
@@ -84,24 +84,24 @@ if os.path.exists(staged_structures):
 else:
     print(f'WARNING: staged structures directory not found: {staged_structures}')
 
-# Merge staged pocket loci from parallel pockets process outputs
-print('Merging staged pocket locus directories...')
+# Merge pockets directories from parallel pockets process outputs
+pocket_data_flat = ${groovy.json.JsonOutput.toJson(pocket_locus_dirs)}
+pocket_data = [(pocket_data_flat[i], pocket_data_flat[i+1]) for i in range(0, len(pocket_data_flat), 2)]
+
+print(f'Merging pockets from {len(pocket_data)} loci...')
 merged_loci = 0
-for staged_entry in os.listdir(work_dir):
-    if staged_entry == '${organism_name}':
-        continue
-    staged_path = os.path.join(work_dir, staged_entry)
-    if not os.path.isdir(staged_path):
+for locus_tag, pockets_path in pocket_data:
+    pockets_src = pockets_path
+    if not os.path.isdir(pockets_src):
+        print(f'  WARNING: pockets directory not found for {locus_tag}: {pockets_src}')
         continue
 
-    # Accept only full locus directories produced by STRUCTURES_POCKETS_SINGLE
-    summary_file = os.path.join(staged_path, f'{staged_entry}_structure_summary.tsv')
-    pockets_dir = os.path.join(staged_path, 'pockets')
-    if os.path.exists(summary_file) and os.path.isdir(pockets_dir):
-        dest_locus = os.path.join(structures_dir, staged_entry)
-        shutil.copytree(staged_path, dest_locus, dirs_exist_ok=True)
-        merged_loci += 1
-        print(f'  Merged pockets for locus: {staged_entry}')
+    dest_locus = os.path.join(structures_dir, locus_tag)
+    os.makedirs(dest_locus, exist_ok=True)
+    pockets_dest = os.path.join(dest_locus, 'pockets')
+    shutil.copytree(pockets_src, pockets_dest, dirs_exist_ok=True)
+    merged_loci += 1
+    print(f'  Merged pockets for locus: {locus_tag}')
 
 print(f'  Total merged pocket loci: {merged_loci}')
 
