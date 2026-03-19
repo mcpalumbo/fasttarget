@@ -104,7 +104,7 @@ print('Stage 2A completed - Ready for parallel downloads', file=sys.stderr)
 process STRUCTURES_DOWNLOAD_SINGLE {
     tag "${locus_tag}"
     label 'low_resources'
-    maxForks 50  // Download up to 50 genes in parallel
+    maxForks 10  // Download up to 10 genes in parallel
     
     errorStrategy 'retry'
     maxRetries 3
@@ -168,7 +168,7 @@ print(f'Completed structure download for ${locus_tag}')
 process STRUCTURES_EXTRACT_CHAINS_SINGLE {
     tag "${locus_tag}"
     label 'medium_resources'
-    maxForks 50
+    maxForks 10
 
     input:
     tuple val(locus_tag), path(download_dir), path(structure_dir)

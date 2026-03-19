@@ -21,7 +21,7 @@ process STRUCTURES_POCKETS_SINGLE {
 
 
     cpus 2  // Each P2Rank instance gets 2 CPUs
-    maxForks 50  // Run up to 50 genes in parallel
+    maxForks 10  // Run up to 10 genes in parallel
     
     errorStrategy 'retry'
     maxRetries 2
