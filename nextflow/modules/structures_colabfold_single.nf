@@ -55,7 +55,7 @@ print('─' * 80)
 
 # Setup work directory for this protein
 work_dir = os.getcwd()
-locus_structure_dir = '${locus_structure_dir}'
+locus_structure_dir = os.path.realpath('${locus_structure_dir}')
 organism_dir = os.path.join(work_dir, '${organism_name}')
 structures_dir = os.path.join(organism_dir, 'structures')
 genome_dir = os.path.join(organism_dir, 'genome')
@@ -76,14 +76,15 @@ if os.path.exists(locus_structure_dir):
     os.makedirs(task_locus_dir, exist_ok=True)
 
     def link_or_copy(src, dst):
+        src_real = os.path.realpath(src)
         try:
-            os.symlink(src, dst)
+            os.symlink(src_real, dst)
             return 'symlink'
         except OSError:
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, dirs_exist_ok=True)
+            if os.path.isdir(src_real):
+                shutil.copytree(src_real, dst, dirs_exist_ok=True)
             else:
-                shutil.copy2(src, dst)
+                shutil.copy2(src_real, dst)
             return 'copy'
 
     linked_items = 0
