@@ -212,9 +212,14 @@ workflow FASTTARGET {
                 organism_name,
                 output_path,
                 STRUCTURES_EXTRACT_CHAINS_COLLECT.out.structure_dir,
-                COLABFOLD_SINGLE.out.colabfold_results
-                    .map { locus_tag, result_dir -> [locus_tag, result_dir.toString()] }
+                COLABFOLD_SINGLE.out.colabfold_cb_results
+                    .map { locus_tag, cb_file -> [locus_tag, cb_file.toString()] }
                     .collect()
+                    .ifEmpty([]),
+                COLABFOLD_SINGLE.out.colabfold_models_results
+                    .map { locus_tag, models_dir -> [locus_tag, models_dir.toString()] }
+                    .collect()
+                    .ifEmpty([])
             )
         }
 
@@ -252,7 +257,10 @@ workflow FASTTARGET {
         STRUCTURES_MERGE(
             GENOME_PREPARATION.out.all_genome_files,
             merge_structures_dir,
-            STRUCTURES_POCKETS_SINGLE.out.locus_structure_dir.collect().ifEmpty([]),
+            STRUCTURES_POCKETS_SINGLE.out.locus_pockets_dir
+                .map { locus_tag, pockets_dir -> [locus_tag, pockets_dir.toString()] }
+                .collect()
+                .ifEmpty([]),
             organism_name,
             output_path,
             pocket_full_mode,
@@ -283,6 +291,7 @@ workflow FASTTARGET {
             GENOME_PREPARATION.out.all_genome_files,
             accession_file
         )
+
         
         if (roary_enabled) {
             CONSERVATION_ROARY(
