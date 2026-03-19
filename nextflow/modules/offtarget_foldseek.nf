@@ -33,7 +33,6 @@ process OFFTARGET_FOLDSEEK {
     output:
     path "${organism_name}/offtarget/foldseek_results/", emit: foldseek_dir
     path "${organism_name}/offtarget/${organism_name}_final_foldseek_results.tsv", emit: foldseek_table, optional: true
-    path "${organism_name}/offtarget/**", emit: all_foldseek
     val organism_name, emit: organism_name
     
     script:
