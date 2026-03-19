@@ -16,7 +16,7 @@
 process CONSERVATION_CORECRUNCHER {
     tag "${organism_name}"
     label 'high_resources'
-    publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/conservation/**"
+    publishDir "${output_path}", mode: 'move', pattern: "${organism_name}/conservation/**"
     
     input:
     val organism_name
@@ -58,7 +58,7 @@ print('=' * 80)
 work_dir = os.getcwd()
 conservation_dir = os.path.join(work_dir, '${organism_name}', 'conservation')
 corecruncher_output_dir = os.path.join(conservation_dir, 'corecruncher_output')
-os.makedirs(os.path.join(corecruncher_output_dir, 'faa'), exist_ok=True)
+os.makedirs(corecruncher_output_dir, exist_ok=True)  # Create parent, NOT faa subdir
 
 print(f'Working in: {work_dir}')
 print(f'Conservation directory: {conservation_dir}')
@@ -72,17 +72,29 @@ for genome_file in glob.glob('${organism_name}.*'):
     shutil.copy2(genome_file, target_file)
     print(f'Copied genome file: {os.path.basename(genome_file)}')
 
-# Copy FAA files from staged faa directory to corecruncher faa directory
+# Link FAA files from upstream work directory (avoid duplication)
+# faa_dir already exists from CONSERVATION_DOWNLOAD_GENOMES work/
 staged_faa_dir = '${faa_dir}'
 faa_target_dir = os.path.join(corecruncher_output_dir, 'faa')
 
-print(f'Copying FAA files from: {staged_faa_dir}')
+print(f'Creating symlinks to FAA files from: {staged_faa_dir}')
+print(f'Target: {faa_target_dir}')
 faa_files = glob.glob(os.path.join(staged_faa_dir, '*.faa'))
 
-for faa_file in faa_files:
-    target_file = os.path.join(faa_target_dir, os.path.basename(faa_file))
-    shutil.copy2(faa_file, target_file)
-    print(f'  - Copied: {os.path.basename(faa_file)}')
+# Remove existing directory and symlink to upstream instead
+if os.path.exists(faa_target_dir) and os.path.islink(faa_target_dir):
+    os.unlink(faa_target_dir)
+elif os.path.exists(faa_target_dir):
+    
+    shutil_module.rmtree(faa_target_dir)
+
+try:
+    os.symlink(staged_faa_dir, faa_target_dir)
+    print(f'  - Symlinked entire faa directory: {staged_faa_dir}')
+except OSError:
+    # Fallback: copy if symlink fails
+    shutil.copytree(staged_faa_dir, faa_target_dir, dirs_exist_ok=True)
+    print(f'  - Copied faa directory (symlink failed)')
 
 print(f'Total FAA files copied: {len(faa_files)}')
 print('')

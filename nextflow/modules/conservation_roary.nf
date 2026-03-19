@@ -16,7 +16,7 @@
 process CONSERVATION_ROARY {
     tag "${organism_name}"
     label 'high_resources'
-    publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/conservation/**"
+    publishDir "${output_path}", mode: 'move', pattern: "${organism_name}/conservation/**"
     
     input:
     val organism_name
@@ -44,12 +44,14 @@ import os
 import shutil
 import glob
 
+
 # Add parent directory to path to import ftscripts
 sys.path.insert(0, '${base_path}')
 
 import shutil
 import glob
 from ftscripts import genome
+import shutil as shutil_module
 
 print('=' * 80)
 print('ROARY PANGENOME ANALYSIS'.center(80))
@@ -59,7 +61,7 @@ print('=' * 80)
 work_dir = os.getcwd()
 conservation_dir = os.path.join(work_dir, '${organism_name}', 'conservation')
 roary_output_dir = os.path.join(conservation_dir, 'roary_output')
-os.makedirs(os.path.join(roary_output_dir, 'gff'), exist_ok=True)
+os.makedirs(roary_output_dir, exist_ok=True)  # Create parent, NOT gff subdir
 
 print(f'Working in: {work_dir}')
 print(f'Conservation directory: {conservation_dir}')
@@ -73,17 +75,28 @@ for genome_file in glob.glob('${organism_name}.*'):
     shutil.copy2(genome_file, target_file)
     print(f'Copied genome file: {os.path.basename(genome_file)}')
 
-# Copy GFF files from staged gff directory to roary gff directory
+# Link GFF files from upstream work directory (avoid duplication)
+# gff_dir already exists from CONSERVATION_DOWNLOAD_GENOMES work/
 staged_gff_dir = '${gff_dir}'
 gff_target_dir = os.path.join(roary_output_dir, 'gff')
 
-print(f'Copying GFF files from: {staged_gff_dir}')
+print(f'Creating symlinks to GFF files from: {staged_gff_dir}')
+print(f'Target: {gff_target_dir}')
 gff_files = glob.glob(os.path.join(staged_gff_dir, '*.gff'))
 
-for gff_file in gff_files:
-    target_file = os.path.join(gff_target_dir, os.path.basename(gff_file))
-    shutil.copy2(gff_file, target_file)
-    print(f'  - Copied: {os.path.basename(gff_file)}')
+# Remove existing directory and symlink to upstream instead
+if os.path.exists(gff_target_dir) and os.path.islink(gff_target_dir):
+    os.unlink(gff_target_dir)
+elif os.path.exists(gff_target_dir):
+    shutil_module.rmtree(gff_target_dir)
+
+try:
+    os.symlink(staged_gff_dir, gff_target_dir)
+    print(f'  - Symlinked entire gff directory: {staged_gff_dir}')
+except OSError:
+    # Fallback: copy if symlink fails
+    shutil.copytree(staged_gff_dir, gff_target_dir, dirs_exist_ok=True)
+    print(f'  - Copied gff directory (symlink failed)')
 
 print(f'Total GFF files copied: {len(gff_files)}')
 print('')

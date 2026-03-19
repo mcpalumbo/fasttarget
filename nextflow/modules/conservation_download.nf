@@ -16,7 +16,8 @@
 process CONSERVATION_DOWNLOAD_GENOMES {
     tag "${organism_name}"
     label 'medium_resources'
-    publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/conservation/*"
+    // Only publish downloaded datasets (genome files), keep gff/faa in work for next steps
+    publishDir "${output_path}", mode: 'move', pattern: "${organism_name}/conservation/${organism_name}_dataset/"
     
     input:
     val organism_name
