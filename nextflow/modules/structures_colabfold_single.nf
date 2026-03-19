@@ -29,6 +29,7 @@ process COLABFOLD_SINGLE {
     output:
     tuple val(locus_tag), path("${organism_name}/structures/${locus_tag}/CB_*.pdb"), emit: colabfold_cb_results, optional: true
     tuple val(locus_tag), path("${organism_name}/structures/${locus_tag}/colabfold_models"), emit: colabfold_models_results, optional: true
+    tuple val(locus_tag), path("${organism_name}/structures/${locus_tag}/${locus_tag}_structure_summary.tsv"), emit: colabfold_summary_results, optional: true
 
     script:
     def base_path = workflow.projectDir.parent
@@ -194,6 +195,7 @@ process COLABFOLD_COLLECT {
     path structure_dir
     val colabfold_cb_results
     val colabfold_models_results
+    val colabfold_summary_results
 
     output:
     path "${organism_name}/structures", emit: structure_dir
@@ -220,13 +222,15 @@ os.makedirs(base_path, exist_ok=True)
 # Parse ColabFold results first to identify loci that must be materialized.
 cb_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_cb_results)}
 models_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_models_results)}
+summary_data_flat = ${groovy.json.JsonOutput.toJson(colabfold_summary_results)}
 
 # Convert flat list into pairs: [tag1, path1, tag2, path2, ...] -> [(tag1, path1), (tag2, path2), ...]
 cb_data = [(cb_data_flat[i], cb_data_flat[i+1]) for i in range(0, len(cb_data_flat), 2)]
 models_data = [(models_data_flat[i], models_data_flat[i+1]) for i in range(0, len(models_data_flat), 2)]
-loci_to_update = set([x[0] for x in cb_data] + [x[0] for x in models_data])
+summary_data = [(summary_data_flat[i], summary_data_flat[i+1]) for i in range(0, len(summary_data_flat), 2)]
+loci_to_update = set([x[0] for x in cb_data] + [x[0] for x in models_data] + [x[0] for x in summary_data])
 
-print(f'Processing ColabFold outputs... CB files: {len(cb_data)} | models dirs: {len(models_data)}')
+print(f'Processing ColabFold outputs... CB files: {len(cb_data)} | models dirs: {len(models_data)} | summaries: {len(summary_data)}')
 
 # Stage existing structures from upstream:
 # - loci to update -> copy (writable)
@@ -274,6 +278,7 @@ else:
 
 cb_merged_count = 0
 models_merged_count = 0
+summary_merged_count = 0
 failed_count = 0
 
 for locus_tag, cb_file in cb_data:
@@ -312,8 +317,26 @@ for locus_tag, models_dir in models_data:
     print(f'Added ColabFold models directory for {locus_tag}')
     models_merged_count += 1
 
-processed_loci = len(set([x[0] for x in cb_data] + [x[0] for x in models_data]))
-print(f'COLLECT: Processed loci: {processed_loci} | CB merged: {cb_merged_count} | models merged: {models_merged_count} | failed: {failed_count}')
+for locus_tag, summary_file in summary_data:
+    summary_src = Path(summary_file)
+    if not summary_src.exists() or not summary_src.is_file():
+        print(f'WARNING: summary file not found for {locus_tag} at {summary_file}')
+        failed_count += 1
+        continue
+
+    locus_structure_dir = os.path.join(base_path, locus_tag)
+    if os.path.islink(locus_structure_dir):
+        source_dir = os.path.realpath(locus_structure_dir)
+        os.unlink(locus_structure_dir)
+        shutil.copytree(source_dir, locus_structure_dir, dirs_exist_ok=True)
+    os.makedirs(locus_structure_dir, exist_ok=True)
+    summary_dest = os.path.join(locus_structure_dir, summary_src.name)
+    shutil.copy2(summary_src, summary_dest)
+    print(f'Updated structure summary for {locus_tag}: {summary_src.name}')
+    summary_merged_count += 1
+
+processed_loci = len(set([x[0] for x in cb_data] + [x[0] for x in models_data] + [x[0] for x in summary_data]))
+print(f'COLLECT: Processed loci: {processed_loci} | CB merged: {cb_merged_count} | models merged: {models_merged_count} | summaries merged: {summary_merged_count} | failed: {failed_count}')
 print('Stage 2.5 COLLECT completed successfully')
 """
 

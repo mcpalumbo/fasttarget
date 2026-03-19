@@ -219,6 +219,10 @@ workflow FASTTARGET {
                 COLABFOLD_SINGLE.out.colabfold_models_results
                     .map { locus_tag, models_dir -> [locus_tag, models_dir.toString()] }
                     .collect()
+                    .ifEmpty([]),
+                COLABFOLD_SINGLE.out.colabfold_summary_results
+                    .map { locus_tag, summary_file -> [locus_tag, summary_file.toString()] }
+                    .collect()
                     .ifEmpty([])
             )
         }
