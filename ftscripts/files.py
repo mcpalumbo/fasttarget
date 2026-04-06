@@ -162,11 +162,12 @@ def create_organism_subfolders(output_path, organism_name):
             os.makedirs(dir_path, exist_ok=True)
             print(f"Created directory: {dir_path}")
 
-def read_blast_output(file_path):
+def read_blast_output(file_path, len=False):
     """
     Read BLASTP output file and return a pandas DataFrame.
 
     :param file_path: File path of blast output file.
+    :len: If True, the length of the query and subject sequences will be added to the DataFrame.
 
     :return: Pandas DataFrame with blast output.
     """
@@ -175,7 +176,7 @@ def read_blast_output(file_path):
         blast_output_df = pd.read_csv(file_path, sep='\t', header=None)
 
         # Columns used for blastp
-        blast_output_df.columns = [
+        blast_columns = [
         "qseqid",   # query or source (gene) sequence id
         "sseqid",   # subject or target (reference genome) sequence id
         "pident",   # percentage of identical positions
@@ -191,6 +192,11 @@ def read_blast_output(file_path):
         "qcovhsp",  # Query Coverage hsp
         "qcovs"     # Query Coverage full
         ]
+
+        if len: #add qlen and slen to columns
+            blast_columns.extend(['qlen', 'slen'])
+
+        blast_output_df.columns = blast_columns
 
         return blast_output_df
     

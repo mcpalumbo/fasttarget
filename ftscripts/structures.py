@@ -646,7 +646,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
                 query= organism_prot_seq_path,
                 output=blast_output_strain_path,
                 evalue= '1e-5',
-                outfmt= '6 std qcovhsp qcovs',
+                outfmt= '6 std qcovhsp qcovs qlen slen',
                 max_target_seqs = '5',
                 cpus=cpus
             )
@@ -673,7 +673,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
                 query= organism_prot_seq_path,
                 output=blast_output_pdb_path,
                 evalue= '1e-5',
-                outfmt= '6 std qcovhsp qcovs',
+                outfmt= '6 std qcovhsp qcovs qlen slen',
                 max_target_seqs = '5',
                 cpus=cpus
             )
@@ -699,7 +699,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
                 query= organism_prot_seq_path,
                 output=blast_output_species_rest_path,
                 evalue= '1e-5',
-                outfmt= '6 std qcovhsp qcovs',
+                outfmt= '6 std qcovhsp qcovs qlen slen',
                 max_target_seqs = '5',
                 cpus=cpus
             )
@@ -711,13 +711,15 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
     else:
         print(f'Blastp results in {blast_output_species_rest_path}.')
 
-def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, all_hits=False):
+def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, subject_cov_cutoff=90, all_hits=False):
     """
     Parse blast output and return best hit per query based on identity and coverage.
 
     :param file: Path to blast output file.
     :param identity_cutoff: Minimum percentage identity to consider a hit. Default is 95.
     :param coverage_cutoff: Minimum query coverage to consider a hit. Default is 90.
+    :param subject_cov_cutoff: Minimum subject coverage to consider a hit. Default is 90.
+    :param all_hits: If True, return all hits that meet the criteria. If False, return only the best hit. Default is False.
     :return: Dictionary with query id as key and best subject id as value.
     """
 
@@ -729,7 +731,7 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, all_h
         return {}
 
     try:
-        blast_output_df = files.read_blast_output(file)
+        blast_output_df = files.read_blast_output(file, len=True)
     except Exception as e:
         print(f'WARNING: Could not parse BLAST output file {file}: {e}. Returning empty results.')
         return {}
@@ -739,9 +741,11 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, all_h
         print(f'WARNING: BLAST output file {file} contains no results. Returning empty results.')
         return {}
 
+    blast_output_df['scov'] = (blast_output_df['length'] / blast_output_df['slen']) * 100
     # Apply filters
     blast_output_filtered_df = blast_output_df[(blast_output_df['pident'] >= identity_cutoff) & 
-                                                (blast_output_df['qcovs'] >= coverage_cutoff)]
+                                                (blast_output_df['qcovs'] >= coverage_cutoff) & 
+                                                (blast_output_df['scov'] >= subject_cov_cutoff)]
 
     best_hits = {}
 
@@ -799,7 +803,8 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
         if files.file_check(blast_output_pdb_path):
             parse_pdb = parse_best_result_blast (blast_output_pdb_path, 
                                     identity_cutoff=95, 
-                                    coverage_cutoff=90, 
+                                    coverage_cutoff=90,
+                                    subject_cov_cutoff=90,
                                     all_hits=True)
         else:
             parse_pdb = {}
@@ -810,7 +815,8 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
         if files.file_check(blast_output_strain_path):
             parse_strain = parse_best_result_blast (blast_output_strain_path, 
                                     identity_cutoff=95, 
-                                    coverage_cutoff=90, 
+                                    coverage_cutoff=90,
+                                    subject_cov_cutoff=90, 
                                     all_hits=False)
             logging.info(f'Mapped {len(parse_strain)} genes to strain-specific UniProt IDs')
             print(f'Mapped {len(parse_strain)} genes to strain-specific UniProt IDs')
@@ -824,6 +830,7 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
             parse_rest = parse_best_result_blast (blast_output_species_rest_path, 
                                     identity_cutoff=95, 
                                     coverage_cutoff=90, 
+                                    subject_cov_cutoff=90,
                                     all_hits=False)
         else:
             logging.error(f'No species-level REST BLAST results found. Cannot proceed with mapping.')
