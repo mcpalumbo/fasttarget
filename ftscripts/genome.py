@@ -414,16 +414,19 @@ def core_download_missing_accessions(output_path, organism_name, tax_id, accessi
     else:
         print('Check already performed.')
 
-def core_files(output_path, organism_name, container_engine='docker'):
+def core_files(output_path, organism_name, container_engine='docker', filter_by_host=True):
     """
-    Select genomes with Human as host and generate .faa and .gff3 files for core genomes.
+    Select genomes for core genome analysis and generate .faa and .gff3 files.
 
-    This function processes the genomes of the given organism to select those with Human as host.
+    This function processes the genomes of the given organism.
+    If filter_by_host=True, it selects only those with Human as host.
+    If filter_by_host=False, it includes all genomes that don't duplicate loci or strain.
     It generates the necessary .faa and .gff3 files for each genome.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param container_engine: Container engine to use ('docker' or 'singularity').
+    :param filter_by_host: If True, filter by 'Homo sapiens' host. If False, use all genomes.
 
     :return: List of core genomes IDs.
     """
@@ -469,37 +472,43 @@ def core_files(output_path, organism_name, container_engine='docker'):
 
                 locus_list, strain, host = gbk_locus_strain_host(gbff_files[0])
 
-                if not set(locus_list) & set(ref_locus_list) and strain != ref_strain:
-                    if host == 'Homo sapiens':
-                        core_genomes.append(f'{assembly_id}')  
-                        
-                        new_gbk = os.path.join(root, dir_name, f'{assembly_id}.gbk')
-                        new_faa = os.path.join(fasta_dir, f'{assembly_id}.faa')
-                        new_gff = os.path.join(gff_dir, f'{assembly_id}.gff')
-
-                        if not os.path.exists(new_gbk):
-                            shutil.move(gbff_files[0], new_gbk)
-                        else:
-                            print(f'{new_gbk} already exists.')
-
-                        if not os.path.exists(new_faa):
-                            gbk_to_fasta(new_gbk, output_file_faa=new_faa)
-                        else:
-                            print(f'{new_faa} already exists.')
-
-                        if not os.path.exists(new_gff):
-                            try:      
-                                programs.run_genbank2gff3(new_gbk, gff_dir, container_engine=container_engine)
-                                print(f"Processed {assembly_id}.gff")
-                            except Exception as e:
-                                logging.exception(f"Error in run_genbank2gff3: {e}")
-                                add_sequences_to_gff3(gff_files[0], new_gbk)
-                                shutil.copy(gff_files[0], new_gff)                 
-                                print(f"Processed {assembly_id}.gff")
-                        else:
-                            print(f"{assembly_id}.gff already exists.")      
-                    else:
+                # Check if genome should be included based on filtering criteria
+                include_genome = not set(locus_list) & set(ref_locus_list) and strain != ref_strain
+                
+                if filter_by_host and include_genome:
+                    # When filtering by host, only include 'Homo sapiens'
+                    include_genome = host == 'Homo sapiens'
+                    if not include_genome:
                         print(f'{dir_name}: Host not Human: {host}, for {assembly_id}, {locus_list}, strain {strain}.')
+                
+                if include_genome:
+                    core_genomes.append(f'{assembly_id}')  
+                    
+                    new_gbk = os.path.join(root, dir_name, f'{assembly_id}.gbk')
+                    new_faa = os.path.join(fasta_dir, f'{assembly_id}.faa')
+                    new_gff = os.path.join(gff_dir, f'{assembly_id}.gff')
+
+                    if not os.path.exists(new_gbk):
+                        shutil.move(gbff_files[0], new_gbk)
+                    else:
+                        print(f'{new_gbk} already exists.')
+
+                    if not os.path.exists(new_faa):
+                        gbk_to_fasta(new_gbk, output_file_faa=new_faa)
+                    else:
+                        print(f'{new_faa} already exists.')
+
+                    if not os.path.exists(new_gff):
+                        try:      
+                            programs.run_genbank2gff3(new_gbk, gff_dir, container_engine=container_engine)
+                            print(f"Processed {assembly_id}.gff")
+                        except Exception as e:
+                            logging.exception(f"Error in run_genbank2gff3: {e}")
+                            add_sequences_to_gff3(gff_files[0], new_gbk)
+                            shutil.copy(gff_files[0], new_gff)                 
+                            print(f"Processed {assembly_id}.gff")
+                    else:
+                        print(f"{assembly_id}.gff already exists.")
                         shutil.rmtree(os.path.join(root, dir_name))
                 else:
                     shutil.rmtree(os.path.join(root, dir_name))
@@ -512,7 +521,7 @@ def core_files(output_path, organism_name, container_engine='docker'):
     return core_genomes
 
 
-def core_check_files(output_path, organism_name, container_engine='docker'):
+def core_check_files(output_path, organism_name, container_engine='docker', filter_by_host=True):
     """
 
     Check for missing files in the core genomes analysis.
@@ -524,6 +533,7 @@ def core_check_files(output_path, organism_name, container_engine='docker'):
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
     :param container_engine: Container engine to use ('docker' or 'singularity').
+    :param filter_by_host: If True, filter genomes by 'Homo sapiens' host. If False, use all genomes.
 
     """
     conservation_dir = os.path.join(output_path, organism_name, 'conservation')  
@@ -559,14 +569,14 @@ def core_check_files(output_path, organism_name, container_engine='docker'):
         genomes_list = files.file_to_list(genomes_file)
         pending_files = pending_files(genomes_list)
         if len(pending_files) > 0:
-            core_files(output_path, organism_name, container_engine=container_engine)
+            core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
     else:
-        core_files(output_path, organism_name, container_engine=container_engine)
+        core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
         if files.file_check(genomes_file):
             genomes_list = files.file_to_list(genomes_file)
             pending_files = pending_files(genomes_list)
             if len(pending_files) > 0:
-                core_files(output_path, organism_name, container_engine=container_engine)
+                core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
         else:
             print(f'No core genomes file found or empty: {genomes_file}.')
 

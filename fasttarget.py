@@ -253,7 +253,9 @@ def conservation_module(config, databases_path, output_path, cpus):
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
-            genome.core_check_files(output_path, organism_name, container_engine=config.container_engine)
+            # If accession_list was provided, don't filter by host; otherwise filter for human host
+            filter_by_host = accession_list is None or len(accession_list) == 0
+            genome.core_check_files(output_path, organism_name, container_engine=config.container_engine, filter_by_host=filter_by_host)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
