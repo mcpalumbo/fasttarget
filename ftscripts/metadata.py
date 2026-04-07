@@ -24,7 +24,95 @@ def ref_gbk_locus(output_path, organism_name):
     
     return locus_tags
 
-def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
+
+def ref_gbk_locus_info(output_path, organism_name):
+    """
+    Returns a dictionary mapping locus_tags to gene names and products from the reference genome.
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of the organism.
+
+    :return: Dictionary with locus_tag as key and dict with 'gene_name' and 'product' as values.
+    """
+    ref_gbk = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
+    
+    locus_info = {}
+    
+    for record in SeqIO.parse(ref_gbk, "genbank"):
+        for feature in record.features:
+            if feature.type == "CDS":
+                if 'translation' in feature.qualifiers and 'locus_tag' in feature.qualifiers:
+                    locus_tag = feature.qualifiers["locus_tag"][0]
+                    
+                    # Extract gene name (if available)
+                    gene_name = ""
+                    if 'gene' in feature.qualifiers:
+                        gene_name = feature.qualifiers['gene'][0]
+                    
+                    # Extract product
+                    product = ""
+                    if 'product' in feature.qualifiers:
+                        product = feature.qualifiers['product'][0]
+                    
+                    locus_info[locus_tag] = {
+                        'gene_name': gene_name,
+                        'product': product
+                    }
+    
+    return locus_info
+
+
+def add_gene_product_info(df, output_path, organism_name):
+    """
+    Add gene_name and product columns to a dataframe that has a 'gene' column.
+    This function extracts gene names and product descriptions from the GenBank file
+    and adds them as new columns (always positions 2 and 3) after 'gene'.
+    
+    Column order will always be: gene | gene_name | product | [rest of columns]
+    
+    If gene_name or product are not found, they will be empty strings.
+    
+    :param df: DataFrame with a 'gene' column (locus_tag)
+    :param output_path: Path to the output directory
+    :param organism_name: Name of the organism
+    :return: DataFrame with added 'gene_name' and 'product' columns in positions 2 and 3
+    """
+    
+    if 'gene' not in df.columns:
+        # If no 'gene' column, return as is
+        return df
+    
+    # Get gene and product info from GenBank
+    gbk_info = ref_gbk_locus_info(output_path, organism_name)
+    
+    # Create new columns with info for each gene
+    gene_names = []
+    products = []
+    
+    for gene in df['gene']:
+        info = gbk_info.get(gene, {})
+        gene_names.append(info.get('gene_name', ''))
+        products.append(info.get('product', ''))
+    
+    # Add columns
+    df['gene_name'] = gene_names
+    df['product'] = products
+    
+    # Reorder columns: gene, gene_name, product, [rest]
+    cols = df.columns.tolist()
+    cols.remove('gene_name')
+    cols.remove('product')
+    
+    # Insert gene_name and product right after 'gene'
+    gene_idx = cols.index('gene')
+    cols.insert(gene_idx + 1, 'gene_name')
+    cols.insert(gene_idx + 2, 'product')
+    
+    df = df[cols]
+    
+    return df
+
+ def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
     """
     Makes a metadata table. Each locus_tag has a boolean value for a property.    
 

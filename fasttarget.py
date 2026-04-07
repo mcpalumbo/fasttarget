@@ -547,6 +547,9 @@ def merge_final_tables(config, output_path, tables):
             if df is not None:
                 combined_df = pd.merge(combined_df, df, on='gene', how='left')
         
+        # Add gene_name and product information
+        combined_df = metadata.add_gene_product_info(combined_df, output_path, organism_name)
+        
         combined_df.to_csv(results_table_path, sep='\t', index=False)
         
         print(f'Final FastTarget results saved in {results_table_path}.')
@@ -561,6 +564,7 @@ def merge_final_tables(config, output_path, tables):
         logging.info('Tables for Target Pathogen created')
 
     elif len(tables) == 1:
+        tables[0] = metadata.add_gene_product_info(tables[0], output_path, organism_name)
         tables[0].to_csv(results_table_path, sep='\t', index=False)
         print(f'Final FastTarget results saved in {results_table_path}.')
         logging.info(f'Final FastTarget results saved.')
