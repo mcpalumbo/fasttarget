@@ -26,6 +26,7 @@ from requests.exceptions import (
     ConnectionError, 
     Timeout
 )
+from datetime import datetime
 
 
 ## ------------------- UNIPROT PROTEOME FUNCTIONS ------------------- ##
@@ -4099,6 +4100,17 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
             logging.exception(f'\n    ✗ ERROR in Stage 3: {e}')
             raise
         
+        # ========== STAGE 4: Generate Report ==========
+        print(f'\n{"─"*80}')
+        print(f'STAGE 4: GENERATING STRUCTURE ANALYSIS REPORT')
+        print(f'{"─"*80}')
+        
+        try:
+            generate_structure_report(output_path, organism_name)
+        except Exception as e:
+            logging.exception(f'\n    ✗ ERROR in Stage 4 (Report generation): {e}')
+            # Don't raise - report generation is non-critical
+        
         # ========== Pipeline Complete ==========
         print(f'\n{"="*80}')
         print(f'Pipeline finished')
@@ -4111,7 +4123,14 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         print(f'Final structure summary table already exists at {final_table_path}, loading existing data.')
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
         final_df = pd.read_csv(final_table_path, sep='\t', dtype={'structure': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
-
+        
+        # Generate report even if table already exists
+        try:
+            print(f'\nGenerating structure analysis report...')
+            generate_structure_report(output_path, organism_name)
+        except Exception as e:
+            logging.exception(f'Error generating report: {e}')
+        
     return final_df
 
 
@@ -4258,3 +4277,177 @@ def get_all_reference_structures(output_path, organism_name, path_mode=True):
                 reference_structures[locus_tag] = None
 
     return reference_structures
+
+
+def generate_structure_report(output_path, organism_name):
+    """
+    Generate a comprehensive structure analysis report.
+    
+    Analyzes the final structure summary table and creates a detailed text report
+    with statistics about structure availability and pocket predictions.
+    
+    :param output_path: Path to the output directory
+    :param organism_name: Name of the organism
+    :return: Path to the generated report file
+    """
+    
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
+    final_table_path = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
+    report_path = os.path.join(structure_dir, f'{organism_name}_STRUCTURE_REPORT.txt')
+    
+    # Load the final structure summary table
+    if not os.path.exists(final_table_path):
+        logging.error(f"Final structure summary table not found at {final_table_path}")
+        return None
+    
+    try:
+        df = pd.read_csv(final_table_path, sep='\t', dtype={'structure': str}, 
+                        keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', 
+                        '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', 
+                        '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+    except Exception as e:
+        logging.error(f"Error reading final structure summary table: {e}")
+        return None
+    
+    # Calculate statistics
+    total_proteins = len(df)
+    
+    # Count proteins with structures
+    proteins_with_pdb = 0
+    proteins_with_alphafold = 0
+    proteins_with_colabfold = 0
+    proteins_with_structures = set()
+    
+    for idx, row in df.iterrows():
+        structure = str(row.get('structure', '')).strip()
+        
+        if not structure or structure.lower() in ['nan', 'none', '']:
+            continue
+            
+        proteins_with_structures.add(idx)
+        
+        # Check for PDB (starts with 'PDB_')
+        if 'PDB_' in structure:
+            proteins_with_pdb += 1
+        
+        # Check for AlphaFold (starts with 'AF_')
+        if 'AF_' in structure:
+            proteins_with_alphafold += 1
+        
+        # Check for ColabFold (starts with 'CB_')
+        if 'CB_' in structure:
+            proteins_with_colabfold += 1
+    
+    proteins_without_structures = total_proteins - len(proteins_with_structures)
+    
+    # Count proteins with pockets
+    proteins_with_pockets = 0
+    proteins_with_fpocket = 0
+    proteins_with_p2rank = 0
+    
+    fpocket_col = 'fpocket_pocket'
+    p2rank_col = 'p2rank_pocket'
+    
+    # Check for ColabFold versions if they exist
+    colabfold_fpocket_col = 'colabfold_fpocket_pocket'
+    colabfold_p2rank_col = 'colabfold_p2rank_pocket'
+    
+    for idx, row in df.iterrows():
+        has_fpocket = False
+        has_p2rank = False
+        
+        # Check standard pocket columns
+        if fpocket_col in df.columns:
+            fpocket = str(row.get(fpocket_col, '')).strip()
+            if fpocket and fpocket.lower() not in ['nan', 'none', '']:
+                has_fpocket = True
+                proteins_with_fpocket += 1
+        
+        if p2rank_col in df.columns:
+            p2rank = str(row.get(p2rank_col, '')).strip()
+            if p2rank and p2rank.lower() not in ['nan', 'none', '']:
+                has_p2rank = True
+                proteins_with_p2rank += 1
+        
+        # Check ColabFold pocket columns
+        if colabfold_fpocket_col in df.columns:
+            cf_fpocket = str(row.get(colabfold_fpocket_col, '')).strip()
+            if cf_fpocket and cf_fpocket.lower() not in ['nan', 'none', '']:
+                has_fpocket = True
+                if not (fpocket_col in df.columns and 
+                       str(row.get(fpocket_col, '')).strip() and 
+                       str(row.get(fpocket_col, '')).strip().lower() not in ['nan', 'none', '']):
+                    proteins_with_fpocket += 1
+        
+        if colabfold_p2rank_col in df.columns:
+            cf_p2rank = str(row.get(colabfold_p2rank_col, '')).strip()
+            if cf_p2rank and cf_p2rank.lower() not in ['nan', 'none', '']:
+                has_p2rank = True
+                if not (p2rank_col in df.columns and 
+                       str(row.get(p2rank_col, '')).strip() and 
+                       str(row.get(p2rank_col, '')).strip().lower() not in ['nan', 'none', '']):
+                    proteins_with_p2rank += 1
+        
+        if has_fpocket or has_p2rank:
+            proteins_with_pockets += 1
+    
+    proteins_without_pockets = total_proteins - proteins_with_pockets
+    
+    # Generate the report
+    report_lines = []
+    report_lines.append("=" * 80)
+    report_lines.append("FASTTARGET STRUCTURE ANALYSIS REPORT".center(80))
+    report_lines.append("=" * 80)
+    report_lines.append("")
+    report_lines.append(f"Organism: {organism_name}")
+    report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report_lines.append("")
+    report_lines.append("=" * 80)
+    report_lines.append("STRUCTURE AVAILABILITY SUMMARY")
+    report_lines.append("=" * 80)
+    report_lines.append("")
+    report_lines.append(f"Total number of proteins analyzed: {total_proteins}")
+    report_lines.append("")
+    
+    # Structures section
+    report_lines.append("-" * 80)
+    report_lines.append("STRUCTURES")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Proteins WITH any structure:          {len(proteins_with_structures):6d}  ({len(proteins_with_structures)/total_proteins*100:5.1f}%)")
+    report_lines.append(f"  └─ With PDB structures:             {proteins_with_pdb:6d}  ({proteins_with_pdb/total_proteins*100:5.1f}%)")
+    report_lines.append(f"  └─ With AlphaFold structures:       {proteins_with_alphafold:6d}  ({proteins_with_alphafold/total_proteins*100:5.1f}%)")
+    report_lines.append(f"  └─ With ColabFold structures:       {proteins_with_colabfold:6d}  ({proteins_with_colabfold/total_proteins*100:5.1f}%)")
+    report_lines.append("")
+    report_lines.append(f"Proteins WITHOUT any structure:       {proteins_without_structures:6d}  ({proteins_without_structures/total_proteins*100:5.1f}%)")
+    report_lines.append("")
+    
+    # Pockets section
+    report_lines.append("-" * 80)
+    report_lines.append("POCKETS")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Proteins WITH pockets:                {proteins_with_pockets:6d}  ({proteins_with_pockets/total_proteins*100:5.1f}%)")
+    
+    # Only show FPocket and P2Rank if they exist
+    if proteins_with_fpocket > 0 or 'fpocket_pocket' in df.columns:
+        report_lines.append(f"  └─ With FPocket predictions:        {proteins_with_fpocket:6d}  ({proteins_with_fpocket/total_proteins*100:5.1f}%)")
+    
+    if proteins_with_p2rank > 0 or 'p2rank_pocket' in df.columns:
+        report_lines.append(f"  └─ With P2Rank predictions:         {proteins_with_p2rank:6d}  ({proteins_with_p2rank/total_proteins*100:5.1f}%)")
+    
+    report_lines.append("")
+    report_lines.append(f"Proteins WITHOUT pockets:             {proteins_without_pockets:6d}  ({proteins_without_pockets/total_proteins*100:5.1f}%)")
+    report_lines.append("")
+    report_lines.append("=" * 80)
+    
+    # Write report to file
+    try:
+        with open(report_path, 'w') as f:
+            f.write('\n'.join(report_lines))
+        
+        logging.info(f"Structure report generated: {report_path}")
+        
+        return report_path
+        
+    except Exception as e:
+        logging.error(f"Error writing report to file: {e}")
+        return None
