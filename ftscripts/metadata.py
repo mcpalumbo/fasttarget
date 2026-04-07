@@ -112,7 +112,7 @@ def add_gene_product_info(df, output_path, organism_name):
     
     return df
 
- def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
+def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property:str, out_dir:str):
     """
     Makes a metadata table. Each locus_tag has a boolean value for a property.    
 
