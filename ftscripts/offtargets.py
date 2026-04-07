@@ -474,7 +474,8 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                     'alntmscore_foldseek': None,
                     'rmsd_foldseek': None,
                     'prob_foldseek': None,
-                    'pident_foldseek': None
+                    'pident_foldseek': None,
+                    'evalue_foldseek': None
                 }
                 print(f'  {locus_tag}: Foldseek search failed, no results')
                 continue
@@ -496,12 +497,13 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                     'alntmscore_foldseek': None,
                     'rmsd_foldseek': None,
                     'prob_foldseek': None,
-                    'pident_foldseek': None
+                    'pident_foldseek': None,
+                    'evalue_foldseek': None
                 }
                 continue
             
             try:
-                df = pd.read_csv(result_file, sep='\t', usecols=['query', 'target', 'alnlen', 'qcov', 'tcov', 'lddt', 'qtmscore', 'ttmscore', 'alntmscore', 'rmsd', 'prob', 'pident'])
+                df = pd.read_csv(result_file, sep='\t', usecols=['query', 'target', 'alnlen', 'qcov', 'tcov', 'lddt', 'qtmscore', 'ttmscore', 'alntmscore', 'rmsd', 'prob', 'pident', 'evalue'])
                 
                 if not df.empty:
                     # Sort by TM score (max of query and target TM-scores)
@@ -520,7 +522,8 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                         'alntmscore_foldseek': best_row['alntmscore'],
                         'rmsd_foldseek': best_row['rmsd'],
                         'prob_foldseek': best_row['prob'],
-                        'pident_foldseek': best_row['pident']
+                        'pident_foldseek': best_row['pident'],
+                        'evalue_foldseek': best_row['evalue']
                     }
                     print(f'  {locus_tag}: Best match = {best_row["target"]} (TM-score={best_row["max_tmscore"]:.3f})')
                 else:
@@ -537,7 +540,8 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                         'alntmscore_foldseek': None,
                         'rmsd_foldseek': None,
                         'prob_foldseek': None,
-                        'pident_foldseek': None
+                        'pident_foldseek': None,
+                        'evalue_foldseek': None
                     }
                     print(f'  {locus_tag}: No hits found in foldseek results')
                     
@@ -555,7 +559,8 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                     'alntmscore_foldseek': None,
                     'rmsd_foldseek': None,
                     'prob_foldseek': None,
-                    'pident_foldseek': None
+                    'pident_foldseek': None,
+                    'evalue_foldseek': None
                 }
         
         # Save results
@@ -611,7 +616,8 @@ def merge_foldseek_data (output_path, organism_name):
                     'alntmscore': foldseek_data.get('alntmscore_foldseek'),
                     'rmsd': foldseek_data.get('rmsd_foldseek'),
                     'prob': foldseek_data.get('prob_foldseek'),
-                    'pident': foldseek_data.get('pident_foldseek')
+                    'pident': foldseek_data.get('pident_foldseek'),
+                    'evalue': foldseek_data.get('evalue_foldseek')
                 }
 
             files.dict_to_json(offtargets_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)
@@ -654,7 +660,7 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             if locus_tag in mapped_dict:
                 rows.append(mapped_dict[locus_tag])
             else:
-                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'alnlen': None, 'qcov': None, 'tcov': None, 'lddt': None, 'qtmscore': None, 'ttmscore': None, 'alntmscore': None, 'rmsd': None, 'prob': None, 'pident': None })
+                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'alnlen': None, 'qcov': None, 'tcov': None, 'lddt': None, 'qtmscore': None, 'ttmscore': None, 'alntmscore': None, 'rmsd': None, 'prob': None, 'pident': None, 'evalue': None })
 
         final_foldseek_df = pd.DataFrame(rows).rename(columns={
             'query_structure': 'FS_query_structure',
@@ -669,7 +675,8 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             'alntmscore': 'FS_alntmscore',
             'rmsd': 'FS_rmsd',
             'prob': 'FS_prob',
-            'pident': 'FS_pident'
+            'pident': 'FS_pident',
+            'evalue': 'FS_evalue'
         })
 
         final_foldseek_df.to_csv(final_foldseek_file, sep='\t', index=False)
