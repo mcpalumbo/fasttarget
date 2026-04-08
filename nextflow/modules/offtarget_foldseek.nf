@@ -29,10 +29,12 @@ process OFFTARGET_FOLDSEEK {
     val output_path
     val databases_path
     val container_engine
+    val colabfold_all_models
     
     output:
     path "${organism_name}/offtarget/foldseek_results/", emit: foldseek_dir
     path "${organism_name}/offtarget/${organism_name}_final_foldseek_results.tsv", emit: foldseek_table, optional: true
+    path "${organism_name}/offtarget/${organism_name}_final_foldseek_colabfold_results.tsv", emit: foldseek_colab_table, optional: true
     val organism_name, emit: organism_name
     
     script:
@@ -115,6 +117,35 @@ final_foldseek_df = offtargets.final_foldseek_structure_table(
     '${organism_name}',
     mapped_dict_foldseek
 )
+
+if ${colabfold_all_models ? 'True' : 'False'}:
+    print('[5] Running Foldseek with ColabFold structures...')
+    foldseek_colab_mapping = offtargets.run_foldseek_human_colabfold_structures(
+        '${databases_path}',
+        work_dir,
+        '${organism_name}',
+        container_engine='${container_engine}'
+    )
+
+    print('[6] Parsing Foldseek ColabFold results...')
+    results_foldseek_colab_dict = offtargets.foldseek_human_colabfold_parser(
+        work_dir,
+        '${organism_name}',
+        foldseek_colab_mapping
+    )
+
+    print('[7] Merging Foldseek ColabFold data...')
+    mapped_dict_foldseek_colab = offtargets.merge_foldseek_colabfold_data(
+        work_dir,
+        '${organism_name}'
+    )
+
+    print('[8] Creating final ColabFold structure table...')
+    final_foldseek_colab_df = offtargets.final_foldseek_colabfold_structure_table(
+        work_dir,
+        '${organism_name}',
+        mapped_dict_foldseek_colab
+    )
 
 print(f'Foldseek offtarget analysis completed')
 print(f'  - Structures analyzed: {len(final_foldseek_df)}')

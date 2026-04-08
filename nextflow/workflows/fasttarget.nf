@@ -371,7 +371,8 @@ workflow FASTTARGET {
             organism_name,
             output_path,
             databases_path,
-            container_engine
+            container_engine,
+            colabfold_all_models
         )
     }
     
@@ -471,6 +472,7 @@ workflow FASTTARGET {
     }
     if (offtarget_enabled && foldseek_enabled && structures_enabled) {
         merge_tables_ch = merge_tables_ch.mix(OFFTARGET_FOLDSEEK.out.foldseek_table)
+        merge_tables_ch = merge_tables_ch.mix(OFFTARGET_FOLDSEEK.out.foldseek_colab_table)
     }
     if (deg_enabled) {
         merge_tables_ch = merge_tables_ch.mix(ESSENTIALITY_DEG.out.deg_table)

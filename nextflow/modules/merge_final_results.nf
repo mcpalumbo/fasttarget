@@ -161,6 +161,7 @@ known_tables = {
     'gut_microbiome_offtarget_norm.tsv': 'Microbiome normalized',
     'gut_microbiome_genomes_analyzed.tsv': 'Microbiome genomes',
     f'{organism_name}_final_foldseek_results.tsv': 'Foldseek offtarget',
+    f'{organism_name}_final_foldseek_colabfold_results.tsv': 'Foldseek offtarget ColabFold',
     'hit_in_deg.tsv': 'DEG essentiality',
     'psortb_localization.tsv': 'PSortB localization',
 }
