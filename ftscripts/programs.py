@@ -949,7 +949,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
             else:
                 logging.error(f"Directory '{DB_dir}' not found. Please make the DB again.")
         else:
-            logging.error(f"Foldseek results file '{results_tsv_file}' already exists.")
+            logging.info(f"Foldseek results file '{results_tsv_file}' already exists.")
     else:
         logging.error(f"Directory '{structures_dir}' not found.")
 
