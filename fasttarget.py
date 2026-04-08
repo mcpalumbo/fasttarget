@@ -386,6 +386,32 @@ def offtarget_module(config, databases_path, output_path, cpus):
                     mapped_dict_foldseek = offtargets.merge_foldseek_data (output_path, organism_name)
                     final_foldseek_df = offtargets.final_foldseek_structure_table (output_path, organism_name, mapped_dict_foldseek)
                     module_tables.append(final_foldseek_df)
+
+                    if config.colabfold and config.colabfold.get('colabfold_run_all', False):
+                        foldseek_colab_mapping = offtargets.run_foldseek_human_colabfold_structures(
+                            databases_path,
+                            output_path,
+                            organism_name,
+                            container_engine=config.container_engine
+                        )
+                        logging.info('Foldseek human offtarget search for ColabFold structures finished')
+
+                        results_foldseek_colab_dict = offtargets.foldseek_human_colabfold_parser(
+                            output_path,
+                            organism_name,
+                            foldseek_colab_mapping
+                        )
+                        mapped_dict_foldseek_colab = offtargets.merge_foldseek_colabfold_data(
+                            output_path,
+                            organism_name
+                        )
+                        final_foldseek_colab_df = offtargets.final_foldseek_colabfold_structure_table(
+                            output_path,
+                            organism_name,
+                            mapped_dict_foldseek_colab
+                        )
+                        module_tables.append(final_foldseek_colab_df)
+
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
@@ -736,4 +762,3 @@ if __name__ == "__main__":
     
 
     main(config, args.databases_path, args.output_path)
-
