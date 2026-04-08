@@ -4,6 +4,7 @@ import urllib.request
 from tqdm import tqdm
 import pandas as pd
 import re
+import csv
 import tempfile
 from Bio import SeqIO
 import multiprocessing
@@ -1477,7 +1478,7 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
             if not summary_df.empty:
                 # Ensure structure_id is stored as string to prevent scientific notation issues
                 summary_df['structure_id'] = summary_df['structure_id'].astype(str)
-                summary_df.to_csv(summary_table_path, sep='\t', index=False)
+                summary_df.to_csv(summary_table_path, sep='\t', index=False, quoting=csv.QUOTE_NONNUMERIC)
             else:
                 print(f'No structure data found for {locus_tag}')
 
@@ -1742,7 +1743,7 @@ def download_single_structure(structure_dir, locus_tag):
 
             if drop_idx:
                 summary_df = summary_df.drop(index=drop_idx)
-                summary_df.to_csv(summary_table_path, sep='\t', index=False)
+                summary_df.to_csv(summary_table_path, sep='\t', index=False, quoting=csv.QUOTE_NONNUMERIC)
                 print(f'Updated structure summary table for {locus_tag} after removing unavailable AlphaFold entries.')
 
     else:
@@ -2413,7 +2414,13 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
 
     if os.path.exists(summary_table_path):
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
-        summary_df = pd.read_csv(summary_table_path, sep='\t', keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+        summary_df = pd.read_csv(
+            summary_table_path,
+            sep='\t',
+            dtype={'structure_id': str, 'uniprot_id': str, 'chain': str},
+            keep_default_na=False,
+            na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
+        )
         has_reference = (summary_df['is_reference'] == True).any()
         if has_reference:
             colabfold_is_reference = False  # Another structure is already reference
@@ -2438,7 +2445,13 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
     if os.path.exists(summary_table_path):
         # Read existing table
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
-        summary_df = pd.read_csv(summary_table_path, sep='\t', keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+        summary_df = pd.read_csv(
+            summary_table_path,
+            sep='\t',
+            dtype={'structure_id': str, 'uniprot_id': str, 'chain': str},
+            keep_default_na=False,
+            na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
+        )
         
         # Check for existing ColabFold entry
         existing_cf = summary_df[
@@ -2459,7 +2472,7 @@ def update_summary_table_with_colabfold(locus_dir, locus_tag, uniprot_id, model_
         summary_df = pd.DataFrame([colabfold_entry])
     
     # Save updated table
-    summary_df.to_csv(summary_table_path, sep='\t', index=False)
+    summary_df.to_csv(summary_table_path, sep='\t', index=False, quoting=csv.QUOTE_NONNUMERIC)
     logging.info(f"Updated summary table for {locus_tag} with ColabFold model (pLDDT: {plddt_score})")
 
 
