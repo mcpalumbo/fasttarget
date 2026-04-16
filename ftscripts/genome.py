@@ -38,6 +38,7 @@ def gbk_to_gff3(gbk_file, gff_dir):
         """
 
         
+        fixed_records = []
         with open(input_file, "r") as in_handle, open(output_file, "w") as out_handle:
             for record in SeqIO.parse(in_handle, "genbank"):
                 for feature in record.features:
@@ -49,8 +50,8 @@ def gbk_to_gff3(gbk_file, gff_dir):
                     if feature.location:
                         # Clean the location by recreating the FeatureLocation object
                         start_pos = ExactPosition(int(str(feature.location.start).replace("<","").replace(">","")))
-                        end_pos = ExactPosition(int(str(feature.location.end).replace("<","").replace(">","")))                         
-                        cleaned_location =  FeatureLocation(start_pos, end_pos, feature.location.strand)
+                        end_pos = ExactPosition(int(str(feature.location.end).replace("<","").replace(">","")))
+                        cleaned_location = FeatureLocation(start_pos, end_pos, feature.location.strand)
                         feature.location = cleaned_location
                     if "codon_start" in feature.qualifiers:
                         try:
@@ -59,8 +60,9 @@ def gbk_to_gff3(gbk_file, gff_dir):
                         except ValueError:
                             # Replace invalid codon_start with default value (1)
                             feature.qualifiers["codon_start"][0] = "1"
-            
-            SeqIO.write(record, out_handle, "genbank")
+                fixed_records.append(record)
+
+            SeqIO.write(fixed_records, out_handle, "genbank")
             print(f"Fixed GenBank file saved to {output_file}")
 
     def write_gff3(gff_file, gb_records):
@@ -795,4 +797,3 @@ def localization_prediction(output_path, organism_name, organism_type, container
         return psort_df
         
     
-

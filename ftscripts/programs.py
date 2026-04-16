@@ -680,35 +680,42 @@ def run_genbank2gff3(input, output, container_engine='docker'):
     image_name = 'mcpalumbo/bioperl:1'
     command = f'bp_genbank2gff3 /data/{os.path.basename(input)}'
 
-    if files.file_check(input):
-        try:
-            run_container(
-                work_dir=work_dir,
-                bind_dir=bind_dir,
-                image_name=image_name,
-                command=command,
-                container_engine=container_engine
-            )
-            # Files genomes
-            file_output = f'{input}.gff'
-            file_final_name = os.path.splitext(input)[0]+'.gff'
-            # File for roary
-            file_roary_name = os.path.basename(input).replace('.gbk', '.gff')
-            file_final_roary = os.path.join(output, file_roary_name)
-
-            if not os.path.exists(output):
-                os.makedirs(output, exist_ok=True)
-            if os.path.exists(file_output):
-                print('bp_genbank2gff3.pl executed successfully.')
-                shutil.move(file_output, file_final_name)
-                if not os.path.exists(file_final_roary):
-                    shutil.copy(file_final_name, file_final_roary)
-                    print(f'Gff3 file saved in {output}')
-
-        except Exception as e:
-            logging.exception(f'Error running bp_genbank2gff3.pl: {e}')
-    else:
+    if not files.file_check(input):
         logging.error(f"GenBank file '{input}' not found.")
+        raise FileNotFoundError(f"GenBank file '{input}' not found.")
+
+    try:
+        run_container(
+            work_dir=work_dir,
+            bind_dir=bind_dir,
+            image_name=image_name,
+            command=command,
+            container_engine=container_engine
+        )
+
+        file_output = f'{input}.gff'
+        file_final_name = os.path.splitext(input)[0] + '.gff'
+        file_roary_name = os.path.basename(input).replace('.gbk', '.gff')
+        file_final_roary = os.path.join(output, file_roary_name)
+
+        if not os.path.exists(output):
+            os.makedirs(output, exist_ok=True)
+
+        if not os.path.exists(file_output):
+            raise FileNotFoundError(
+                f"bp_genbank2gff3 completed but did not create expected file '{file_output}'."
+            )
+
+        print('bp_genbank2gff3.pl executed successfully.')
+        shutil.move(file_output, file_final_name)
+
+        if not os.path.exists(file_final_roary):
+            shutil.copy(file_final_name, file_final_roary)
+            print(f'Gff3 file saved in {output}')
+
+    except Exception as e:
+        logging.exception(f'Error running bp_genbank2gff3.pl: {e}')
+        raise
 
 def run_roary(work_dir, input, output, core_threshold=99, identity=95, cluster_number=50000,cpus=multiprocessing.cpu_count(), container_engine='docker'):
 
