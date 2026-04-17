@@ -466,13 +466,16 @@ def core_files(output_path, organism_name, container_engine='docker', filter_by_
             print(f'Genome {i} from {len(dirs)}: {dir_name}')
             gbff_pattern = os.path.join(root, dir_name, "*.gbff")
             gbff_files = glob.glob(gbff_pattern)
+            gbk_pattern = os.path.join(root, dir_name, "*.gbk")
+            gbk_files = glob.glob(gbk_pattern)
+            genome_files = gbff_files if len(gbff_files) == 1 else gbk_files
 
             gff_pattern = os.path.join(root, dir_name, "*.gff")
             gff_files = glob.glob(gff_pattern)
     
-            if not len(gbff_files) > 1:
+            if len(genome_files) == 1:
 
-                locus_list, strain, host = gbk_locus_strain_host(gbff_files[0])
+                locus_list, strain, host = gbk_locus_strain_host(genome_files[0])
 
                 # Check if genome should be included based on filtering criteria
                 include_genome = not set(locus_list) & set(ref_locus_list) and strain != ref_strain
@@ -491,7 +494,10 @@ def core_files(output_path, organism_name, container_engine='docker', filter_by_
                     new_gff = os.path.join(gff_dir, f'{assembly_id}.gff')
 
                     if not os.path.exists(new_gbk):
-                        shutil.move(gbff_files[0], new_gbk)
+                        if len(gbff_files) == 1:
+                            shutil.move(gbff_files[0], new_gbk)
+                        else:
+                            shutil.copy(genome_files[0], new_gbk)
                     else:
                         print(f'{new_gbk} already exists.')
 
@@ -506,14 +512,21 @@ def core_files(output_path, organism_name, container_engine='docker', filter_by_
                             print(f"Processed {assembly_id}.gff")
                         except Exception as e:
                             logging.exception(f"Error in run_genbank2gff3: {e}")
-                            add_sequences_to_gff3(gff_files[0], new_gbk)
-                            shutil.copy(gff_files[0], new_gff)                 
-                            print(f"Processed {assembly_id}.gff")
+                            if len(gff_files) == 1:
+                                add_sequences_to_gff3(gff_files[0], new_gbk)
+                                shutil.copy(gff_files[0], new_gff)
+                                print(f"Processed {assembly_id}.gff")
+                            else:
+                                logging.error(
+                                    f"Expected exactly one GFF fallback file for {assembly_id}, found {len(gff_files)}."
+                                )
                     else:
                         print(f"{assembly_id}.gff already exists.")
                         shutil.rmtree(os.path.join(root, dir_name))
                 else:
                     shutil.rmtree(os.path.join(root, dir_name))
+            elif len(gbff_files) == 0 and len(gbk_files) == 0:
+                logging.error(f"No .gbff or .gbk file found for {assembly_id} in {os.path.join(root, dir_name)}")
             else:
                 print(f'More than one genome files.')
 
