@@ -8,6 +8,44 @@ import glob
 from tqdm import tqdm
 import logging
 
+EXPECTED_MICROBIOME_GENOMES = 4744
+
+
+def _microbiome_catalogue_status(species_path):
+    genome_dirs = {
+        entry for entry in os.listdir(species_path)
+        if os.path.isdir(os.path.join(species_path, entry))
+    }
+    indexed_genomes = {
+        genome for genome in genome_dirs
+        if os.path.isfile(os.path.join(species_path, genome, f"{genome}_DB.dmnd"))
+    }
+    return genome_dirs, indexed_genomes
+
+
+def _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes):
+    if len(genome_dirs) != EXPECTED_MICROBIOME_GENOMES:
+        logging.warning(
+            "The microbiome catalogue contains %d genome directories; %d were expected.",
+            len(genome_dirs),
+            EXPECTED_MICROBIOME_GENOMES,
+        )
+        print(
+            f"Warning: The microbiome catalogue contains {len(genome_dirs)} genome "
+            f"directories; {EXPECTED_MICROBIOME_GENOMES} were expected."
+        )
+    if len(indexed_genomes) != EXPECTED_MICROBIOME_GENOMES:
+        logging.warning(
+            "Only %d of %d expected microbiome genomes have a DIAMOND index.",
+            len(indexed_genomes),
+            EXPECTED_MICROBIOME_GENOMES,
+        )
+        print(
+            f"Warning: Only {len(indexed_genomes)} of {EXPECTED_MICROBIOME_GENOMES} "
+            "expected microbiome genomes have a DIAMOND index."
+        )
+
+
 def human_offtarget_blast (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 
     """
@@ -68,12 +106,16 @@ def microbiome_offtarget_blast_species (databases_path, output_path, organism_na
     offtarget_path = os.path.join(organism_path, "offtarget", "species_blast_results")
     os.makedirs(offtarget_path, exist_ok=True)
 
-    # Iterate over each genome (subfolder with its own indexed faa)
-    for genome_dir in sorted(os.listdir(species_databases_path)):
+    genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_databases_path)
+    _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes)
+
+    if not indexed_genomes:
+        raise RuntimeError(
+            f"No indexed microbiome genomes were found in {species_databases_path}."
+        )
+
+    for genome_dir in sorted(indexed_genomes):
         genome_path = os.path.join(species_databases_path, genome_dir)
-        
-        if not os.path.isdir(genome_path):
-            continue
 
         # Output file for this genome
         blast_output_path = os.path.join(offtarget_path, f"{genome_dir}_offtarget.tsv")
@@ -194,27 +236,53 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
 
     offtarget_path = os.path.join(output_path, organism_name, "offtarget", "species_blast_results")
 
-    protein_hits = {}  # dict: protein_id -> set of genomes
-    genome_files = [f for f in os.listdir(offtarget_path) if f.endswith("_offtarget.tsv")]
-    total_outputs = len(genome_files)
-
     species_path = os.path.join(databases_path, "species_catalogue")
-    total_genomes = len([d for d in os.listdir(species_path) if os.path.isdir(os.path.join(species_path, d))])
+    genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_path)
+    _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes)
 
-    if total_outputs == 0:
-        print(f"Error: No microbiome species BLAST results found in {offtarget_path}. Please run the microbiome_offtarget_blast_species function first.")
-        return pd.DataFrame()
+    genome_files = {
+        f.replace("_offtarget.tsv", ""): f
+        for f in os.listdir(offtarget_path)
+        if f.endswith("_offtarget.tsv")
+    }
+    searched_genomes = sorted(indexed_genomes.intersection(genome_files))
 
-    if total_outputs < total_genomes:                                                                   
-        print(f"Warning: Only {total_outputs} out of {total_genomes} microbiome species BLAST results found in {offtarget_path}.")
-        print("Some genomes may be missing or the process was interrupted.")
-        print("Proceeding with available results...")
+    if not searched_genomes:
+        raise RuntimeError(
+            f"No completed microbiome searches were found in {offtarget_path}. "
+            "Run microbiome_offtarget_blast_species first."
+        )
+
+    if len(searched_genomes) < len(indexed_genomes):
+        print(
+            f"Warning: Only {len(searched_genomes)} of {len(indexed_genomes)} indexed "
+            "microbiome genomes have search results."
+        )
+    if len(searched_genomes) < EXPECTED_MICROBIOME_GENOMES:
+        print(
+            f"Warning: Microbiome scores will be normalized using the "
+            f"{len(searched_genomes)} genomes actually analyzed instead of the "
+            f"{EXPECTED_MICROBIOME_GENOMES} genomes expected."
+        )
 
     microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget_counts.tsv')
     microbiome_results_norm = os.path.join(offtarget_path, 'gut_microbiome_offtarget_norm.tsv')
     microbiome_results_genomes = os.path.join(offtarget_path, 'gut_microbiome_genomes_analyzed.tsv')
 
-    if files.file_check(microbiome_results):
+    cached_results_valid = False
+    if all(files.file_check(path) for path in (
+        microbiome_results,
+        microbiome_results_norm,
+        microbiome_results_genomes,
+    )):
+        cached_genomes = pd.read_csv(microbiome_results_genomes, sep='\t', header=0)
+        analyzed_values = cached_genomes["gut_microbiome_genomes_analyzed"].dropna().unique()
+        cached_results_valid = (
+            len(analyzed_values) == 1
+            and analyzed_values[0] == len(searched_genomes)
+        )
+
+    if cached_results_valid:
         print('Microbiome species offtarget analysis already done, output file found')
         print(microbiome_results)
         df_hit_totals = pd.read_csv(microbiome_results, sep='\t', header=0)
@@ -222,11 +290,20 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         df_total_genomes = pd.read_csv(microbiome_results_genomes, sep='\t', header=0)
 
     else:
+        if files.file_check(microbiome_results):
+            print(
+                "Warning: Cached microbiome summaries use a different denominator "
+                "and will be recalculated."
+            )
         print(f"Parsing microbiome species BLAST results...")
-        print(f"Total genomes in species catalogue: {total_genomes}")
+        print(f"Expected genomes: {EXPECTED_MICROBIOME_GENOMES}")
+        print(f"Genome directories found: {len(genome_dirs)}")
+        print(f"Indexed genomes found: {len(indexed_genomes)}")
+        print(f"Genomes analyzed: {len(searched_genomes)}")
 
-        for file in tqdm(sorted(genome_files), desc="Parsing microbiome species BLAST results"):
-            genome_name = file.replace("_offtarget.tsv", "")
+        protein_hits = {}
+        for genome_name in tqdm(searched_genomes, desc="Parsing microbiome species BLAST results"):
+            file = genome_files[genome_name]
             blast_output_path = os.path.join(offtarget_path, file)
 
             if os.stat(blast_output_path).st_size == 0:
@@ -249,9 +326,9 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         # Convert sets to sorted lists
         protein_hits = {prot: sorted(list(genomes)) for prot, genomes in protein_hits.items()}
 
-        # Normalized counts: number of genomes with hits / total genomes
+        analyzed_genomes = len(searched_genomes)
         protein_hit_counts = {
-            prot: len(genomes) / total_genomes if total_genomes > 0 else 0
+            prot: len(genomes) / analyzed_genomes
             for prot, genomes in protein_hits.items()
         }
 
@@ -263,7 +340,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
 
         # Total number of genomes analyzed for each protein
         protein_total_genomes = {
-            prot: total_genomes
+            prot: analyzed_genomes
             for prot in protein_hits.keys()
         }
 
@@ -279,7 +356,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
                                                 'gut_microbiome_offtarget_counts', offtarget_path, 0)
 
         df_total_genomes = metadata.metadata_table_with_values(output_path, organism_name, protein_total_genomes,
-                                                'gut_microbiome_genomes_analyzed', offtarget_path, total_genomes)
+                                                'gut_microbiome_genomes_analyzed', offtarget_path, analyzed_genomes)
 
     return df_microbiome_norm, df_hit_totals, df_total_genomes
 
