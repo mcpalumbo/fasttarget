@@ -157,9 +157,6 @@ known_tables = {
     'core_roary.tsv': 'Roary',
     'core_corecruncher.tsv': 'CoreCruncher',
     'human_offtarget.tsv': 'Human offtarget',
-    'gut_microbiome_offtarget_counts.tsv': 'Microbiome counts',
-    'gut_microbiome_offtarget_norm.tsv': 'Microbiome normalized',
-    'gut_microbiome_genomes_analyzed.tsv': 'Microbiome genomes',
     f'{organism_name}_final_foldseek_results.tsv': 'Foldseek offtarget',
     f'{organism_name}_final_foldseek_colabfold_results.tsv': 'Foldseek offtarget ColabFold',
     'hit_in_deg.tsv': 'DEG essentiality',
@@ -185,10 +182,21 @@ for table_path in table_files:
             tables.append(meta_df)
         continue
 
-    if basename in known_tables:
-        df = load_table(table_path, known_tables[basename])
+    table_name = known_tables.get(basename)
+    if (
+        table_name is None
+        and (
+            basename.endswith('_offtarget_counts.tsv')
+            or basename.endswith('_offtarget_norm.tsv')
+            or basename.endswith('_genomes_analyzed.tsv')
+        )
+    ):
+        table_name = f'Microbiome: {basename}'
+
+    if table_name is not None:
+        df = load_table(table_path, table_name)
         if df is not None:
-            df = filter_to_genome_genes(df, known_tables[basename], allowed_genes)
+            df = filter_to_genome_genes(df, table_name, allowed_genes)
             if basename == f'{organism_name}_gene_name.tsv':
                 base_table = df
             tables.append(df)

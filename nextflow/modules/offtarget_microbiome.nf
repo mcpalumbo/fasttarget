@@ -23,15 +23,14 @@ process OFFTARGET_MICROBIOME {
     val organism_name
     val output_path
     val databases_path
-    val microbiome_identity_filter
-    val microbiome_coverage_filter
+    val microbiome_catalogues_json
     val cpus
     
     output:
-    path "${organism_name}/offtarget/species_blast_results/", emit: species_dir
-    path "${organism_name}/offtarget/species_blast_results/gut_microbiome_offtarget_norm.tsv", emit: normalized_table
-    path "${organism_name}/offtarget/species_blast_results/gut_microbiome_offtarget_counts.tsv", emit: counts_table
-    path "${organism_name}/offtarget/species_blast_results/gut_microbiome_genomes_analyzed.tsv", emit: genomes_analyzed
+    path "${organism_name}/offtarget/microbiomes/", emit: microbiomes_dir
+    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_offtarget_norm.tsv", emit: normalized_tables
+    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_offtarget_counts.tsv", emit: counts_tables
+    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_genomes_analyzed.tsv", emit: genomes_analyzed_tables
     path "${organism_name}/offtarget/**", emit: all_microbiome_offtarget
     val organism_name, emit: organism_name
     
@@ -41,6 +40,7 @@ process OFFTARGET_MICROBIOME {
     
 import sys
 import os
+import json
 
 # Add parent directory to path to import ftscripts
 sys.path.insert(0, '${base_path}')
@@ -51,9 +51,14 @@ print('=' * 80)
 print('MICROBIOME OFFTARGET ANALYSIS'.center(80))
 print('=' * 80)
 
-print('\\nParameters:')
-print(f'  - Identity filter: ${microbiome_identity_filter}%')
-print(f'  - Coverage filter: ${microbiome_coverage_filter}%')
+catalogues = json.loads('''${microbiome_catalogues_json}''')
+
+print('\\nCatalogues:')
+for catalogue in catalogues:
+    print(
+        f"  - {catalogue['name']}: identity={catalogue['identity_filter']}%, "
+        f"coverage={catalogue['coverage_filter']}%"
+    )
 print(f'  - CPUs: ${cpus}')
 
 # Create organism directory structure in work dir
@@ -76,30 +81,44 @@ for genome_file in os.listdir('.'):
             shutil.copy2(src, dst)
             print(f'  Copied: {genome_file}')
 
-print('[1] Running BLASTP searches against microbiome species...')
-offtargets.microbiome_offtarget_blast_species('${databases_path}', work_dir, '${organism_name}', ${cpus})
-print('  ✓ BLAST searches completed')
+for catalogue in catalogues:
+    name = catalogue['name']
+    identity = float(catalogue['identity_filter'])
+    coverage = float(catalogue['coverage_filter'])
+    print(f'[1] Running DIAMOND searches against {name}...')
+    offtargets.microbiome_offtarget_blast_species(
+        '${databases_path}',
+        work_dir,
+        '${organism_name}',
+        name,
+        identity,
+        coverage,
+        ${cpus}
+    )
+    print(f'[2] Parsing {name} results...')
+    result_tables = offtargets.microbiome_species_parse(
+        '${databases_path}',
+        work_dir,
+        '${organism_name}',
+        name,
+        identity,
+        coverage
+    )
+    print(f'  - Genes analyzed: {len(result_tables[0])}')
 
-print('[2] Parsing and analyzing results...')
-df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse('${databases_path}', work_dir, '${organism_name}', ${microbiome_identity_filter}, ${microbiome_coverage_filter})
-
-print(f'Microbiome offtarget analysis completed')
-print(f'  - Genes analyzed: {len(df_microbiome_norm)}')
-print(f'  - Genomes analyzed: {len(df_microbiome_total_genomes)}')
+print('Microbiome offtarget analysis completed')
 """
     
     stub:
     """
-    mkdir -p offtarget/species_blast_results
+    mkdir -p ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results
     
     # Create dummy species results
-    echo -e "gene\tmicrobiome_offtarget_norm\ngene1\t0.15" > offtarget/species_blast_results/gut_microbiome_offtarget_norm.tsv
-    echo -e "gene\tmicrobiome_offtarget_count\ngene1\t5" > offtarget/species_blast_results/gut_microbiome_offtarget_counts.tsv
-    echo -e "genome_id\tgenome_name\ngut_genome_1\tBacteroides" > offtarget/species_blast_results/gut_microbiome_genomes_analyzed.tsv
+    echo -e "gene\thuman_gut_offtarget_norm\ngene1\t0.15" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_offtarget_norm.tsv
+    echo -e "gene\thuman_gut_offtarget_counts\ngene1\t5" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_offtarget_counts.tsv
+    echo -e "gene\thuman_gut_genomes_analyzed\ngene1\t4744" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_genomes_analyzed.tsv
     
     # Create a dummy individual result
-    echo -e "qseqid\tsseqid\tpident\tqcovs\ngene1\tprotein1\t85.5\t90.0" > offtarget/species_blast_results/MGYG000000001_offtarget.tsv
-    
     echo "STUB: Microbiome offtarget for ${organism_name}"
     """
 }

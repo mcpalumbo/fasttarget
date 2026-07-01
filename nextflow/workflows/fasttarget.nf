@@ -346,16 +346,19 @@ workflow FASTTARGET {
     
     // Microbiome offtarget
     if (offtarget_enabled && microbiome_enabled) {
-        def microbiome_identity = config.offtarget.microbiome_identity_filter ?: 40
-        def microbiome_coverage = config.offtarget.microbiome_coverage_filter ?: 70
+        def microbiome_catalogues = config.offtarget.microbiome_catalogues ?: [[
+            name: 'human-gut',
+            identity_filter: config.offtarget.microbiome_identity_filter ?: 40,
+            coverage_filter: config.offtarget.microbiome_coverage_filter ?: 70
+        ]]
+        def microbiome_catalogues_json = groovy.json.JsonOutput.toJson(microbiome_catalogues)
         
         OFFTARGET_MICROBIOME(
             GENOME_PREPARATION.out.all_genome_files,
             organism_name,
             output_path,
             databases_path,
-            microbiome_identity,
-            microbiome_coverage,
+            microbiome_catalogues_json,
             cpus
         )
     }
@@ -466,9 +469,9 @@ workflow FASTTARGET {
     }
     if (offtarget_enabled && microbiome_enabled) {
         merge_tables_ch = merge_tables_ch
-            .mix(OFFTARGET_MICROBIOME.out.counts_table)
-            .mix(OFFTARGET_MICROBIOME.out.normalized_table)
-            .mix(OFFTARGET_MICROBIOME.out.genomes_analyzed)
+            .mix(OFFTARGET_MICROBIOME.out.counts_tables.flatten())
+            .mix(OFFTARGET_MICROBIOME.out.normalized_tables.flatten())
+            .mix(OFFTARGET_MICROBIOME.out.genomes_analyzed_tables.flatten())
     }
     if (offtarget_enabled && foldseek_enabled && structures_enabled) {
         merge_tables_ch = merge_tables_ch.mix(OFFTARGET_FOLDSEEK.out.foldseek_table)
