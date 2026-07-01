@@ -353,7 +353,16 @@ def offtarget_module(config, databases_path, output_path, cpus):
 
                     # Run blastp search
                     print('----- Blastp search -----')
-                    offtargets.microbiome_offtarget_blast_species(databases_path, output_path, organism_name, cpus)
+                    microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
+                    microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
+                    offtargets.microbiome_offtarget_blast_species(
+                        databases_path,
+                        output_path,
+                        organism_name,
+                        microbiome_identity_filter,
+                        microbiome_coverage_filter,
+                        cpus,
+                    )
                     logging.info('Microbiome offtarget blast search finished')
 
                     # Parse results
