@@ -25,7 +25,8 @@ cpus: null
 
 # ---- Container Engine ----
 # container_engine: Choose 'docker' or 'singularity' for running containerized tools.
-# Make sure to run the appropriate setup script (setup_docker.sh or setup_singularity.sh) before using.
+# Make sure to run the appropriate setup script (setup_docker.sh or setup_containers.sh) before using.
+# Valid options: docker, singularity, apptainer
 container_engine: docker
 
 # ---- Metabolism ----
@@ -76,6 +77,14 @@ core:
   min_identity: 95
   # min_core_freq: Minimum frequency for a gene to be considered core (0-100). Example: 99 means gene must be present in 99% of genomes.
   min_core_freq: 99
+  # accession_file: (Optional) Path to a text file with one NCBI assembly accession per line.
+  # If provided, only these specific genomes will be downloaded instead of all genomes from tax_id.
+  # Leave empty, set to null, or comment out to download all genomes from tax_id.
+  # Example file format (one accession per line):
+  #   GCF_000006945.2
+  #   GCF_000027345.1
+  #   GCF_000319655.2
+  accession_file: null
 
 # ---- Offtarget ----
 offtarget:
