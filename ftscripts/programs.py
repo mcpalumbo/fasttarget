@@ -607,7 +607,18 @@ def run_makeblastdb(input, output, title, dbtype, taxid=None):
         logging.error(f"Blast database file '{input}' not found.")
 
 
-def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6',cpus=multiprocessing.cpu_count()):
+def run_diamond_blastp(
+    blastdb,
+    query,
+    output,
+    evalue='1e-5',
+    max_hsps='1',
+    outfmt='6',
+    cpus=multiprocessing.cpu_count(),
+    identity=None,
+    query_cover=None,
+    max_target_seqs=None,
+):
 
     """
     Runs Protein-Protein Diamond BLAST command line.
@@ -619,6 +630,9 @@ def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outf
     :param max_hsps: Maximum number of HSPs (alignments) to keep for any single query-subject pair. Default 1.
     :param outfmt: Output format. Default 6 (tabular).
     :param cpus: Number of threads (CPUs) to use in blast search.
+    :param identity: Minimum percentage identity reported by DIAMOND.
+    :param query_cover: Minimum query coverage percentage reported by DIAMOND.
+    :param max_target_seqs: Maximum number of target sequences reported per query.
     
     """
     if files.file_check(query):
@@ -628,6 +642,13 @@ def run_diamond_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outf
             '--evalue', str(evalue),
             '--max-hsps', str(max_hsps),
         ]
+
+        if identity is not None:
+            diamond_blastp_command.extend(['--id', str(identity)])
+        if query_cover is not None:
+            diamond_blastp_command.extend(['--query-cover', str(query_cover)])
+        if max_target_seqs is not None:
+            diamond_blastp_command.extend(['--max-target-seqs', str(max_target_seqs)])
         
         # Handle outfmt: split if it contains spaces (e.g., "6 qseqid sseqid...")
         outfmt_parts = str(outfmt).split()

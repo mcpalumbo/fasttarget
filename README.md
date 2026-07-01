@@ -376,8 +376,8 @@ The `config.yml` file is the **central configuration file** for this repository.
    - `offtarget.enabled`: Set to `True` to enable offtarget analysis.
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
    - `offtarget.microbiome`: Set to `True` to enable microbiome offtarget analysis.
-   - `offtarget.microbiome_identity_filter`: Filter value of % identity, only hits with higher values will be used. Recommended: `30-50`.
-   - `offtarget.microbiome_coverage_filter`: Filter value of query coverage, only hits with higher values will be used. Recommended: `50-80`.
+   - `offtarget.microbiome_identity_filter`: Minimum percentage identity; hits equal to or above this value are retained. Recommended: `30-50`.
+   - `offtarget.microbiome_coverage_filter`: Minimum query coverage; hits equal to or above this value are retained. Recommended: `50-80`.
    - `offtarget.foldseek_human`: Set to `True` to use Foldseek for structural comparison against human proteome. **Note:** Requires both `offtarget.enabled` AND `structures.enabled` to be `True`.
 
 9. **DEG Analysis:**

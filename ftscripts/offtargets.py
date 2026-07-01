@@ -175,7 +175,10 @@ def microbiome_offtarget_blast_species(
             output=temporary_output_path,
             evalue="1e-5",
             outfmt="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp",
-            cpus=cpus
+            cpus=cpus,
+            identity=identity_filter,
+            query_cover=coverage_filter,
+            max_target_seqs=1,
         )
         _validate_microbiome_blast_output(temporary_output_path)
         os.replace(temporary_output_path, blast_output_path)
@@ -267,8 +270,8 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
     :param output_path: Directory of the organism output.
     :param databases_path: Base path where MICROBIOME database is stored.
     :param organism_name: Name of the organism.
-    :param identity_filter: Percentage identity filter value. Keeps results above this value in the pident column.
-    :param coverage_filter: Query coverage filter value. Keeps results above this value in the qcovs column.
+    :param identity_filter: Minimum percentage identity accepted in the pident column.
+    :param coverage_filter: Minimum query coverage accepted in the qcovhsp column.
 
     Returns:
         - df_microbiome_norm: DataFrame with one row per protein and a column with normalized counts
@@ -329,8 +332,8 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         ]
 
         filtered_df = df[
-            (df["pident"] > identity_filter)
-            & (df["qcovhsp"] > coverage_filter)
+            (df["pident"] >= identity_filter)
+            & (df["qcovhsp"] >= coverage_filter)
         ]
         for qseqid in filtered_df["qseqid"].unique():
             protein_hits.setdefault(qseqid, set()).add(genome_name)
