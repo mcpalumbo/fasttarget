@@ -59,6 +59,8 @@ process MICROBIOME_SHARD_SEARCH {
     cache false
     cpus { threads_per_genome as int }
     maxForks params.microbiome_max_forks
+    memory params.microbiome_search_memory
+    time params.microbiome_search_time
     errorStrategy 'retry'
     maxRetries 2
 
@@ -160,7 +162,9 @@ process MICROBIOME_SHARD_SEARCH {
 
 process PARSE_MICROBIOME_RESULTS {
     tag "${catalogue_name}"
-    label 'low_resources'
+    label 'microbiome_parse'
+    memory params.microbiome_parse_memory
+    time params.microbiome_parse_time
     publishDir "${output_path}", mode: 'copy',
         pattern: "${organism_name}/offtarget/microbiomes/${catalogue_name}/**"
 

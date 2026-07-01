@@ -406,6 +406,7 @@ The `config.yml` file is the **central configuration file** for this repository.
    In standalone mode, `cpus: 16` and `microbiome_threads_per_genome: 4` run up to four representative-genome searches concurrently. CPU affinity limits are respected.
    Nextflow divides each catalogue into balanced tasks containing approximately 250 representative genomes. Configure this with `microbiome_genomes_per_job` in `nextflow/nextflow.config` or override it with `--microbiome_genomes_per_job`.
    Nextflow runs up to five microbiome tasks concurrently. Configure `microbiome_max_forks` in `nextflow/nextflow.config` or override it with `--microbiome_max_forks`.
+   Search tasks default to 4 GB and 48 hours (`microbiome_search_memory`, `microbiome_search_time`). Per-catalogue parsing defaults to 8 GB and 24 hours (`microbiome_parse_memory`, `microbiome_parse_time`). These values can be changed in `nextflow/nextflow.config` or overridden as command-line parameters.
    Tasks are balanced by total FASTA size and write validated per-genome TSV files directly to the persistent output directory, so retries and `-resume` only execute missing or invalid results.
    - `offtarget.foldseek_human`: Set to `True` to use Foldseek for structural comparison against human proteome. **Note:** Requires both `offtarget.enabled` AND `structures.enabled` to be `True`.
 
