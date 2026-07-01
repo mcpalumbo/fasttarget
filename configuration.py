@@ -260,6 +260,17 @@ def validate_config(config):
         offt = config['offtarget']
         
         if offt.get('microbiome'):
+            threads_per_genome = offt.get('microbiome_threads_per_genome', 4)
+            if (
+                isinstance(threads_per_genome, bool)
+                or not isinstance(threads_per_genome, int)
+                or threads_per_genome < 1
+            ):
+                errors.append(
+                    "offtarget.microbiome_threads_per_genome must be a "
+                    "positive integer"
+                )
+
             catalogue_configs = configured_catalogues(offt)
             if not isinstance(catalogue_configs, list) or not catalogue_configs:
                 errors.append("offtarget.microbiome_catalogues must be a non-empty list")
@@ -426,6 +437,10 @@ def print_config(config):
         print(f"Human Offtarget Enabled: {config.offtarget['human']}")
         print(f"Microbiome Offtarget Enabled: {config.offtarget['microbiome']}")
         if config.offtarget['microbiome']:
+            print(
+                "Microbiome Threads per Genome: "
+                f"{config.offtarget.get('microbiome_threads_per_genome', 4)}"
+            )
             for catalogue in configured_catalogues(config.offtarget):
                 print(
                     f"Microbiome Catalogue: {catalogue['name']} "

@@ -12,8 +12,18 @@ import multiprocessing
 import glob
 from tqdm import tqdm
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 MICROBIOME_BLAST_COLUMNS = 13
+
+
+@dataclass(frozen=True)
+class GenomeSearchResult:
+    genome_id: str
+    status: str
+    output_path: str
+    error: str = None
 
 
 def _format_filter_value(value):
@@ -46,6 +56,68 @@ def _microbiome_catalogue_status(species_path):
         if os.path.isfile(os.path.join(species_path, genome, f"{genome}_DB.dmnd"))
     }
     return genome_dirs, indexed_genomes
+
+
+def _available_cpus():
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return multiprocessing.cpu_count()
+
+
+def search_one_genome(
+    genome_id,
+    genome_db,
+    query_faa,
+    output_path,
+    identity_filter,
+    coverage_filter,
+    threads=4,
+):
+    """
+    Runs and validates one DIAMOND search against a representative genome.
+
+    :return: GenomeSearchResult with status success, skipped, or error.
+    """
+
+    temporary_output_path = f"{output_path}.tmp"
+
+    try:
+        if os.path.exists(output_path):
+            try:
+                _validate_microbiome_blast_output(output_path)
+                return GenomeSearchResult(genome_id, "skipped", output_path)
+            except ValueError:
+                os.remove(output_path)
+
+        if os.path.exists(temporary_output_path):
+            os.remove(temporary_output_path)
+
+        programs.run_diamond_blastp(
+            blastdb=genome_db,
+            query=query_faa,
+            output=temporary_output_path,
+            evalue="1e-5",
+            outfmt=(
+                "6 qseqid sseqid pident length mismatch gapopen qstart qend "
+                "sstart send evalue bitscore qcovhsp"
+            ),
+            cpus=threads,
+            identity=identity_filter,
+            query_cover=coverage_filter,
+            max_target_seqs=1,
+        )
+        _validate_microbiome_blast_output(temporary_output_path)
+        os.replace(temporary_output_path, output_path)
+        return GenomeSearchResult(genome_id, "success", output_path)
+    except Exception as error:
+        if os.path.exists(temporary_output_path):
+            os.remove(temporary_output_path)
+        return GenomeSearchResult(
+            genome_id,
+            "error",
+            output_path,
+            str(error),
+        )
 
 
 def _warn_incomplete_microbiome_catalogue(
@@ -120,6 +192,7 @@ def microbiome_offtarget_blast_species(
     identity_filter,
     coverage_filter,
     cpus=multiprocessing.cpu_count(),
+    threads_per_genome=4,
 ):
     """
     Runs Diamond BLASTP of the organism proteome against each genome in the microbiome species catalogue.
@@ -135,7 +208,8 @@ def microbiome_offtarget_blast_species(
     :param catalogue_name: Name of a supported MGnify catalogue.
     :param identity_filter: Identity threshold associated with the result files.
     :param coverage_filter: Query coverage threshold associated with the result files.
-    :param cpus: Number of threads (CPUs) to use in the BLAST search.
+    :param cpus: Total CPU budget for concurrent searches.
+    :param threads_per_genome: Maximum DIAMOND threads assigned to each genome.
     """
 
     catalogue = get_catalogue(catalogue_name)
@@ -170,43 +244,72 @@ def microbiome_offtarget_blast_species(
         )
 
     result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
+    available_cpus = _available_cpus()
+    cpu_budget = max(1, min(int(cpus), available_cpus))
+    genome_threads = max(1, min(int(threads_per_genome), cpu_budget))
+    parallel_genomes = max(1, cpu_budget // genome_threads)
 
+    print(
+        f"{catalogue_name}: {parallel_genomes} concurrent searches, "
+        f"{genome_threads} DIAMOND threads per genome "
+        f"({cpu_budget} CPUs available to this module)."
+    )
+
+    search_arguments = []
     for genome_dir in sorted(indexed_genomes):
         genome_path = os.path.join(species_databases_path, genome_dir)
-
-        # Output file for this genome
         blast_output_path = os.path.join(offtarget_path, f"{genome_dir}{result_suffix}")
-        temporary_output_path = f"{blast_output_path}.tmp"
-
-        if os.path.exists(blast_output_path):
-            try:
-                _validate_microbiome_blast_output(blast_output_path)
-                print(f"✔️ Skipping {genome_dir}, valid result already exists")
-                continue
-            except ValueError:
-                print(f"Warning: Replacing invalid result for {genome_dir}")
-                os.remove(blast_output_path)
-
-        # Run Diamond BLASTP for this genome
-        print(f"🔹 Running Diamond BLAST against {genome_dir}")
         genome_db = os.path.join(genome_path, f'{genome_dir}_DB')
+        search_arguments.append((genome_dir, genome_db, blast_output_path))
 
-        if os.path.exists(temporary_output_path):
-            os.remove(temporary_output_path)
+    results = []
+    with ThreadPoolExecutor(max_workers=parallel_genomes) as executor:
+        futures = {
+            executor.submit(
+                search_one_genome,
+                genome_id,
+                genome_db,
+                organism_prot_seq_path,
+                blast_output_path,
+                identity_filter,
+                coverage_filter,
+                genome_threads,
+            ): genome_id
+            for genome_id, genome_db, blast_output_path in search_arguments
+        }
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc=f"Searching {catalogue_name}",
+        ):
+            results.append(future.result())
 
-        programs.run_diamond_blastp(
-            blastdb=genome_db,                  # index db                
-            query=organism_prot_seq_path,       # organism proteome
-            output=temporary_output_path,
-            evalue="1e-5",
-            outfmt="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp",
-            cpus=cpus,
-            identity=identity_filter,
-            query_cover=coverage_filter,
-            max_target_seqs=1,
+    status_counts = {
+        status: sum(result.status == status for result in results)
+        for status in ("success", "skipped", "error")
+    }
+    print(
+        f"{catalogue_name} search summary: {status_counts['success']} completed, "
+        f"{status_counts['skipped']} skipped, {status_counts['error']} failed."
+    )
+
+    failed = [result for result in results if result.status == "error"]
+    if failed:
+        examples = "; ".join(
+            f"{result.genome_id}: {result.error}"
+            for result in failed[:5]
         )
-        _validate_microbiome_blast_output(temporary_output_path)
-        os.replace(temporary_output_path, blast_output_path)
+        raise RuntimeError(
+            f"{len(failed)} {catalogue_name} DIAMOND searches failed. {examples}"
+        )
+
+    if len(results) != len(indexed_genomes):
+        raise RuntimeError(
+            f"{catalogue_name} search accounting mismatch: received "
+            f"{len(results)} results for {len(indexed_genomes)} indexed genomes."
+        )
+
+    return results
 
 def microbiome_offtarget_blast_allproteins (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 

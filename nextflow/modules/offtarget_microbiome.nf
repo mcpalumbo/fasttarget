@@ -93,6 +93,7 @@ for catalogue in catalogues:
         name,
         identity,
         coverage,
+        ${cpus},
         ${cpus}
     )
     print(f'[2] Parsing {name} results...')

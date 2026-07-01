@@ -352,6 +352,10 @@ def offtarget_module(config, databases_path, output_path, cpus):
 
                     print_stylized('MICROBIOME OFFTARGET')
 
+                    threads_per_genome = config.offtarget.get(
+                        'microbiome_threads_per_genome',
+                        4,
+                    )
                     for catalogue in configured_catalogues(config.offtarget):
                         catalogue_name = catalogue['name']
                         identity_filter = float(catalogue['identity_filter'])
@@ -365,6 +369,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
                             identity_filter,
                             coverage_filter,
                             cpus,
+                            threads_per_genome,
                         )
                         logging.info(
                             "%s microbiome search finished with identity=%s and coverage=%s",

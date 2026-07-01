@@ -91,6 +91,8 @@ offtarget:
   enabled: False
   human: False
   microbiome: False
+  # Maximum DIAMOND threads per representative genome in standalone mode.
+  microbiome_threads_per_genome: 4
   # Add any combination of: human-gut, human-oral, human-skin, human-vaginal,
   # marine, soil, barley-rhizosphere, maize-rhizosphere, tomato-rhizosphere.
   microbiome_catalogues:

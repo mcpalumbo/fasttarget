@@ -60,6 +60,7 @@ offtarget:
   enabled: True
   human: True
   microbiome: True
+  microbiome_threads_per_genome: 4
   microbiome_catalogues:
     - name: human-gut
       identity_filter: 50
