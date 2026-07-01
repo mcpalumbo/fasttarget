@@ -490,7 +490,7 @@ The output columns vary depending on your configuration:
 
 **Offtarget columns** (if `offtarget.enabled: True`):
 - `human_offtarget`: BLASTp hit in the human proteome (e-value and identity %)
-- `gut_microbiome_offtarget`: Normalized score based on hits in the gut microbiome (0-1 scale, where 1 = ≥1000 hits)
+- `gut_microbiome_offtarget_norm`: Fraction of analyzed gut microbiome genomes with at least one valid hit (0-1 scale, where 1 means a hit was found in every analyzed genome)
 - `foldseek_human_offtarget`: Structural similarity to human proteins (if `foldseek_human: True`)
 
 **Essentiality columns** (if `deg.enabled: True`):
