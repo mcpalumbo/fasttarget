@@ -218,8 +218,12 @@ python databases.py --download human-sequences
 # Only human structures (PDB/AlphaFold - needed for Foldseek)
 python databases.py --download human-structures
 
-# Only microbiome catalogue
+# Human gut catalogue (default)
 python databases.py --download microbiome
+
+# Any supported combination
+python databases.py --download microbiome \
+  --microbiome-catalogues human-gut human-oral marine
 
 # Only DEG database
 python databases.py --download deg
@@ -248,13 +252,24 @@ This repository uses several key databases for analysis:
    - Contains essential bacterial genes from [DEG](http://origin.tubic.org/deg/public/index.php/download).
    - **Size:** ~500MB.
 
-3. **Human Gut Microbiome Species Catalogue (v2.0.2):**
-   - Individual genome sequences from the [MGnify Human Gut Microbiome Species Catalogue](https://www.ebi.ac.uk/metagenomics/genome-catalogues/human-gut-v2-0-2).
-   - Contains representative genomes from gut microbial species.
-   - Used to identify proteins present in the human gut microbiome.
-   - **Size:** Over 7GB.
+3. **MGnify microbiome species catalogues:**
+   - Supported catalogues: `human-gut`, `human-oral`, `human-skin`, `human-vaginal`, `marine`, `soil`, `barley-rhizosphere`, `maize-rhizosphere`, and `tomato-rhizosphere`.
+   - Each selected catalogue stores and indexes its representative genomes independently.
+   - Database size depends on the selected catalogues; environmental catalogues can be substantially larger than `human-gut`.
 
-> **Total Storage Required:** ~30GB+ of free disk space.
+| Catalogue | Species representatives |
+|---|---:|
+| `human-gut` | 4,744 |
+| `human-oral` | 452 |
+| `human-skin` | 579 |
+| `human-vaginal` | 280 |
+| `marine` | 13,223 |
+| `soil` | 19,472 |
+| `barley-rhizosphere` | 86 |
+| `maize-rhizosphere` | 336 |
+| `tomato-rhizosphere` | 579 |
+
+> **Storage:** Requirements depend on the selected catalogues. `marine` and `soil` require substantially more space than the default `human-gut` catalogue.
 
 **Which databases do you need?**
 - For **human offtarget analysis** (BLASTp) → download `human-sequences`
@@ -376,8 +391,17 @@ The `config.yml` file is the **central configuration file** for this repository.
    - `offtarget.enabled`: Set to `True` to enable offtarget analysis.
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
    - `offtarget.microbiome`: Set to `True` to enable microbiome offtarget analysis.
-   - `offtarget.microbiome_identity_filter`: Minimum percentage identity; hits equal to or above this value are retained. Recommended: `30-50`.
-   - `offtarget.microbiome_coverage_filter`: Minimum query coverage; hits equal to or above this value are retained. Recommended: `50-80`.
+   - `offtarget.microbiome_catalogues`: Select one or more supported catalogues. Each entry requires `name`, `identity_filter`, and `coverage_filter`.
+   - Catalogue filters are independent. Hits equal to or above both thresholds are retained.
+   ```yaml
+   microbiome_catalogues:
+     - name: human-gut
+       identity_filter: 40
+       coverage_filter: 70
+     - name: marine
+       identity_filter: 50
+       coverage_filter: 80
+   ```
    - `offtarget.foldseek_human`: Set to `True` to use Foldseek for structural comparison against human proteome. **Note:** Requires both `offtarget.enabled` AND `structures.enabled` to be `True`.
 
 9. **DEG Analysis:**
@@ -490,7 +514,9 @@ The output columns vary depending on your configuration:
 
 **Offtarget columns** (if `offtarget.enabled: True`):
 - `human_offtarget`: BLASTp hit in the human proteome (e-value and identity %)
-- `gut_microbiome_offtarget_norm`: Fraction of analyzed gut microbiome genomes with at least one valid hit (0-1 scale, where 1 means a hit was found in every analyzed genome)
+- `<catalogue>_offtarget_norm`: Fraction of analyzed catalogue genomes with at least one valid hit.
+- `<catalogue>_offtarget_counts`: Number of analyzed catalogue genomes with a valid hit.
+- `<catalogue>_genomes_analyzed`: Number of genomes used as the normalization denominator.
 - `foldseek_human_offtarget`: Structural similarity to human proteins (if `foldseek_human: True`)
 
 **Essentiality columns** (if `deg.enabled: True`):
@@ -562,7 +588,7 @@ Package containing all analysis implementations called by both `fasttarget.py` a
 - `build_human_pdb_index.py` — script to rebuild human PDB/AlphaFold index
 
 ### Data Directories
-- `databases/` — downloaded database files and indexes (human proteome, DEG, microbiome catalogue)
+- `databases/` — downloaded database files and indexes (human proteome, DEG, and selected catalogues under `microbiomes/<catalogue>/species_catalogue`)
 - `organism/` — default output folder; each run creates a subfolder with results
 - `singularity_sfi_files/` — cached Singularity container images
 

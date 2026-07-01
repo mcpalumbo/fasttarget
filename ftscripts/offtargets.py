@@ -1,5 +1,10 @@
 
 from ftscripts import programs, metadata, files, structures
+from ftscripts.microbiome_catalogues import (
+    catalogue_column_prefix,
+    catalogue_species_path,
+    get_catalogue,
+)
 import os
 import json
 import pandas as pd
@@ -8,7 +13,6 @@ import glob
 from tqdm import tqdm
 import logging
 
-EXPECTED_MICROBIOME_GENOMES = 4744
 MICROBIOME_BLAST_COLUMNS = 13
 
 
@@ -44,26 +48,33 @@ def _microbiome_catalogue_status(species_path):
     return genome_dirs, indexed_genomes
 
 
-def _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes):
-    if len(genome_dirs) != EXPECTED_MICROBIOME_GENOMES:
+def _warn_incomplete_microbiome_catalogue(
+    catalogue_name,
+    expected_genomes,
+    genome_dirs,
+    indexed_genomes,
+):
+    if len(genome_dirs) != expected_genomes:
         logging.warning(
-            "The microbiome catalogue contains %d genome directories; %d were expected.",
+            "The %s catalogue contains %d genome directories; %d were expected.",
+            catalogue_name,
             len(genome_dirs),
-            EXPECTED_MICROBIOME_GENOMES,
+            expected_genomes,
         )
         print(
-            f"Warning: The microbiome catalogue contains {len(genome_dirs)} genome "
-            f"directories; {EXPECTED_MICROBIOME_GENOMES} were expected."
+            f"Warning: The {catalogue_name} catalogue contains {len(genome_dirs)} "
+            f"genome directories; {expected_genomes} were expected."
         )
-    if len(indexed_genomes) != EXPECTED_MICROBIOME_GENOMES:
+    if len(indexed_genomes) != expected_genomes:
         logging.warning(
-            "Only %d of %d expected microbiome genomes have a DIAMOND index.",
+            "Only %d of %d expected %s genomes have a DIAMOND index.",
             len(indexed_genomes),
-            EXPECTED_MICROBIOME_GENOMES,
+            expected_genomes,
+            catalogue_name,
         )
         print(
-            f"Warning: Only {len(indexed_genomes)} of {EXPECTED_MICROBIOME_GENOMES} "
-            "expected microbiome genomes have a DIAMOND index."
+            f"Warning: Only {len(indexed_genomes)} of {expected_genomes} expected "
+            f"{catalogue_name} genomes have a DIAMOND index."
         )
 
 
@@ -105,14 +116,15 @@ def microbiome_offtarget_blast_species(
     databases_path,
     output_path,
     organism_name,
+    catalogue_name,
     identity_filter,
     coverage_filter,
     cpus=multiprocessing.cpu_count(),
 ):
     """
     Runs Diamond BLASTP of the organism proteome against each genome in the microbiome species catalogue.
-    Each genome in the species catalogue is stored as a subdirectory under `databases/species_catalogue`,
-    containing its own .faa file and BLAST index.
+    Each representative genome is stored under
+    `databases/microbiomes/<catalogue>/species_catalogue`, with its DIAMOND index.
 
     For each genome, the BLAST output is stored in the 'offtarget' folder of the organism directory,
     with one result file per genome. The process can be resumed if interrupted.
@@ -120,24 +132,37 @@ def microbiome_offtarget_blast_species(
     :param databases_path: Path where the species catalogue databases are stored.
     :param output_path: Path of the organism output.
     :param organism_name: Name of the organism (folder name under 'organism').
+    :param catalogue_name: Name of a supported MGnify catalogue.
     :param identity_filter: Identity threshold associated with the result files.
     :param coverage_filter: Query coverage threshold associated with the result files.
     :param cpus: Number of threads (CPUs) to use in the BLAST search.
     """
 
-    # Path to species catalogue
-    species_databases_path = os.path.join(databases_path, "species_catalogue")
+    catalogue = get_catalogue(catalogue_name)
+    expected_genomes = catalogue["number_of_species"]
+    species_databases_path = catalogue_species_path(databases_path, catalogue_name)
 
     # Path to organism proteome (.faa file)
     organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, "genome", f"{organism_name}.faa")
 
     # Output folder
-    offtarget_path = os.path.join(organism_path, "offtarget", "species_blast_results")
+    offtarget_path = os.path.join(
+        organism_path,
+        "offtarget",
+        "microbiomes",
+        catalogue_name,
+        "species_blast_results",
+    )
     os.makedirs(offtarget_path, exist_ok=True)
 
     genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_databases_path)
-    _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes)
+    _warn_incomplete_microbiome_catalogue(
+        catalogue_name,
+        expected_genomes,
+        genome_dirs,
+        indexed_genomes,
+    )
 
     if not indexed_genomes:
         raise RuntimeError(
@@ -259,7 +284,14 @@ def human_offtarget_parse (output_path, organism_name):
 
     return df_human
 
-def microbiome_species_parse(databases_path, output_path, organism_name, identity_filter, coverage_filter):
+def microbiome_species_parse(
+    databases_path,
+    output_path,
+    organism_name,
+    catalogue_name,
+    identity_filter,
+    coverage_filter,
+):
     """
     Parse Diamond BLASTP results against all genomes in the microbiome species catalogue.
     Each genome has its own BLAST output file under 'offtarget' folder of the organism.
@@ -270,6 +302,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
     :param output_path: Directory of the organism output.
     :param databases_path: Base path where MICROBIOME database is stored.
     :param organism_name: Name of the organism.
+    :param catalogue_name: Name of a supported MGnify catalogue.
     :param identity_filter: Minimum percentage identity accepted in the pident column.
     :param coverage_filter: Minimum query coverage accepted in the qcovhsp column.
 
@@ -279,11 +312,25 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         - df_microbiome_total_genomes: DataFrame with one row per protein and a column with total number of genomes analyzed
     """
 
-    offtarget_path = os.path.join(output_path, organism_name, "offtarget", "species_blast_results")
+    offtarget_path = os.path.join(
+        output_path,
+        organism_name,
+        "offtarget",
+        "microbiomes",
+        catalogue_name,
+        "species_blast_results",
+    )
 
-    species_path = os.path.join(databases_path, "species_catalogue")
+    catalogue = get_catalogue(catalogue_name)
+    expected_genomes = catalogue["number_of_species"]
+    species_path = catalogue_species_path(databases_path, catalogue_name)
     genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_path)
-    _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes)
+    _warn_incomplete_microbiome_catalogue(
+        catalogue_name,
+        expected_genomes,
+        genome_dirs,
+        indexed_genomes,
+    )
 
     result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
     genome_files = {
@@ -304,15 +351,16 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
             f"Warning: Only {len(searched_genomes)} of {len(indexed_genomes)} indexed "
             "microbiome genomes have search results."
         )
-    if len(searched_genomes) < EXPECTED_MICROBIOME_GENOMES:
+    if len(searched_genomes) < expected_genomes:
         print(
             f"Warning: Microbiome scores will be normalized using the "
             f"{len(searched_genomes)} genomes actually analyzed instead of the "
-            f"{EXPECTED_MICROBIOME_GENOMES} genomes expected."
+            f"{expected_genomes} genomes expected for {catalogue_name}."
         )
 
     print("Parsing microbiome species BLAST results...")
-    print(f"Expected genomes: {EXPECTED_MICROBIOME_GENOMES}")
+    print(f"Catalogue: {catalogue_name}")
+    print(f"Expected genomes: {expected_genomes}")
     print(f"Genome directories found: {len(genome_dirs)}")
     print(f"Indexed genomes found: {len(indexed_genomes)}")
     print(f"Genomes analyzed: {len(searched_genomes)}")
@@ -356,11 +404,12 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         for protein in protein_hits
     }
 
+    column_prefix = catalogue_column_prefix(catalogue_name)
     metadata.metadata_table_with_values(
         output_path,
         organism_name,
         protein_hits,
-        'gut_microbiome_offtarget',
+        f'{column_prefix}_offtarget',
         offtarget_path,
         'no_hit',
     )
@@ -368,7 +417,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         output_path,
         organism_name,
         protein_hit_counts,
-        'gut_microbiome_offtarget_norm',
+        f'{column_prefix}_offtarget_norm',
         offtarget_path,
         0,
     )
@@ -376,7 +425,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         output_path,
         organism_name,
         protein_hit_totals,
-        'gut_microbiome_offtarget_counts',
+        f'{column_prefix}_offtarget_counts',
         offtarget_path,
         0,
     )
@@ -384,7 +433,7 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
         output_path,
         organism_name,
         protein_total_genomes,
-        'gut_microbiome_genomes_analyzed',
+        f'{column_prefix}_genomes_analyzed',
         offtarget_path,
         analyzed_genomes,
     )

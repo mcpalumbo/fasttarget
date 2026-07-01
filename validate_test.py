@@ -65,7 +65,7 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
     Checks 3 independent parts:
       1) Foldseek structure + per-protein tsv + human_foldseek_dict.json (20 keys with values)
       2) Human offtarget files + table shape (2 cols, 20 rows) + blast nonempty
-      3) Microbiome offtarget: >=4744 MGYG*_offtarget.tsv nonempty + gut_microbiome* summaries (2 cols, 20 rows)
+      3) Human gut off-target: >=4744 completed MGYG result files and valid summaries
     Only the part that fails appends errors to validation["failed"].
     """
 
@@ -214,28 +214,32 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
     micro_warnings = []
     micro_passed = []
 
-    species_dir = os.path.join(offtarget_dir, "species_blast_results")
+    species_dir = os.path.join(
+        offtarget_dir,
+        "microbiomes",
+        "human-gut",
+        "species_blast_results",
+    )
     if not os.path.isdir(species_dir):
         micro_errors.append("❌ Microbiome offtarget: species_blast_results directory not found")
     else:
         # MGYG genome outputs
-        genome_tsvs = glob.glob(os.path.join(species_dir, "MGYG*_offtarget.tsv"))
-        nonempty_genome_tsvs = [p for p in genome_tsvs if _is_nonempty_file(p)]
+        genome_tsvs = glob.glob(os.path.join(species_dir, "MGYG*_offtarget_id*_cov*.tsv"))
 
-        if len(nonempty_genome_tsvs) < min_microbiome_genomes:
+        if len(genome_tsvs) < min_microbiome_genomes:
             micro_errors.append(
-                f"❌ Microbiome offtarget: Expected ≥{min_microbiome_genomes} non-empty MGYG*_offtarget.tsv, found {len(nonempty_genome_tsvs)}"
+                f"❌ Microbiome offtarget: Expected ≥{min_microbiome_genomes} completed MGYG result files, found {len(genome_tsvs)}"
             )
         else:
-            micro_passed.append(f"✅ Microbiome offtarget: Found {len(nonempty_genome_tsvs)} non-empty MGYG genome TSVs")
+            micro_passed.append(f"✅ Microbiome offtarget: Found {len(genome_tsvs)} completed MGYG genome TSVs")
 
-        # gut_microbiome_offtarget* summaries: must exist, not empty, 2 columns, 20 rows
-        gut_files = sorted(glob.glob(os.path.join(species_dir, "gut_microbiome_offtarget*")))
+        # Human gut summaries: must exist, not empty, 2 columns, 20 rows
+        gut_files = sorted(glob.glob(os.path.join(species_dir, "human_gut_offtarget*")))
         # Filter to tsv/csv only (your tree shows both)
         gut_files = [p for p in gut_files if p.endswith(".tsv") or p.endswith(".csv")]
 
         if not gut_files:
-            micro_errors.append("❌ Microbiome offtarget: No gut_microbiome_offtarget* summary files found")
+            micro_errors.append("❌ Microbiome offtarget: No human_gut_offtarget* summary files found")
         else:
             bad = []
             ok = 0
@@ -257,17 +261,16 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
 
             if bad:
                 micro_errors.append(
-                    "❌ Microbiome offtarget: Some gut_microbiome_offtarget* files are invalid (need 2 cols, 20 rows): "
+                    "❌ Microbiome offtarget: Some human_gut_offtarget* files are invalid (need 2 cols, 20 rows): "
                     + "; ".join(bad[:8]) + (" ..." if len(bad) > 8 else "")
                 )
             if ok > 0 and not bad:
-                micro_passed.append(f"✅ Microbiome offtarget: All {ok} gut_microbiome_offtarget* summary files have 2 cols and {expected_count} rows")
+                micro_passed.append(f"✅ Microbiome offtarget: All {ok} human_gut_offtarget* summary files have 2 cols and {expected_count} rows")
             elif ok > 0 and bad:
-                micro_warnings.append(f"⚠️  Microbiome offtarget: {ok}/{len(gut_files)} gut_microbiome_offtarget* files look OK")
+                micro_warnings.append(f"⚠️  Microbiome offtarget: {ok}/{len(gut_files)} human_gut_offtarget* files look OK")
 
-        # gut_microbiome_genomes_analyzed.* are also expected in your tree
-        analyzed_csv = os.path.join(species_dir, "gut_microbiome_genomes_analyzed.csv")
-        analyzed_tsv = os.path.join(species_dir, "gut_microbiome_genomes_analyzed.tsv")
+        analyzed_csv = os.path.join(species_dir, "human_gut_genomes_analyzed.csv")
+        analyzed_tsv = os.path.join(species_dir, "human_gut_genomes_analyzed.tsv")
         for p in (analyzed_csv, analyzed_tsv):
             if not os.path.exists(p):
                 micro_warnings.append(f"⚠️  Microbiome offtarget: {os.path.basename(p)} not found")

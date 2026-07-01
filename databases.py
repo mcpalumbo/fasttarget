@@ -17,6 +17,11 @@ import time
 import sys
 import datetime
 from ftscripts import programs,files, structures
+from ftscripts.microbiome_catalogues import (
+    MGNIFY_CATALOGUES,
+    catalogue_species_path,
+    get_catalogue,
+)
 import tqdm
 import requests
 import multiprocessing
@@ -428,14 +433,18 @@ def download_DEG(database_path):
               ' You can also try to download it manually and place it in the databases folder.')
     return download_status
 
-def extract_microbiome_species_ids(database_path):
+def extract_microbiome_species_ids(database_path, catalogue_name="human-gut"):
     """
     Extracts unique species IDs from the Human Gut Microbiome Species Catalogue metadata file.
     :param database_path =  Path to the databases folder.
     :return: species_ids = List of unique species IDs.
     """
 
-    species_path = os.path.join(database_path, 'species_catalogue')
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+        allow_legacy=False,
+    )
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
 
     if  os.path.exists(meta_path):
@@ -446,30 +455,34 @@ def extract_microbiome_species_ids(database_path):
         raise FileNotFoundError(f"Metadata file not found: {meta_path}")
 
 
-def download_microbiome_species_catalogue(database_path):
+def download_microbiome_species_catalogue(database_path, catalogue_name="human-gut"):
 
     """
-    Downloads the Human Gut Microbiome Species Catalogue from the EBI Metagenomics (MGnify) database, 
+    Downloads a supported MGnify microbiome species catalogue.
     Each genome has its own folder with a .faa file inside 'genome'.
-    Files are saved into 'databases/species_catalogue'.
-    https://www.ebi.ac.uk/metagenomics/genome-catalogues/human-gut-v2-0-2
-    DOI: 10.1093/nar/gkz1035
+    Files are saved under 'databases/microbiomes/<catalogue>/species_catalogue'.
 
     :param database_path =  Path to the databases folder.
+    :param catalogue_name: Name of a supported MGnify catalogue.
 
     """
 
-    species_path = os.path.join(database_path, 'species_catalogue')
+    catalogue = get_catalogue(catalogue_name)
+    base_url = catalogue["ftp_site"].rstrip("/") + "/"
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+        allow_legacy=False,
+    )
     os.makedirs(species_path, exist_ok=True)
 
-    # Download README file
-    info_path = os.path.join(species_path, 'README_uhgp_v2.0.2.txt')
-    info_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/README_v2.0.2.txt'
+    version = os.path.basename(catalogue["ftp_site"].rstrip("/"))
+    info_path = os.path.join(species_path, f"README_{version}.txt")
+    info_url = f"{base_url}README_{version}.txt"
     download_with_wget(info_url, info_path)
 
-    # Download metadata file
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
-    meta_url = 'https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/genomes-all_metadata.tsv'
+    meta_url = f"{base_url}genomes-all_metadata.tsv"
     download_with_wget(meta_url, meta_path)
 
     # Download species catalogue
@@ -488,40 +501,60 @@ def download_microbiome_species_catalogue(database_path):
             else:
                 os.remove(check_file)
 
-    success_check = check_microbiome_species_catalogue_download(database_path)
+    success_check = check_microbiome_species_catalogue_download(
+        database_path,
+        catalogue_name,
+    )
 
     if success_file and success_check:
         print("Species catalogue download was already completed successfully.")
 
     else:
 
-        # Parse the main directory to get species folders        
-        base_url = "http://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/v2.0.2/species_catalogue/"
+        species_url = f"{base_url}species_catalogue/"
 
-        r = requests.get(base_url)
+        r = requests.get(species_url)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
+        representative_ids = set(
+            extract_microbiome_species_ids(database_path, catalogue_name)
+        )
+        expected_species = catalogue["number_of_species"]
+        if len(representative_ids) != expected_species:
+            raise RuntimeError(
+                f"{catalogue_name} metadata contains {len(representative_ids)} "
+                f"species representatives; {expected_species} were expected."
+            )
 
-        # Obtain folder links 
-        species_links = [a["href"] for a in soup.find_all("a") if a["href"].startswith("MGYG")]
+        species_links = [
+            a["href"] for a in soup.find_all("a")
+            if a.get("href", "").endswith("/")
+            and not a["href"].startswith(("../", "/"))
+        ]
         expected_files = []
-        genome_list = []
+        located_representatives = set()
 
         for sp in species_links:
-            sp_url = base_url + sp
+            sp_url = species_url + sp
             r2 = requests.get(sp_url)
             r2.raise_for_status()
             soup2 = BeautifulSoup(r2.text, "html.parser")
 
-            genome_links = [a["href"] for a in soup2.find_all("a") if a["href"].startswith("MGYG")]
+            genome_links = [
+                a["href"] for a in soup2.find_all("a")
+                if a.get("href", "").endswith("/")
+                and not a["href"].startswith(("../", "/"))
+            ]
 
             for genome in genome_links:
-                genome_list.append(genome[:-1])
+                genome_id = genome.rstrip("/")
+                if genome_id not in representative_ids:
+                    continue
+                located_representatives.add(genome_id)
 
-                faa_url = f"{sp_url}{genome}genome/{genome[:-1]}.faa"
-                faa_ftp_url = faa_url.replace("http://", "https://")
+                faa_url = f"{sp_url}{genome}genome/{genome_id}.faa"
 
-                genome_path = os.path.join(species_path, genome[:-1])
+                genome_path = os.path.join(species_path, genome_id)
                 os.makedirs(genome_path, exist_ok=True)
 
                 faa_name = os.path.basename(faa_url)
@@ -530,9 +563,16 @@ def download_microbiome_species_catalogue(database_path):
 
                 if not files.file_check(faa_out):
                     print(f"Downloading {faa_name}...")
-                    download_with_wget(faa_ftp_url, faa_out)
+                    download_with_wget(faa_url, faa_out)
                 else:
                     print(f"{faa_name} already exists.")
+
+        missing_representatives = representative_ids - located_representatives
+        if missing_representatives:
+            raise RuntimeError(
+                f"Could not locate {len(missing_representatives)} "
+                f"{catalogue_name} species representatives on the MGnify FTP site."
+            )
         
         # Check for missing files
         downloaded_files = [os.path.basename(f) for f in glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)]
@@ -549,7 +589,10 @@ def download_microbiome_species_catalogue(database_path):
             else:
                 f.write("All files downloaded successfully!\n")
 
-def check_microbiome_species_catalogue_download(database_path):
+def check_microbiome_species_catalogue_download(
+    database_path,
+    catalogue_name="human-gut",
+):
     """
     Checks if all .faa files from the species catalogue have been downloaded.
     The concatenated fasta file is located in "databases/species_catalogue" folder.
@@ -558,14 +601,19 @@ def check_microbiome_species_catalogue_download(database_path):
 
     """
 
-    species_path = os.path.join(database_path, 'species_catalogue')
-    species_ids = extract_microbiome_species_ids(database_path)
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+        allow_legacy=False,
+    )
+    species_ids = extract_microbiome_species_ids(database_path, catalogue_name)
 
     for id in species_ids:
         faa_file = os.path.join(species_path, id, f"{id}.faa")
         if not files.file_check(faa_file):
             print(f"Missing file: {faa_file}")
             return False
+    return True
 
 def concat_microbiome_species_catalogue(database_path):
     """
@@ -1138,18 +1186,27 @@ def index_db_blast_microbiome_protein_catalogue (database_path):
         print('Error indexing Microbiome database:', e)
 
 
-def index_db_blast_microbiome_species_catalogue (database_path, specific_file=None):
+def index_db_blast_microbiome_species_catalogue(
+    database_path,
+    catalogue_name="human-gut",
+    specific_file=None,
+):
 
     """
     Makes a Diamond BLAST db for gut microbiome species catalogue. 
 
     :param database_path =  Path to the databases folder.
+    :param catalogue_name: Name of a supported MGnify catalogue.
     :param specific_file =  Specific .faa file to index. If None, all .faa files in the
     species_catalogue folder will be indexed.
 
     """
 
-    species_path = os.path.join(database_path, 'species_catalogue')
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+        allow_legacy=False,
+    )
     faa_files = glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
 
     if specific_file is None:
@@ -1312,48 +1369,69 @@ def download_and_index_human_structures(database_path, cpus=None, container_engi
 
     print('----- 1. Finished -----')
 
-def download_and_index_microbiome(database_path):
+def download_and_index_microbiome(database_path, catalogue_names=None):
     """
     Downloads and indexes Microbiome database.
 
     :param database_path =  Path to the 'databases' folder.
     """
 
-    # Download and index Microbiome database
-    print('----- 2. Downloading and indexing microbiome database -----')
-    species_path = os.path.join(database_path, 'species_catalogue')
-    check_file = os.path.join(species_path, 'download_check.txt')
+    print('----- 2. Downloading and indexing microbiome databases -----')
+    catalogue_names = catalogue_names or ["human-gut"]
 
-    if not files.file_check(check_file):
-        download_microbiome_species_catalogue (database_path)
-        index_db_blast_microbiome_species_catalogue (database_path)
-        print('Microbiome database downloaded and indexed')
-    else:
-        with open(check_file) as f:
-            content = f.read()
+    for catalogue_name in catalogue_names:
+        get_catalogue(catalogue_name)
+        print(f"----- Microbiome catalogue: {catalogue_name} -----")
+        species_path = catalogue_species_path(
+            database_path,
+            catalogue_name,
+            allow_legacy=False,
+        )
+        check_file = os.path.join(species_path, 'download_check.txt')
+
+        if not files.file_check(check_file):
+            download_microbiome_species_catalogue(database_path, catalogue_name)
+            index_db_blast_microbiome_species_catalogue(
+                database_path,
+                catalogue_name,
+            )
+        else:
+            with open(check_file) as check_handle:
+                content = check_handle.read()
             if "List of missing files:" in content:
-                print('Some files are missing in the species catalogue. Please check download_check.txt file.')                     
-                download_microbiome_species_catalogue (database_path)
-                index_db_blast_microbiome_species_catalogue (database_path)
-            else:
-                print('Microbiome sequences already exists.')
+                print(f"Some files are missing from {catalogue_name}; retrying.")
+                download_microbiome_species_catalogue(database_path, catalogue_name)
 
-        # Check if all .faa files have been indexed
-        check = check_microbiome_species_catalogue_downloaded(database_path)
-        if len(check) > 0:
-            for faa_path in check:
-                index_db_blast_microbiome_species_catalogue(database_path, specific_file=faa_path)
+            missing_indexes = check_microbiome_species_catalogue_downloaded(
+                database_path,
+                catalogue_name,
+            )
+            for faa_path in missing_indexes:
+                index_db_blast_microbiome_species_catalogue(
+                    database_path,
+                    catalogue_name,
+                    specific_file=faa_path,
+                )
+
+        print(f"{catalogue_name} downloaded and indexed")
 
     print('----- 2. Finished -----')
 
-def check_microbiome_species_catalogue_downloaded(database_path):
+def check_microbiome_species_catalogue_downloaded(
+    database_path,
+    catalogue_name="human-gut",
+):
     """
     Check if all species in the microbiome species catalogue have been indexed.
     
     :param database_path =  Path to the 'databases' folder.
     """
 
-    species_path = os.path.join(database_path, 'species_catalogue')
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+        allow_legacy=False,
+    )
     required_extensions = {".dmnd"}
 
     check = []
@@ -1408,7 +1486,13 @@ def download_and_index_deg(database_path):
 
 
 
-def main_download(database_path, selected_databases, cpus=None, container_engine='docker'):
+def main_download(
+    database_path,
+    selected_databases,
+    cpus=None,
+    container_engine='docker',
+    microbiome_catalogues=None,
+):
     """Main download function"""
 
     print(f"📥 Downloading databases: {', '.join(selected_databases)}")
@@ -1431,7 +1515,10 @@ def main_download(database_path, selected_databases, cpus=None, container_engine
                 success_count += 1
 
             elif db_name == 'microbiome':
-                download_and_index_microbiome(database_path)
+                download_and_index_microbiome(
+                    database_path,
+                    microbiome_catalogues,
+                )
                 success_count += 1
                     
             elif db_name == 'deg':
@@ -1472,7 +1559,7 @@ if __name__ == '__main__':
         python databases.py --download all          # Download all databases
         python databases.py --download human-sequences --database-path /home/fasttarget/databases   # Download only human sequences
         python databases.py --download human-structures  # Download only human structures (needed for foldseek)
-        python databases.py --download microbiome     # Download microbiome database
+        python databases.py --download microbiome --microbiome-catalogues human-gut marine
         python databases.py --download deg            # Download DEG database
                 """
         )
@@ -1486,6 +1573,13 @@ if __name__ == '__main__':
                        help="Number of parallel workers for downloads (default: min(16, cpu_count()) - safe for clusters)")
     parser.add_argument('--container-engine', type=str, choices=['docker', 'singularity'], default='docker',
                        help="Container engine to use for Foldseek (default: docker)")
+    parser.add_argument(
+        '--microbiome-catalogues',
+        nargs='+',
+        choices=sorted(MGNIFY_CATALOGUES),
+        default=['human-gut'],
+        help="MGnify catalogues to download with --download microbiome (default: human-gut)",
+    )
 
     args = parser.parse_args()
     
@@ -1495,4 +1589,10 @@ if __name__ == '__main__':
     # Determine databases to process
     if hasattr(args, 'download') and args.download:
         databases_to_process = ['human-sequences', 'human-structures', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
-        main_download(database_path, databases_to_process, cpus=args.cpus, container_engine=args.container_engine)
+        main_download(
+            database_path,
+            databases_to_process,
+            cpus=args.cpus,
+            container_engine=args.container_engine,
+            microbiome_catalogues=args.microbiome_catalogues,
+        )

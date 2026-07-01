@@ -4,6 +4,7 @@ import pandas as pd
 import argparse
 import multiprocessing
 from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata
+from ftscripts.microbiome_catalogues import configured_catalogues
 from datetime import datetime
 import logging
 import sys
@@ -351,27 +352,35 @@ def offtarget_module(config, databases_path, output_path, cpus):
 
                     print_stylized('MICROBIOME OFFTARGET')
 
-                    # Run blastp search
-                    print('----- Blastp search -----')
-                    microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
-                    microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
-                    offtargets.microbiome_offtarget_blast_species(
-                        databases_path,
-                        output_path,
-                        organism_name,
-                        microbiome_identity_filter,
-                        microbiome_coverage_filter,
-                        cpus,
-                    )
-                    logging.info('Microbiome offtarget blast search finished')
-
-                    # Parse results
-                    logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
-                    logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
-                    df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(databases_path, output_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
-                    module_tables.append(df_microbiome_norm)
-                    module_tables.append(df_microbiome_counts)
-                    module_tables.append(df_microbiome_total_genomes)
+                    for catalogue in configured_catalogues(config.offtarget):
+                        catalogue_name = catalogue['name']
+                        identity_filter = float(catalogue['identity_filter'])
+                        coverage_filter = float(catalogue['coverage_filter'])
+                        print(f"----- {catalogue_name}: DIAMOND search -----")
+                        offtargets.microbiome_offtarget_blast_species(
+                            databases_path,
+                            output_path,
+                            organism_name,
+                            catalogue_name,
+                            identity_filter,
+                            coverage_filter,
+                            cpus,
+                        )
+                        logging.info(
+                            "%s microbiome search finished with identity=%s and coverage=%s",
+                            catalogue_name,
+                            identity_filter,
+                            coverage_filter,
+                        )
+                        result_tables = offtargets.microbiome_species_parse(
+                            databases_path,
+                            output_path,
+                            organism_name,
+                            catalogue_name,
+                            identity_filter,
+                            coverage_filter,
+                        )
+                        module_tables.extend(result_tables)
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
                             

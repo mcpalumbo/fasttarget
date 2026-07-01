@@ -1,6 +1,10 @@
 import yaml
 import os
 import argparse
+from ftscripts.microbiome_catalogues import (
+    MGNIFY_CATALOGUES,
+    configured_catalogues,
+)
 
 def validate_file_path(filepath, name, required_extensions=None):
     """
@@ -255,23 +259,43 @@ def validate_config(config):
     if 'offtarget' in config and config['offtarget'].get('enabled'):
         offt = config['offtarget']
         
-        # Validate microbiome filters if microbiome enabled
         if offt.get('microbiome'):
-            if 'microbiome_identity_filter' in offt:
-                try:
-                    identity = float(offt['microbiome_identity_filter'])
-                    if not (0 <= identity <= 100):
-                        errors.append(f"offtarget.microbiome_identity_filter must be between 0 and 100 (got {identity})")
-                except (ValueError, TypeError):
-                    errors.append(f"offtarget.microbiome_identity_filter must be a number (got {offt['microbiome_identity_filter']})")
-            
-            if 'microbiome_coverage_filter' in offt:
-                try:
-                    coverage = float(offt['microbiome_coverage_filter'])
-                    if not (0 <= coverage <= 100):
-                        errors.append(f"offtarget.microbiome_coverage_filter must be between 0 and 100 (got {coverage})")
-                except (ValueError, TypeError):
-                    errors.append(f"offtarget.microbiome_coverage_filter must be a number (got {offt['microbiome_coverage_filter']})")
+            catalogue_configs = configured_catalogues(offt)
+            if not isinstance(catalogue_configs, list) or not catalogue_configs:
+                errors.append("offtarget.microbiome_catalogues must be a non-empty list")
+                catalogue_configs = []
+
+            seen_catalogues = set()
+            for index, catalogue in enumerate(catalogue_configs):
+                prefix = f"offtarget.microbiome_catalogues[{index}]"
+                if not isinstance(catalogue, dict):
+                    errors.append(f"{prefix} must be a mapping")
+                    continue
+
+                name = catalogue.get('name')
+                if name not in MGNIFY_CATALOGUES:
+                    errors.append(
+                        f"{prefix}.name must be one of "
+                        f"{sorted(MGNIFY_CATALOGUES)} (got {name!r})"
+                    )
+                elif name in seen_catalogues:
+                    errors.append(f"Duplicate microbiome catalogue: {name}")
+                else:
+                    seen_catalogues.add(name)
+
+                for field in ('identity_filter', 'coverage_filter'):
+                    if field not in catalogue:
+                        errors.append(f"{prefix}.{field} is required")
+                        continue
+                    try:
+                        value = float(catalogue[field])
+                        if not (0 <= value <= 100):
+                            errors.append(
+                                f"{prefix}.{field} must be between 0 and 100 "
+                                f"(got {value})"
+                            )
+                    except (ValueError, TypeError):
+                        errors.append(f"{prefix}.{field} must be a number")
         
         # Validate foldseek_human requires structures
         if offt.get('foldseek_human') and not config.get('structures', {}).get('enabled'):
@@ -402,8 +426,12 @@ def print_config(config):
         print(f"Human Offtarget Enabled: {config.offtarget['human']}")
         print(f"Microbiome Offtarget Enabled: {config.offtarget['microbiome']}")
         if config.offtarget['microbiome']:
-            print(f"Microbiome Identity Filter: {config.offtarget['microbiome_identity_filter']}")
-            print(f"Microbiome Coverage Filter: {config.offtarget['microbiome_coverage_filter']}")
+            for catalogue in configured_catalogues(config.offtarget):
+                print(
+                    f"Microbiome Catalogue: {catalogue['name']} "
+                    f"(identity={catalogue['identity_filter']}%, "
+                    f"coverage={catalogue['coverage_filter']}%)"
+                )
         if config.structures:
             print(f"Foldseek Human Offtarget Enabled: {config.offtarget['foldseek_human']}")
         else:

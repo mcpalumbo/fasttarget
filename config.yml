@@ -91,10 +91,12 @@ offtarget:
   enabled: False
   human: False
   microbiome: False
-  # microbiome_identity_filter: Filter value of %identity, only hits with higher values will be used. Recommended: 30-50.
-  microbiome_identity_filter: 40
-  # microbiome_coverage_filter: Filter value of query coverage, only hits with higher values will be used. Recommended: 50-80.
-  microbiome_coverage_filter: 70
+  # Add any combination of: human-gut, human-oral, human-skin, human-vaginal,
+  # marine, soil, barley-rhizosphere, maize-rhizosphere, tomato-rhizosphere.
+  microbiome_catalogues:
+    - name: human-gut
+      identity_filter: 40
+      coverage_filter: 70
   # foldseek_human: True if you want to use Foldseek to search for human off-targets. 
   # NOTE: Requires both 'offtarget' AND 'structures' to be enabled.
   foldseek_human: False
@@ -121,4 +123,3 @@ metadata:
     - /path/to/meta_table1.tsv
     - /path/to/meta_table2.tsv
     # Add more paths as needed
-
