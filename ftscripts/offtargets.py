@@ -9,6 +9,27 @@ from tqdm import tqdm
 import logging
 
 EXPECTED_MICROBIOME_GENOMES = 4744
+MICROBIOME_BLAST_COLUMNS = 13
+
+
+def _format_filter_value(value):
+    return f"{float(value):g}"
+
+
+def _microbiome_result_suffix(identity_filter, coverage_filter):
+    identity = _format_filter_value(identity_filter)
+    coverage = _format_filter_value(coverage_filter)
+    return f"_offtarget_id{identity}_cov{coverage}.tsv"
+
+
+def _validate_microbiome_blast_output(output_path):
+    with open(output_path, "r", encoding="utf-8") as output_file:
+        for line_number, line in enumerate(output_file, start=1):
+            if len(line.rstrip("\n").split("\t")) != MICROBIOME_BLAST_COLUMNS:
+                raise ValueError(
+                    f"Invalid DIAMOND output in {output_path} at line {line_number}: "
+                    f"expected {MICROBIOME_BLAST_COLUMNS} columns."
+                )
 
 
 def _microbiome_catalogue_status(species_path):
@@ -80,7 +101,14 @@ def human_offtarget_blast (databases_path, output_path, organism_name, cpus=mult
         cpus=cpus
     )
 
-def microbiome_offtarget_blast_species (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
+def microbiome_offtarget_blast_species(
+    databases_path,
+    output_path,
+    organism_name,
+    identity_filter,
+    coverage_filter,
+    cpus=multiprocessing.cpu_count(),
+):
     """
     Runs Diamond BLASTP of the organism proteome against each genome in the microbiome species catalogue.
     Each genome in the species catalogue is stored as a subdirectory under `databases/species_catalogue`,
@@ -92,6 +120,8 @@ def microbiome_offtarget_blast_species (databases_path, output_path, organism_na
     :param databases_path: Path where the species catalogue databases are stored.
     :param output_path: Path of the organism output.
     :param organism_name: Name of the organism (folder name under 'organism').
+    :param identity_filter: Identity threshold associated with the result files.
+    :param coverage_filter: Query coverage threshold associated with the result files.
     :param cpus: Number of threads (CPUs) to use in the BLAST search.
     """
 
@@ -114,29 +144,41 @@ def microbiome_offtarget_blast_species (databases_path, output_path, organism_na
             f"No indexed microbiome genomes were found in {species_databases_path}."
         )
 
+    result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
+
     for genome_dir in sorted(indexed_genomes):
         genome_path = os.path.join(species_databases_path, genome_dir)
 
         # Output file for this genome
-        blast_output_path = os.path.join(offtarget_path, f"{genome_dir}_offtarget.tsv")
+        blast_output_path = os.path.join(offtarget_path, f"{genome_dir}{result_suffix}")
+        temporary_output_path = f"{blast_output_path}.tmp"
 
-        # Skip if already exists (resume functionality)
         if os.path.exists(blast_output_path):
-            print(f"✔️ Skipping {genome_dir}, result already exists")
-            continue
+            try:
+                _validate_microbiome_blast_output(blast_output_path)
+                print(f"✔️ Skipping {genome_dir}, valid result already exists")
+                continue
+            except ValueError:
+                print(f"Warning: Replacing invalid result for {genome_dir}")
+                os.remove(blast_output_path)
 
         # Run Diamond BLASTP for this genome
         print(f"🔹 Running Diamond BLAST against {genome_dir}")
         genome_db = os.path.join(genome_path, f'{genome_dir}_DB')
-        
+
+        if os.path.exists(temporary_output_path):
+            os.remove(temporary_output_path)
+
         programs.run_diamond_blastp(
             blastdb=genome_db,                  # index db                
             query=organism_prot_seq_path,       # organism proteome
-            output=blast_output_path,           # result per genome
+            output=temporary_output_path,
             evalue="1e-5",
             outfmt="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovhsp",
             cpus=cpus
         )
+        _validate_microbiome_blast_output(temporary_output_path)
+        os.replace(temporary_output_path, blast_output_path)
 
 def microbiome_offtarget_blast_allproteins (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
 
@@ -240,10 +282,11 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
     genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_path)
     _warn_incomplete_microbiome_catalogue(genome_dirs, indexed_genomes)
 
+    result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
     genome_files = {
-        f.replace("_offtarget.tsv", ""): f
+        f.removesuffix(result_suffix): f
         for f in os.listdir(offtarget_path)
-        if f.endswith("_offtarget.tsv")
+        if f.endswith(result_suffix)
     }
     searched_genomes = sorted(indexed_genomes.intersection(genome_files))
 
@@ -265,98 +308,83 @@ def microbiome_species_parse(databases_path, output_path, organism_name, identit
             f"{EXPECTED_MICROBIOME_GENOMES} genomes expected."
         )
 
-    microbiome_results = os.path.join(offtarget_path, 'gut_microbiome_offtarget_counts.tsv')
-    microbiome_results_norm = os.path.join(offtarget_path, 'gut_microbiome_offtarget_norm.tsv')
-    microbiome_results_genomes = os.path.join(offtarget_path, 'gut_microbiome_genomes_analyzed.tsv')
+    print("Parsing microbiome species BLAST results...")
+    print(f"Expected genomes: {EXPECTED_MICROBIOME_GENOMES}")
+    print(f"Genome directories found: {len(genome_dirs)}")
+    print(f"Indexed genomes found: {len(indexed_genomes)}")
+    print(f"Genomes analyzed: {len(searched_genomes)}")
 
-    cached_results_valid = False
-    if all(files.file_check(path) for path in (
-        microbiome_results,
-        microbiome_results_norm,
-        microbiome_results_genomes,
-    )):
-        cached_genomes = pd.read_csv(microbiome_results_genomes, sep='\t', header=0)
-        analyzed_values = cached_genomes["gut_microbiome_genomes_analyzed"].dropna().unique()
-        cached_results_valid = (
-            len(analyzed_values) == 1
-            and analyzed_values[0] == len(searched_genomes)
-        )
+    protein_hits = {}
+    for genome_name in tqdm(searched_genomes, desc="Parsing microbiome species BLAST results"):
+        blast_output_path = os.path.join(offtarget_path, genome_files[genome_name])
 
-    if cached_results_valid:
-        print('Microbiome species offtarget analysis already done, output file found')
-        print(microbiome_results)
-        df_hit_totals = pd.read_csv(microbiome_results, sep='\t', header=0)
-        df_microbiome_norm = pd.read_csv(microbiome_results_norm, sep='\t', header=0)
-        df_total_genomes = pd.read_csv(microbiome_results_genomes, sep='\t', header=0)
+        if os.stat(blast_output_path).st_size == 0:
+            continue
 
-    else:
-        if files.file_check(microbiome_results):
-            print(
-                "Warning: Cached microbiome summaries use a different denominator "
-                "and will be recalculated."
-            )
-        print(f"Parsing microbiome species BLAST results...")
-        print(f"Expected genomes: {EXPECTED_MICROBIOME_GENOMES}")
-        print(f"Genome directories found: {len(genome_dirs)}")
-        print(f"Indexed genomes found: {len(indexed_genomes)}")
-        print(f"Genomes analyzed: {len(searched_genomes)}")
+        df = pd.read_csv(blast_output_path, sep="\t", header=None)
+        df.columns = [
+            "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
+            "qstart", "qend", "sstart", "send", "evalue", "bitscore",
+            "qcovhsp"
+        ]
 
-        protein_hits = {}
-        for genome_name in tqdm(searched_genomes, desc="Parsing microbiome species BLAST results"):
-            file = genome_files[genome_name]
-            blast_output_path = os.path.join(offtarget_path, file)
+        filtered_df = df[
+            (df["pident"] > identity_filter)
+            & (df["qcovhsp"] > coverage_filter)
+        ]
+        for qseqid in filtered_df["qseqid"].unique():
+            protein_hits.setdefault(qseqid, set()).add(genome_name)
 
-            if os.stat(blast_output_path).st_size == 0:
-                continue
+    protein_hits = {
+        protein: sorted(genomes)
+        for protein, genomes in protein_hits.items()
+    }
+    analyzed_genomes = len(searched_genomes)
+    protein_hit_counts = {
+        protein: len(genomes) / analyzed_genomes
+        for protein, genomes in protein_hits.items()
+    }
+    protein_hit_totals = {
+        protein: len(genomes)
+        for protein, genomes in protein_hits.items()
+    }
+    protein_total_genomes = {
+        protein: analyzed_genomes
+        for protein in protein_hits
+    }
 
-            df = pd.read_csv(blast_output_path, sep="\t", header=None)
-
-            # Diamond outfmt: "6 std qcovhsp"
-            df.columns = [
-                "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
-                "qstart", "qend", "sstart", "send", "evalue", "bitscore",
-                "qcovhsp"
-            ]
-
-            filtered_df = df[(df["pident"] > identity_filter) & (df["qcovhsp"] > coverage_filter)]
-
-            for qseqid in filtered_df["qseqid"].unique():
-                protein_hits.setdefault(qseqid, set()).add(genome_name)
-
-        # Convert sets to sorted lists
-        protein_hits = {prot: sorted(list(genomes)) for prot, genomes in protein_hits.items()}
-
-        analyzed_genomes = len(searched_genomes)
-        protein_hit_counts = {
-            prot: len(genomes) / analyzed_genomes
-            for prot, genomes in protein_hits.items()
-        }
-
-        # Number of genomes with hits
-        protein_hit_totals = {
-            prot: len(genomes)
-            for prot, genomes in protein_hits.items()
-        }
-
-        # Total number of genomes analyzed for each protein
-        protein_total_genomes = {
-            prot: analyzed_genomes
-            for prot in protein_hits.keys()
-        }
-
-
-        # Build DataFrame 
-        df_microbiome = metadata.metadata_table_with_values(output_path, organism_name, protein_hits, 
-                                                'gut_microbiome_offtarget', offtarget_path, 'no_hit')
-
-        df_microbiome_norm = metadata.metadata_table_with_values(output_path, organism_name, protein_hit_counts,
-                                                'gut_microbiome_offtarget_norm', offtarget_path, 0)
-        
-        df_hit_totals = metadata.metadata_table_with_values(output_path, organism_name, protein_hit_totals,
-                                                'gut_microbiome_offtarget_counts', offtarget_path, 0)
-
-        df_total_genomes = metadata.metadata_table_with_values(output_path, organism_name, protein_total_genomes,
-                                                'gut_microbiome_genomes_analyzed', offtarget_path, analyzed_genomes)
+    metadata.metadata_table_with_values(
+        output_path,
+        organism_name,
+        protein_hits,
+        'gut_microbiome_offtarget',
+        offtarget_path,
+        'no_hit',
+    )
+    df_microbiome_norm = metadata.metadata_table_with_values(
+        output_path,
+        organism_name,
+        protein_hit_counts,
+        'gut_microbiome_offtarget_norm',
+        offtarget_path,
+        0,
+    )
+    df_hit_totals = metadata.metadata_table_with_values(
+        output_path,
+        organism_name,
+        protein_hit_totals,
+        'gut_microbiome_offtarget_counts',
+        offtarget_path,
+        0,
+    )
+    df_total_genomes = metadata.metadata_table_with_values(
+        output_path,
+        organism_name,
+        protein_total_genomes,
+        'gut_microbiome_genomes_analyzed',
+        offtarget_path,
+        analyzed_genomes,
+    )
 
     return df_microbiome_norm, df_hit_totals, df_total_genomes
 
