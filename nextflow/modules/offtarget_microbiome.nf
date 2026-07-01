@@ -99,6 +99,10 @@ process MICROBIOME_SHARD_SEARCH {
         'species_blast_results',
     )
     os.makedirs(results_path, exist_ok=True)
+    offtargets.validate_microbiome_search_environment(
+        '${query_faa}',
+        results_path,
+    )
 
     suffix = offtargets._microbiome_result_suffix(
         ${identity_filter},
@@ -120,6 +124,10 @@ process MICROBIOME_SHARD_SEARCH {
             ${threads_per_genome},
         )
         results.append(result)
+        if result.status == 'system_error':
+            raise RuntimeError(
+                f'Systemic DIAMOND search failure for {genome_id}: {result.error}'
+            )
 
     failed = [result for result in results if result.status == 'error']
     if failed:

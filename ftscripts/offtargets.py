@@ -14,6 +14,8 @@ from tqdm import tqdm
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import shutil
+import subprocess
 
 MICROBIOME_BLAST_COLUMNS = 13
 
@@ -62,6 +64,38 @@ def _available_cpus():
     if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return multiprocessing.cpu_count()
+
+
+def validate_microbiome_search_environment(query_faa, output_dir):
+    """
+    Validates resources shared by every representative-genome search.
+    """
+
+    if not files.file_check(query_faa):
+        raise RuntimeError(f"Query protein FASTA not found or empty: {query_faa}")
+    if not os.access(query_faa, os.R_OK):
+        raise RuntimeError(f"Query protein FASTA is not readable: {query_faa}")
+    if shutil.which("diamond") is None:
+        raise RuntimeError("DIAMOND executable was not found in PATH.")
+
+    os.makedirs(output_dir, exist_ok=True)
+    if not os.access(output_dir, os.W_OK):
+        raise RuntimeError(f"Output directory is not writable: {output_dir}")
+
+
+def _is_systemic_search_error(error):
+    if isinstance(error, OSError):
+        return True
+    if isinstance(error, subprocess.CalledProcessError):
+        message = f"{error.stderr or ''} {error.stdout or ''}".lower()
+        systemic_messages = (
+            "no space left on device",
+            "permission denied",
+            "read-only file system",
+            "cannot allocate memory",
+        )
+        return any(text in message for text in systemic_messages)
+    return False
 
 
 def create_microbiome_shards(species_path, output_dir, shard_size):
@@ -118,7 +152,7 @@ def search_one_genome(
     """
     Runs and validates one DIAMOND search against a representative genome.
 
-    :return: GenomeSearchResult with status success, skipped, or error.
+    :return: GenomeSearchResult with success, skipped, error, or system_error status.
     """
 
     temporary_output_path = f"{output_path}.tmp"
@@ -156,7 +190,7 @@ def search_one_genome(
             os.remove(temporary_output_path)
         return GenomeSearchResult(
             genome_id,
-            "error",
+            "system_error" if _is_systemic_search_error(error) else "error",
             output_path,
             str(error),
         )
@@ -271,6 +305,10 @@ def microbiome_offtarget_blast_species(
         "species_blast_results",
     )
     os.makedirs(offtarget_path, exist_ok=True)
+    validate_microbiome_search_environment(
+        organism_prot_seq_path,
+        offtarget_path,
+    )
 
     genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_databases_path)
     _warn_incomplete_microbiome_catalogue(
@@ -305,7 +343,9 @@ def microbiome_offtarget_blast_species(
         search_arguments.append((genome_dir, genome_db, blast_output_path))
 
     results = []
-    with ThreadPoolExecutor(max_workers=parallel_genomes) as executor:
+    systemic_failure = None
+    executor = ThreadPoolExecutor(max_workers=parallel_genomes)
+    try:
         futures = {
             executor.submit(
                 search_one_genome,
@@ -324,7 +364,22 @@ def microbiome_offtarget_blast_species(
             total=len(futures),
             desc=f"Searching {catalogue_name}",
         ):
-            results.append(future.result())
+            result = future.result()
+            results.append(result)
+            if result.status == "system_error":
+                systemic_failure = result
+                for pending_future in futures:
+                    if pending_future is not future:
+                        pending_future.cancel()
+                break
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    if systemic_failure is not None:
+        raise RuntimeError(
+            f"Systemic DIAMOND search failure for {systemic_failure.genome_id}: "
+            f"{systemic_failure.error}"
+        )
 
     status_counts = {
         status: sum(result.status == status for result in results)
