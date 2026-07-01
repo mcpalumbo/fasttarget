@@ -366,8 +366,6 @@ def offtarget_module(config, databases_path, output_path, cpus):
                     logging.info('Microbiome offtarget blast search finished')
 
                     # Parse results
-                    microbiome_identity_filter = config.offtarget['microbiome_identity_filter']
-                    microbiome_coverage_filter = config.offtarget['microbiome_coverage_filter']
                     logging.info(f'Microbiome identity filter: {microbiome_identity_filter}')
                     logging.info(f'Microbiome coverage filter: {microbiome_coverage_filter}')
                     df_microbiome_norm, df_microbiome_counts, df_microbiome_total_genomes = offtargets.microbiome_species_parse(databases_path, output_path, organism_name, microbiome_identity_filter, microbiome_coverage_filter)
