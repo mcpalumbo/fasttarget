@@ -64,6 +64,48 @@ def _available_cpus():
     return multiprocessing.cpu_count()
 
 
+def create_microbiome_shards(species_path, output_dir, shard_size):
+    """
+    Creates size-balanced shard files containing indexed representative genome IDs.
+
+    :return: List of shard file paths.
+    """
+
+    if isinstance(shard_size, bool) or int(shard_size) < 1:
+        raise ValueError("shard_size must be a positive integer.")
+
+    _, indexed_genomes = _microbiome_catalogue_status(species_path)
+    if not indexed_genomes:
+        raise RuntimeError(f"No indexed representative genomes found in {species_path}.")
+
+    genomes = []
+    for genome_id in indexed_genomes:
+        faa_path = os.path.join(species_path, genome_id, f"{genome_id}.faa")
+        if not files.file_check(faa_path):
+            raise FileNotFoundError(
+                f"Representative protein FASTA not found: {faa_path}"
+            )
+        genomes.append((genome_id, os.path.getsize(faa_path)))
+
+    shard_count = max(1, (len(genomes) + int(shard_size) - 1) // int(shard_size))
+    shards = [{"size": 0, "genomes": []} for _ in range(shard_count)]
+    for genome_id, faa_size in sorted(genomes, key=lambda item: item[1], reverse=True):
+        shard = min(shards, key=lambda item: (item["size"], len(item["genomes"])))
+        shard["genomes"].append(genome_id)
+        shard["size"] += faa_size
+
+    os.makedirs(output_dir, exist_ok=True)
+    shard_paths = []
+    for index, shard in enumerate(shards, start=1):
+        shard_path = os.path.join(output_dir, f"shard_{index:04d}.txt")
+        with open(shard_path, "w", encoding="utf-8") as shard_file:
+            for genome_id in sorted(shard["genomes"]):
+                shard_file.write(f"{genome_id}\n")
+        shard_paths.append(shard_path)
+
+    return shard_paths
+
+
 def search_one_genome(
     genome_id,
     genome_db,
@@ -394,6 +436,7 @@ def microbiome_species_parse(
     catalogue_name,
     identity_filter,
     coverage_filter,
+    genome_output_path=None,
 ):
     """
     Parse Diamond BLASTP results against all genomes in the microbiome species catalogue.
@@ -408,6 +451,7 @@ def microbiome_species_parse(
     :param catalogue_name: Name of a supported MGnify catalogue.
     :param identity_filter: Minimum percentage identity accepted in the pident column.
     :param coverage_filter: Minimum query coverage accepted in the qcovhsp column.
+    :param genome_output_path: Optional root containing the staged organism genome.
 
     Returns:
         - df_microbiome_norm: DataFrame with one row per protein and a column with normalized counts
@@ -508,8 +552,9 @@ def microbiome_species_parse(
     }
 
     column_prefix = catalogue_column_prefix(catalogue_name)
+    genome_output_path = genome_output_path or output_path
     metadata.metadata_table_with_values(
-        output_path,
+        genome_output_path,
         organism_name,
         protein_hits,
         f'{column_prefix}_offtarget',
@@ -517,7 +562,7 @@ def microbiome_species_parse(
         'no_hit',
     )
     df_microbiome_norm = metadata.metadata_table_with_values(
-        output_path,
+        genome_output_path,
         organism_name,
         protein_hit_counts,
         f'{column_prefix}_offtarget_norm',
@@ -525,7 +570,7 @@ def microbiome_species_parse(
         0,
     )
     df_hit_totals = metadata.metadata_table_with_values(
-        output_path,
+        genome_output_path,
         organism_name,
         protein_hit_totals,
         f'{column_prefix}_offtarget_counts',
@@ -533,7 +578,7 @@ def microbiome_species_parse(
         0,
     )
     df_total_genomes = metadata.metadata_table_with_values(
-        output_path,
+        genome_output_path,
         organism_name,
         protein_total_genomes,
         f'{column_prefix}_genomes_analyzed',

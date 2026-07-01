@@ -23,7 +23,11 @@ include { CONSERVATION_DOWNLOAD_GENOMES } from '../modules/conservation_download
 include { CONSERVATION_ROARY } from '../modules/conservation_roary'
 include { CONSERVATION_CORECRUNCHER } from '../modules/conservation_corecruncher'
 include { OFFTARGET_HUMAN } from '../modules/offtarget_human'
-include { OFFTARGET_MICROBIOME } from '../modules/offtarget_microbiome'
+include {
+    PREPARE_MICROBIOME_SHARDS;
+    MICROBIOME_SHARD_SEARCH;
+    PARSE_MICROBIOME_RESULTS
+} from '../modules/offtarget_microbiome'
 include { OFFTARGET_FOLDSEEK } from '../modules/offtarget_foldseek'
 include { ESSENTIALITY_DEG } from '../modules/essentiality_deg'
 include { LOCALIZATION_PSORTB } from '../modules/localization_psortb'
@@ -351,15 +355,50 @@ workflow FASTTARGET {
             identity_filter: config.offtarget.microbiome_identity_filter ?: 40,
             coverage_filter: config.offtarget.microbiome_coverage_filter ?: 70
         ]]
-        def microbiome_catalogues_json = groovy.json.JsonOutput.toJson(microbiome_catalogues)
-        
-        OFFTARGET_MICROBIOME(
-            GENOME_PREPARATION.out.all_genome_files,
+        def microbiome_shard_size = params.microbiome_genomes_per_job
+        def microbiome_threads = config.offtarget.microbiome_threads_per_genome ?: 4
+        microbiome_catalogue_ch = Channel
+            .fromList(microbiome_catalogues)
+            .map { catalogue ->
+                tuple(
+                    catalogue.name as String,
+                    catalogue.identity_filter,
+                    catalogue.coverage_filter
+                )
+            }
+
+        PREPARE_MICROBIOME_SHARDS(
+            microbiome_catalogue_ch,
+            databases_path,
+            microbiome_shard_size
+        )
+
+        microbiome_shards_ch = PREPARE_MICROBIOME_SHARDS.out.shards
+            .flatMap { catalogue_name, identity, coverage, shard_files ->
+                def files = shard_files instanceof List ? shard_files : [shard_files]
+                files.collect { shard_file ->
+                    tuple(catalogue_name, identity, coverage, shard_file)
+                }
+            }
+
+        MICROBIOME_SHARD_SEARCH(
+            microbiome_shards_ch,
+            GENOME_PREPARATION.out.faa.first(),
             organism_name,
             output_path,
             databases_path,
-            microbiome_catalogues_json,
-            cpus
+            microbiome_threads
+        )
+
+        microbiome_completed_ch = MICROBIOME_SHARD_SEARCH.out.completed
+            .groupTuple(by: [0, 1, 2])
+
+        PARSE_MICROBIOME_RESULTS(
+            microbiome_completed_ch,
+            organism_name,
+            output_path,
+            databases_path,
+            GENOME_PREPARATION.out.gbk.first()
         )
     }
     
@@ -469,9 +508,9 @@ workflow FASTTARGET {
     }
     if (offtarget_enabled && microbiome_enabled) {
         merge_tables_ch = merge_tables_ch
-            .mix(OFFTARGET_MICROBIOME.out.counts_tables.flatten())
-            .mix(OFFTARGET_MICROBIOME.out.normalized_tables.flatten())
-            .mix(OFFTARGET_MICROBIOME.out.genomes_analyzed_tables.flatten())
+            .mix(PARSE_MICROBIOME_RESULTS.out.counts_table)
+            .mix(PARSE_MICROBIOME_RESULTS.out.normalized_table)
+            .mix(PARSE_MICROBIOME_RESULTS.out.genomes_analyzed_table)
     }
     if (offtarget_enabled && foldseek_enabled && structures_enabled) {
         merge_tables_ch = merge_tables_ch.mix(OFFTARGET_FOLDSEEK.out.foldseek_table)

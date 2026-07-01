@@ -391,6 +391,7 @@ The `config.yml` file is the **central configuration file** for this repository.
    - `offtarget.enabled`: Set to `True` to enable offtarget analysis.
    - `offtarget.human`: Set to `True` to enable human offtarget analysis.
    - `offtarget.microbiome`: Set to `True` to enable microbiome offtarget analysis.
+   - `offtarget.microbiome_threads_per_genome`: DIAMOND threads per representative genome. Standalone uses this value to calculate its worker count; each Nextflow microbiome task requests this number of CPUs. Default: `4`.
    - `offtarget.microbiome_catalogues`: Select one or more supported catalogues. Each entry requires `name`, `identity_filter`, and `coverage_filter`.
    - Catalogue filters are independent. Hits equal to or above both thresholds are retained.
    ```yaml
@@ -402,6 +403,10 @@ The `config.yml` file is the **central configuration file** for this repository.
        identity_filter: 50
        coverage_filter: 80
    ```
+   In standalone mode, `cpus: 16` and `microbiome_threads_per_genome: 4` run up to four representative-genome searches concurrently. CPU affinity limits are respected.
+   Nextflow divides each catalogue into balanced tasks containing approximately 250 representative genomes. Configure this with `microbiome_genomes_per_job` in `nextflow/nextflow.config` or override it with `--microbiome_genomes_per_job`.
+   Nextflow runs up to five microbiome tasks concurrently. Configure `microbiome_max_forks` in `nextflow/nextflow.config` or override it with `--microbiome_max_forks`.
+   Tasks are balanced by total FASTA size and write validated per-genome TSV files directly to the persistent output directory, so retries and `-resume` only execute missing or invalid results.
    - `offtarget.foldseek_human`: Set to `True` to use Foldseek for structural comparison against human proteome. **Note:** Requires both `offtarget.enabled` AND `structures.enabled` to be `True`.
 
 9. **DEG Analysis:**

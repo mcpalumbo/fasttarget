@@ -1,125 +1,244 @@
 #!/usr/bin/env nextflow
 
 /*
- * Module: Offtarget - Microbiome
- * ===============================
- * Runs BLAST against gut microbiome genomes to identify potential offtargets
- * 
- * Steps:
- * 1. Run BLASTP searches against all microbiome species genomes
- * 2. Parse results with identity and coverage filters
- * 3. Generate normalized scores and counts
- * 
- * Can run in parallel with human and foldseek offtarget modules
+ * Microbiome off-target scatter-gather workflow.
+ *
+ * Representative genomes are balanced into shards by FASTA size. Each shard
+ * runs sequentially with a fixed CPU allocation, while Nextflow executes
+ * multiple shards concurrently.
  */
 
-process OFFTARGET_MICROBIOME {
-    tag "${organism_name}"
-    label 'blast_process'
-    publishDir "${output_path}", mode: 'copy', pattern: "${organism_name}/offtarget/**"
-    
+process PREPARE_MICROBIOME_SHARDS {
+    tag "${catalogue_name}"
+    label 'low_resources'
+
     input:
-    path genome_files
+    tuple val(catalogue_name), val(identity_filter), val(coverage_filter)
+    val databases_path
+    val shard_size
+
+    output:
+    tuple val(catalogue_name), val(identity_filter), val(coverage_filter),
+        path("shards/*.txt"), emit: shards
+
+    script:
+    def base_path = workflow.projectDir.parent
+    """
+    #!/usr/bin/env python3
+    import os
+    import sys
+
+    sys.path.insert(0, '${base_path}')
+
+    from ftscripts import offtargets
+    from ftscripts.microbiome_catalogues import catalogue_species_path
+
+    species_path = catalogue_species_path('${databases_path}', '${catalogue_name}')
+    shard_paths = offtargets.create_microbiome_shards(
+        species_path,
+        os.path.join(os.getcwd(), 'shards'),
+        ${shard_size},
+    )
+    print(
+        f"Prepared {len(shard_paths)} shards for ${catalogue_name} "
+        f"with a target size of ${shard_size} genomes."
+    )
+    """
+
+    stub:
+    """
+    mkdir -p shards
+    echo "MGYG000000001" > shards/shard_0001.txt
+    """
+}
+
+
+process MICROBIOME_SHARD_SEARCH {
+    tag "${catalogue_name}:${shard_file.simpleName}"
+    label 'microbiome_shard'
+    cache false
+    cpus { threads_per_genome as int }
+    maxForks params.microbiome_max_forks
+    errorStrategy 'retry'
+    maxRetries 2
+
+    input:
+    tuple val(catalogue_name), val(identity_filter), val(coverage_filter),
+        path(shard_file)
+    path query_faa
     val organism_name
     val output_path
     val databases_path
-    val microbiome_catalogues_json
-    val cpus
-    
+    val threads_per_genome
+
     output:
-    path "${organism_name}/offtarget/microbiomes/", emit: microbiomes_dir
-    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_offtarget_norm.tsv", emit: normalized_tables
-    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_offtarget_counts.tsv", emit: counts_tables
-    path "${organism_name}/offtarget/microbiomes/*/species_blast_results/*_genomes_analyzed.tsv", emit: genomes_analyzed_tables
-    path "${organism_name}/offtarget/**", emit: all_microbiome_offtarget
-    val organism_name, emit: organism_name
-    
+    tuple val(catalogue_name), val(identity_filter), val(coverage_filter),
+        path("completed/${catalogue_name}_${shard_file.simpleName}.done"),
+        emit: completed
+
     script:
     def base_path = workflow.projectDir.parent
-    """#!/usr/bin/env python3
-    
-import sys
-import os
-import json
+    """
+    #!/usr/bin/env python3
+    import os
+    import sys
 
-# Add parent directory to path to import ftscripts
-sys.path.insert(0, '${base_path}')
+    sys.path.insert(0, '${base_path}')
 
-from ftscripts import offtargets
+    from ftscripts import offtargets
+    from ftscripts.microbiome_catalogues import catalogue_species_path
 
-print('=' * 80)
-print('MICROBIOME OFFTARGET ANALYSIS'.center(80))
-print('=' * 80)
-
-catalogues = json.loads('''${microbiome_catalogues_json}''')
-
-print('\\nCatalogues:')
-for catalogue in catalogues:
-    print(
-        f"  - {catalogue['name']}: identity={catalogue['identity_filter']}%, "
-        f"coverage={catalogue['coverage_filter']}%"
-    )
-print(f'  - CPUs: ${cpus}')
-
-# Create organism directory structure in work dir
-work_dir = os.getcwd()
-organism_dir = os.path.join(work_dir, '${organism_name}')
-offtarget_dir = os.path.join(organism_dir, 'offtarget')
-os.makedirs(offtarget_dir, exist_ok=True)
-
-# Create genome directory and copy genome files
-import shutil
-genome_dir = os.path.join(organism_dir, 'genome')
-os.makedirs(genome_dir, exist_ok=True)
-
-print('Copying genome files...')
-for genome_file in os.listdir('.'):
-    if genome_file.endswith(('.gbk', '.faa', '.fna', '.fasta', '.gff')):
-        src = os.path.join(work_dir, genome_file)
-        dst = os.path.join(genome_dir, genome_file)
-        if os.path.isfile(src) and not os.path.exists(dst):
-            shutil.copy2(src, dst)
-            print(f'  Copied: {genome_file}')
-
-for catalogue in catalogues:
-    name = catalogue['name']
-    identity = float(catalogue['identity_filter'])
-    coverage = float(catalogue['coverage_filter'])
-    print(f'[1] Running DIAMOND searches against {name}...')
-    offtargets.microbiome_offtarget_blast_species(
-        '${databases_path}',
-        work_dir,
+    catalogue_name = '${catalogue_name}'
+    species_path = catalogue_species_path('${databases_path}', catalogue_name)
+    results_path = os.path.join(
+        '${output_path}',
         '${organism_name}',
-        name,
-        identity,
-        coverage,
-        ${cpus},
-        ${cpus}
+        'offtarget',
+        'microbiomes',
+        catalogue_name,
+        'species_blast_results',
     )
-    print(f'[2] Parsing {name} results...')
-    result_tables = offtargets.microbiome_species_parse(
-        '${databases_path}',
-        work_dir,
-        '${organism_name}',
-        name,
-        identity,
-        coverage
-    )
-    print(f'  - Genes analyzed: {len(result_tables[0])}')
+    os.makedirs(results_path, exist_ok=True)
 
-print('Microbiome offtarget analysis completed')
-"""
-    
+    suffix = offtargets._microbiome_result_suffix(
+        ${identity_filter},
+        ${coverage_filter},
+    )
+    with open('${shard_file}', 'r', encoding='utf-8') as shard_handle:
+        genome_ids = [line.strip() for line in shard_handle if line.strip()]
+
+    results = []
+    for genome_id in genome_ids:
+        genome_db = os.path.join(species_path, genome_id, f'{genome_id}_DB')
+        result = offtargets.search_one_genome(
+            genome_id,
+            genome_db,
+            '${query_faa}',
+            os.path.join(results_path, f'{genome_id}{suffix}'),
+            ${identity_filter},
+            ${coverage_filter},
+            ${threads_per_genome},
+        )
+        results.append(result)
+
+    failed = [result for result in results if result.status == 'error']
+    if failed:
+        examples = '; '.join(
+            f'{result.genome_id}: {result.error}' for result in failed[:5]
+        )
+        raise RuntimeError(
+            f'{len(failed)} searches failed in ${shard_file.simpleName}: {examples}'
+        )
+
+    os.makedirs('completed', exist_ok=True)
+    marker = os.path.join(
+        'completed',
+        '${catalogue_name}_${shard_file.simpleName}.done',
+    )
+    with open(marker, 'w', encoding='utf-8') as marker_file:
+        marker_file.write(
+            f'completed={len(results)}\\n'
+            f'skipped={sum(r.status == "skipped" for r in results)}\\n'
+        )
+    """
+
     stub:
     """
-    mkdir -p ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results
-    
-    # Create dummy species results
-    echo -e "gene\thuman_gut_offtarget_norm\ngene1\t0.15" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_offtarget_norm.tsv
-    echo -e "gene\thuman_gut_offtarget_counts\ngene1\t5" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_offtarget_counts.tsv
-    echo -e "gene\thuman_gut_genomes_analyzed\ngene1\t4744" > ${organism_name}/offtarget/microbiomes/human-gut/species_blast_results/human_gut_genomes_analyzed.tsv
-    
-    # Create a dummy individual result
-    echo "STUB: Microbiome offtarget for ${organism_name}"
+    mkdir -p completed
+    echo "completed=1" > completed/${catalogue_name}_${shard_file.simpleName}.done
+    """
+}
+
+
+process PARSE_MICROBIOME_RESULTS {
+    tag "${catalogue_name}"
+    label 'low_resources'
+    publishDir "${output_path}", mode: 'copy',
+        pattern: "${organism_name}/offtarget/microbiomes/${catalogue_name}/**"
+
+    input:
+    tuple val(catalogue_name), val(identity_filter), val(coverage_filter),
+        path(completion_markers)
+    val organism_name
+    val output_path
+    val databases_path
+    path genome_gbk
+
+    output:
+    path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/*_offtarget_norm.tsv",
+        emit: normalized_table
+    path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/*_offtarget_counts.tsv",
+        emit: counts_table
+    path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/*_genomes_analyzed.tsv",
+        emit: genomes_analyzed_table
+    val organism_name, emit: organism_name
+
+    script:
+    def base_path = workflow.projectDir.parent
+    """
+    #!/usr/bin/env python3
+    import os
+    import shutil
+    import sys
+
+    sys.path.insert(0, '${base_path}')
+
+    from ftscripts import offtargets
+    from ftscripts.microbiome_catalogues import catalogue_column_prefix
+
+    work_dir = os.getcwd()
+    genome_dir = os.path.join(work_dir, '${organism_name}', 'genome')
+    os.makedirs(genome_dir, exist_ok=True)
+    shutil.copy2(
+        '${genome_gbk}',
+        os.path.join(genome_dir, '${organism_name}.gbk'),
+    )
+
+    tables = offtargets.microbiome_species_parse(
+        '${databases_path}',
+        '${output_path}',
+        '${organism_name}',
+        '${catalogue_name}',
+        ${identity_filter},
+        ${coverage_filter},
+        genome_output_path=work_dir,
+    )
+
+    prefix = catalogue_column_prefix('${catalogue_name}')
+    persistent_results = os.path.join(
+        '${output_path}',
+        '${organism_name}',
+        'offtarget',
+        'microbiomes',
+        '${catalogue_name}',
+        'species_blast_results',
+    )
+    local_results = os.path.join(
+        '${organism_name}',
+        'offtarget',
+        'microbiomes',
+        '${catalogue_name}',
+        'species_blast_results',
+    )
+    os.makedirs(local_results, exist_ok=True)
+
+    for property_name in (
+        f'{prefix}_offtarget_norm',
+        f'{prefix}_offtarget_counts',
+        f'{prefix}_genomes_analyzed',
+    ):
+        source = os.path.join(persistent_results, f'{property_name}.tsv')
+        shutil.copy2(source, os.path.join(local_results, os.path.basename(source)))
+
+    print('Parsed ${catalogue_name} microbiome results.')
+    """
+
+    stub:
+    """
+    results=${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results
+    mkdir -p "\$results"
+    echo -e "gene\tstub_offtarget_norm\ngene1\t0.15" > "\$results/stub_offtarget_norm.tsv"
+    echo -e "gene\tstub_offtarget_counts\ngene1\t5" > "\$results/stub_offtarget_counts.tsv"
+    echo -e "gene\tstub_genomes_analyzed\ngene1\t1" > "\$results/stub_genomes_analyzed.tsv"
     """
 }
