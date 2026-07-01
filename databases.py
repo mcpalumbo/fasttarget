@@ -1193,7 +1193,7 @@ def index_db_blast_microbiome_species_catalogue(
 ):
 
     """
-    Makes a Diamond BLAST db for gut microbiome species catalogue. 
+    Creates and verifies DIAMOND indexes for a microbiome species catalogue.
 
     :param database_path =  Path to the databases folder.
     :param catalogue_name: Name of a supported MGnify catalogue.
@@ -1207,32 +1207,76 @@ def index_db_blast_microbiome_species_catalogue(
         catalogue_name,
         allow_legacy=False,
     )
-    faa_files = glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
-
     if specific_file is None:
-
-        for faa_file in faa_files:
-            if not files.file_check(faa_file):
-                raise FileNotFoundError(f"File {faa_file} does not exist.")
-            else:
-                try:
-                    programs.run_makediamonddb(
-                    input= faa_file,
-                    output= faa_file.replace(".faa", "_DB")
-                    )
-                except Exception as e:
-                    print(f'Error indexing {faa_file} for Diamond DB:', e)
+        faa_files = sorted(
+            glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
+        )
+        expected_species = get_catalogue(catalogue_name)["number_of_species"]
+        if len(faa_files) != expected_species:
+            raise RuntimeError(
+                f"{catalogue_name} contains {len(faa_files)} representative FASTA "
+                f"files; {expected_species} were expected."
+            )
     else:
-        if not files.file_check(specific_file):
-            raise FileNotFoundError(f"File {specific_file} does not exist.")
-        else:
+        faa_files = [specific_file]
+
+    indexed = []
+    already_indexed = []
+    failed = []
+
+    for faa_file in faa_files:
+        if not files.file_check(faa_file):
+            raise FileNotFoundError(f"File {faa_file} does not exist.")
+
+        index_base = os.path.splitext(faa_file)[0] + "_DB"
+        index_file = f"{index_base}.dmnd"
+        if files.file_check(index_file):
+            already_indexed.append(faa_file)
+            continue
+
+        last_error = None
+        for attempt in range(1, 3):
+            if os.path.exists(index_file):
+                os.remove(index_file)
             try:
                 programs.run_makediamonddb(
-                input= specific_file,
-                output= specific_file.replace(".faa", "_DB")
+                    input=faa_file,
+                    output=index_base,
                 )
-            except Exception as e:
-                print(f'Error indexing {specific_file} for Diamond DB:', e)
+                if not files.file_check(index_file):
+                    raise RuntimeError(
+                        f"DIAMOND did not create a valid index at {index_file}."
+                    )
+                indexed.append(faa_file)
+                last_error = None
+                break
+            except Exception as error:
+                last_error = error
+                if attempt == 1:
+                    print(f"Warning: Retrying DIAMOND indexing for {faa_file}.")
+
+        if last_error is not None:
+            failed.append((faa_file, last_error))
+
+    print(
+        f"{catalogue_name} indexing summary: {len(indexed)} created, "
+        f"{len(already_indexed)} already present, {len(failed)} failed."
+    )
+
+    if failed:
+        failed_files = ", ".join(path for path, _ in failed[:5])
+        if len(failed) > 5:
+            failed_files += f", and {len(failed) - 5} more"
+        raise RuntimeError(
+            f"Failed to index {len(failed)} {catalogue_name} representative "
+            f"genomes after two attempts: {failed_files}."
+        )
+
+    return {
+        "created": len(indexed),
+        "already_present": len(already_indexed),
+        "failed": 0,
+    }
 
 def index_db_blast_deg (database_path):
 
@@ -1391,10 +1435,6 @@ def download_and_index_microbiome(database_path, catalogue_names=None):
 
         if not files.file_check(check_file):
             download_microbiome_species_catalogue(database_path, catalogue_name)
-            index_db_blast_microbiome_species_catalogue(
-                database_path,
-                catalogue_name,
-            )
         else:
             with open(check_file) as check_handle:
                 content = check_handle.read()
@@ -1402,16 +1442,10 @@ def download_and_index_microbiome(database_path, catalogue_names=None):
                 print(f"Some files are missing from {catalogue_name}; retrying.")
                 download_microbiome_species_catalogue(database_path, catalogue_name)
 
-            missing_indexes = check_microbiome_species_catalogue_downloaded(
-                database_path,
-                catalogue_name,
-            )
-            for faa_path in missing_indexes:
-                index_db_blast_microbiome_species_catalogue(
-                    database_path,
-                    catalogue_name,
-                    specific_file=faa_path,
-                )
+        index_db_blast_microbiome_species_catalogue(
+            database_path,
+            catalogue_name,
+        )
 
         print(f"{catalogue_name} downloaded and indexed")
 
