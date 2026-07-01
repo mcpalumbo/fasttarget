@@ -1257,6 +1257,10 @@ def index_db_blast_microbiome_species_catalogue(
 
         if last_error is not None:
             failed.append((faa_file, last_error))
+            print(
+                f"Error: DIAMOND indexing failed for {faa_file} after two "
+                f"attempts: {last_error}"
+            )
 
     print(
         f"{catalogue_name} indexing summary: {len(indexed)} created, "
@@ -1536,6 +1540,7 @@ def main_download(
         os.makedirs(database_path)
     
     success_count = 0
+    failed_databases = []
     for db_name in selected_databases:
         try:
             print(f"\n{'='*20} {db_name.upper()} {'='*20}")
@@ -1561,8 +1566,14 @@ def main_download(
                     
         except Exception as e:
             print(f"❌ Failed to download {db_name}: {e}")
+            failed_databases.append(db_name)
     
     print(f"\n🎯 Summary: {success_count}/{len(selected_databases)} databases completed successfully")
+    if failed_databases:
+        raise RuntimeError(
+            "Database preparation failed for: "
+            + ", ".join(failed_databases)
+        )
 
 
 if __name__ == '__main__':
