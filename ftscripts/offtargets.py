@@ -7,17 +7,45 @@ from ftscripts.microbiome_catalogues import (
 )
 import os
 import json
+import csv
 import pandas as pd
 import multiprocessing
 import glob
+import datetime
 from tqdm import tqdm
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import shutil
 import subprocess
+import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 MICROBIOME_BLAST_COLUMNS = 13
+MICROBIOME_HIT_COLUMNS = (
+    "gene",
+    "representative_genome_id",
+    "subject_protein_id",
+    "pident",
+    "qcovhsp",
+    "evalue",
+    "bitscore",
+)
+MICROBIOME_HIT_SCHEMA = pa.schema([
+    pa.field("gene", pa.string()),
+    pa.field("representative_genome_id", pa.string()),
+    pa.field("subject_protein_id", pa.string()),
+    pa.field("pident", pa.float64()),
+    pa.field("qcovhsp", pa.float64()),
+    pa.field("evalue", pa.float64()),
+    pa.field("bitscore", pa.float64()),
+])
+MICROBIOME_EVALUE = "1e-5"
+MICROBIOME_MAX_TARGET_SEQS = 1
+MICROBIOME_MAX_HSPS = 1
+MICROBIOME_PARQUET_BATCH_ROWS = 75000
+MICROBIOME_PARQUET_ROW_GROUP_ROWS = 100000
 
 
 @dataclass(frozen=True)
@@ -29,16 +57,22 @@ class GenomeSearchResult:
 
 
 def _format_filter_value(value):
+    """
+    Formats a numeric filter value for use in result file names.
+
+    :param value: Numeric filter value.
+    :return: Compact string representation of the value.
+    """
     return f"{float(value):g}"
 
 
-def _microbiome_result_suffix(identity_filter, coverage_filter):
-    identity = _format_filter_value(identity_filter)
-    coverage = _format_filter_value(coverage_filter)
-    return f"_offtarget_id{identity}_cov{coverage}.tsv"
-
-
 def _validate_microbiome_blast_output(output_path):
+    """
+    Validates the column count of a DIAMOND microbiome result file.
+
+    :param output_path: Path to the DIAMOND output TSV.
+    :raises ValueError: If a row does not contain the expected number of columns.
+    """
     with open(output_path, "r", encoding="utf-8") as output_file:
         for line_number, line in enumerate(output_file, start=1):
             if len(line.rstrip("\n").split("\t")) != MICROBIOME_BLAST_COLUMNS:
@@ -49,6 +83,12 @@ def _validate_microbiome_blast_output(output_path):
 
 
 def _microbiome_catalogue_status(species_path):
+    """
+    Returns the available and indexed representatives of a catalogue.
+
+    :param species_path: Path to the species catalogue directory.
+    :return: Sets containing genome directories and indexed genome IDs.
+    """
     genome_dirs = {
         entry for entry in os.listdir(species_path)
         if os.path.isdir(os.path.join(species_path, entry))
@@ -60,7 +100,691 @@ def _microbiome_catalogue_status(species_path):
     return genome_dirs, indexed_genomes
 
 
+def _microbiome_results_path(output_path, organism_name, catalogue_name):
+    """
+    Returns the directory containing per-genome microbiome results.
+
+    :param output_path: Path of the organism output.
+    :param organism_name: Name of the organism.
+    :param catalogue_name: Name of the microbiome catalogue.
+    :return: Path to the species BLAST result directory.
+    """
+    return os.path.join(
+        output_path,
+        organism_name,
+        "offtarget",
+        "microbiomes",
+        catalogue_name,
+        "species_blast_results",
+    )
+
+
+def _microbiome_consolidated_paths(output_path, organism_name, catalogue_name):
+    """
+    Returns the paths used by consolidated microbiome results.
+
+    :param output_path: Path of the organism output.
+    :param organism_name: Name of the organism.
+    :param catalogue_name: Name of the microbiome catalogue.
+    :return: Result directory, consolidated Parquet path, and manifest path.
+    """
+    results_path = _microbiome_results_path(
+        output_path,
+        organism_name,
+        catalogue_name,
+    )
+    return (
+        results_path,
+        os.path.join(results_path, f"{catalogue_name}_offtarget_hits.parquet"),
+        os.path.join(results_path, f"{catalogue_name}_offtarget_manifest.json"),
+    )
+
+def _read_microbiome_manifest(manifest_path):
+    """
+    Reads a microbiome consolidation manifest.
+
+    :param manifest_path: Path to the manifest JSON file.
+    :return: Manifest dictionary, or None if the file is missing or invalid.
+    """
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+            manifest = json.load(manifest_file)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def is_microbiome_consolidation_compatible(
+    output_path,
+    organism_name,
+    catalogue_name,
+    identity_filter,
+    coverage_filter,
+    verify_checksum=True,
+):
+    """
+    Checks whether consolidated microbiome hits match a catalogue and thresholds.
+
+    :param output_path: Path of the organism output.
+    :param organism_name: Name of the organism.
+    :param catalogue_name: Name of a supported MGnify catalogue.
+    :param identity_filter: Identity threshold associated with the results.
+    :param coverage_filter: Query coverage threshold associated with the results.
+    :param verify_checksum: Whether to recompute and verify the Parquet SHA-256.
+    :return: True if the Parquet and manifest are present, valid, and compatible.
+    """
+    _, parquet_path, manifest_path = _microbiome_consolidated_paths(
+        output_path,
+        organism_name,
+        catalogue_name,
+    )
+    if not os.path.isfile(parquet_path) or not os.path.isfile(manifest_path):
+        return False
+
+    manifest = _read_microbiome_manifest(manifest_path)
+    if manifest is None:
+        return False
+
+    expected_suffix = microbiome_result_suffix(
+        identity_filter,
+        coverage_filter,
+    )
+    catalogue = get_catalogue(catalogue_name)
+    try:
+        compatible = (
+            manifest.get("catalogue") == catalogue_name
+            and manifest.get("source_result_suffix") == expected_suffix
+            and manifest.get("expected_representatives")
+            == catalogue["number_of_species"]
+            and _format_filter_value(manifest.get("identity_filter"))
+            == _format_filter_value(identity_filter)
+            and _format_filter_value(manifest.get("coverage_filter"))
+            == _format_filter_value(coverage_filter)
+            and manifest.get("hits_parquet") == os.path.basename(parquet_path)
+        )
+    except (TypeError, ValueError):
+        return False
+    if not compatible:
+        return False
+
+    try:
+        parquet_rows = pq.ParquetFile(parquet_path).metadata.num_rows
+        if parquet_rows != manifest.get("hit_rows"):
+            return False
+        return (
+            not verify_checksum
+            or files.sha256_file(parquet_path)
+            == manifest.get("hits_parquet_sha256")
+        )
+    except (OSError, pa.ArrowException):
+        return False
+
+
+def _validate_microbiome_source_tsv(tsv_path):
+    """
+    Validates one per-genome DIAMOND result and counts its hit rows.
+
+    Empty files are accepted as valid searches without hits.
+
+    :param tsv_path: Path to the per-genome result TSV.
+    :return: Number of non-empty result rows.
+    :raises ValueError: If columns, numeric values, or query IDs are invalid.
+    """
+    row_count = 0
+    query_ids = set()
+    with open(tsv_path, "r", encoding="utf-8", newline="") as input_file:
+        reader = csv.reader(input_file, delimiter="\t")
+        for line_number, row in enumerate(reader, start=1):
+            if not row:
+                continue
+            if len(row) != MICROBIOME_BLAST_COLUMNS:
+                raise ValueError(
+                    f"Invalid DIAMOND output in {tsv_path} at line {line_number}: "
+                    f"expected {MICROBIOME_BLAST_COLUMNS} columns, found {len(row)}."
+                )
+            if not row[0]:
+                raise ValueError(
+                    f"Empty qseqid in {tsv_path} at line {line_number}."
+                )
+            if row[0] in query_ids:
+                raise ValueError(
+                    f"Duplicate qseqid {row[0]!r} in {tsv_path}; "
+                    "--max-target-seqs 1 requires at most one row per query."
+                )
+            query_ids.add(row[0])
+            try:
+                for position in (2, 10, 11, 12):
+                    float(row[position])
+            except ValueError as error:
+                raise ValueError(
+                    f"Invalid numeric value in {tsv_path} at line {line_number}."
+                ) from error
+            row_count += 1
+    return row_count
+
+
+def _write_unsorted_microbiome_parquet(
+    source_files,
+    unsorted_path,
+    batch_rows=MICROBIOME_PARQUET_BATCH_ROWS,
+):
+    """
+    Writes per-genome microbiome hits incrementally to an unsorted Parquet file.
+
+    :param source_files: Sequence of representative IDs and result TSV paths.
+    :param unsorted_path: Path to the temporary unsorted Parquet file.
+    :param batch_rows: Maximum number of rows accumulated before writing a batch.
+    """
+    columns = {column: [] for column in MICROBIOME_HIT_COLUMNS}
+
+    def flush_batch(writer):
+        """
+        Writes the current in-memory hit batch and clears its columns.
+
+        :param writer: Open PyArrow Parquet writer.
+        """
+        if not columns["gene"]:
+            return
+        writer.write_table(
+            pa.Table.from_pydict(columns, schema=MICROBIOME_HIT_SCHEMA),
+            row_group_size=MICROBIOME_PARQUET_ROW_GROUP_ROWS,
+        )
+        for values in columns.values():
+            values.clear()
+
+    with pq.ParquetWriter(
+        unsorted_path,
+        MICROBIOME_HIT_SCHEMA,
+        compression="zstd",
+    ) as writer:
+        for genome_id, tsv_path in source_files:
+            with open(tsv_path, "r", encoding="utf-8", newline="") as input_file:
+                for row in csv.reader(input_file, delimiter="\t"):
+                    if not row:
+                        continue
+                    columns["gene"].append(row[0])
+                    columns["representative_genome_id"].append(genome_id)
+                    columns["subject_protein_id"].append(row[1])
+                    columns["pident"].append(float(row[2]))
+                    columns["qcovhsp"].append(float(row[12]))
+                    columns["evalue"].append(float(row[10]))
+                    columns["bitscore"].append(float(row[11]))
+                    if len(columns["gene"]) >= batch_rows:
+                        flush_batch(writer)
+        flush_batch(writer)
+
+
+def _duckdb_path(file_path):
+    """
+    Escapes a file path for use in a DuckDB SQL string.
+
+    :param file_path: File path to escape.
+    :return: Absolute SQL-safe file path.
+    """
+    return os.path.abspath(file_path).replace("'", "''")
+
+
+def _sort_microbiome_parquet(unsorted_path, sorted_path, temporary_directory):
+    """
+    Sorts consolidated microbiome hits using DuckDB external storage.
+
+    :param unsorted_path: Path to the unsorted input Parquet file.
+    :param sorted_path: Path to the sorted output Parquet file.
+    :param temporary_directory: Directory available for DuckDB temporary data.
+    """
+    connection = duckdb.connect()
+    try:
+        connection.execute(
+            f"SET temp_directory='{_duckdb_path(temporary_directory)}'"
+        )
+        connection.execute(
+            f"""
+            COPY (
+                SELECT * FROM read_parquet('{_duckdb_path(unsorted_path)}')
+                ORDER BY gene, representative_genome_id
+            )
+            TO '{_duckdb_path(sorted_path)}'
+            (
+                FORMAT PARQUET,
+                COMPRESSION ZSTD,
+                ROW_GROUP_SIZE {MICROBIOME_PARQUET_ROW_GROUP_ROWS}
+            )
+            """
+        )
+    finally:
+        connection.close()
+
+
+def _validate_consolidated_microbiome_parquet(
+    parquet_path,
+    expected_rows,
+    expected_representative_ids,
+):
+    """
+    Validates the schema and contents of a consolidated microbiome Parquet file.
+
+    :param parquet_path: Path to the consolidated Parquet file.
+    :param expected_rows: Expected number of hit rows.
+    :param expected_representative_ids: Valid representative IDs for the catalogue.
+    :return: Number of genes and representatives containing hits.
+    :raises ValueError: If any schema or content validation fails.
+    """
+    parquet_file = pq.ParquetFile(parquet_path)
+    if parquet_file.schema_arrow != MICROBIOME_HIT_SCHEMA:
+        raise ValueError(
+            f"Unexpected consolidated hit schema in {parquet_path}: "
+            f"{parquet_file.schema_arrow}."
+        )
+    if parquet_file.metadata.num_rows != expected_rows:
+        raise ValueError(
+            f"Consolidated Parquet contains {parquet_file.metadata.num_rows} rows; "
+            f"{expected_rows} source rows were expected."
+        )
+
+    previous_key = None
+    out_of_order = 0
+    for batch in parquet_file.iter_batches(
+        columns=["gene", "representative_genome_id"],
+        batch_size=MICROBIOME_PARQUET_BATCH_ROWS,
+    ):
+        genes = batch.column(0).to_pylist()
+        representatives_in_batch = batch.column(1).to_pylist()
+        for key in zip(genes, representatives_in_batch):
+            if previous_key is not None and key < previous_key:
+                out_of_order += 1
+            previous_key = key
+
+    connection = duckdb.connect()
+    try:
+        source = f"read_parquet('{_duckdb_path(parquet_path)}')"
+        null_rows = connection.execute(
+            f"""
+            SELECT count(*) FROM {source}
+            WHERE gene IS NULL OR representative_genome_id IS NULL
+            """
+        ).fetchone()[0]
+        duplicate_pairs = connection.execute(
+            f"""
+            SELECT count(*) FROM (
+                SELECT gene, representative_genome_id
+                FROM {source}
+                GROUP BY gene, representative_genome_id
+                HAVING count(*) > 1
+            )
+            """
+        ).fetchone()[0]
+        representatives = {
+            row[0] for row in connection.execute(
+                f"SELECT DISTINCT representative_genome_id FROM {source}"
+            ).fetchall()
+        }
+        genes_with_hits, representatives_with_hits = connection.execute(
+            f"""
+            SELECT
+                count(DISTINCT gene),
+                count(DISTINCT representative_genome_id)
+            FROM {source}
+            """
+        ).fetchone()
+    finally:
+        connection.close()
+
+    if null_rows:
+        raise ValueError(
+            f"Consolidated Parquet contains {null_rows} rows with null identifiers."
+        )
+    if duplicate_pairs:
+        raise ValueError(
+            f"Consolidated Parquet contains {duplicate_pairs} duplicate "
+            "gene and representative_genome_id pairs."
+        )
+    unexpected_representatives = representatives - expected_representative_ids
+    if unexpected_representatives:
+        raise ValueError(
+            f"Consolidated Parquet contains {len(unexpected_representatives)} "
+            "representative IDs outside the catalogue."
+        )
+    if out_of_order:
+        raise ValueError(
+            f"Consolidated Parquet contains {out_of_order} out-of-order rows."
+        )
+    return genes_with_hits, representatives_with_hits
+
+
+def microbiome_result_suffix(identity_filter, coverage_filter):
+    """
+    Creates the suffix used by per-genome microbiome result files.
+
+    :param identity_filter: Identity threshold associated with the results.
+    :param coverage_filter: Query coverage threshold associated with the results.
+    :return: Result file suffix containing both thresholds.
+    """
+    identity = _format_filter_value(identity_filter)
+    coverage = _format_filter_value(coverage_filter)
+    return f"_offtarget_id{identity}_cov{coverage}.tsv"
+
+def consolidate_microbiome_hits(
+    databases_path,
+    output_path,
+    organism_name,
+    catalogue_name,
+    identity_filter,
+    coverage_filter,
+    delete_source_tsvs=False,
+):
+    """
+    Consolidates validated per-genome DIAMOND results into a sorted Parquet file.
+
+    :param databases_path: Path where microbiome catalogues are stored.
+    :param output_path: Path of the organism output.
+    :param organism_name: Name of the organism.
+    :param catalogue_name: Name of a supported MGnify catalogue.
+    :param identity_filter: Identity threshold associated with the results.
+    :param coverage_filter: Query coverage threshold associated with the results.
+    :param delete_source_tsvs: Whether to remove source TSVs after validation.
+    :return: Path to the consolidated Parquet file.
+    """
+    _, existing_parquet_path, _ = _microbiome_consolidated_paths(
+        output_path,
+        organism_name,
+        catalogue_name,
+    )
+    if is_microbiome_consolidation_compatible(
+        output_path,
+        organism_name,
+        catalogue_name,
+        identity_filter,
+        coverage_filter,
+    ):
+        if delete_source_tsvs:
+            cleanup_consolidated_microbiome_tsvs(
+                databases_path,
+                output_path,
+                organism_name,
+                catalogue_name,
+                identity_filter,
+                coverage_filter,
+                delete_source_tsvs=True,
+            )
+        return existing_parquet_path
+
+    catalogue = get_catalogue(catalogue_name)
+    expected_count = catalogue["number_of_species"]
+    species_path = catalogue_species_path(databases_path, catalogue_name)
+    _, indexed_genomes = _microbiome_catalogue_status(species_path)
+    if len(indexed_genomes) != expected_count:
+        raise RuntimeError(
+            f"{catalogue_name} has {len(indexed_genomes)} indexed representatives; "
+            f"{expected_count} were expected."
+        )
+
+    taxonomy_path = os.path.join(
+        species_path,
+        "representative_taxonomy.parquet",
+    )
+    if not os.path.isfile(taxonomy_path):
+        raise FileNotFoundError(
+            f"Representative taxonomy not found: {taxonomy_path}"
+        )
+    taxonomy_table = pq.read_table(
+        taxonomy_path,
+        columns=["representative_genome_id"],
+    )
+    taxonomy_ids = set(
+        taxonomy_table.column("representative_genome_id").to_pylist()
+    )
+    if len(taxonomy_ids) != expected_count or taxonomy_ids != indexed_genomes:
+        raise RuntimeError(
+            f"{catalogue_name} taxonomy and indexed representatives do not match."
+        )
+
+    results_path, parquet_path, manifest_path = _microbiome_consolidated_paths(
+        output_path,
+        organism_name,
+        catalogue_name,
+    )
+    if not os.path.isdir(results_path):
+        raise FileNotFoundError(
+            f"Microbiome result directory not found: {results_path}"
+        )
+
+    temporary_files = [
+        name for name in os.listdir(results_path)
+        if name.endswith(".tmp")
+    ]
+    if temporary_files:
+        raise RuntimeError(
+            f"Temporary files found in {results_path}: "
+            f"{', '.join(sorted(temporary_files)[:5])}."
+        )
+
+    result_suffix = microbiome_result_suffix(
+        identity_filter,
+        coverage_filter,
+    )
+    source_files = [
+        (
+            genome_id,
+            os.path.join(results_path, f"{genome_id}{result_suffix}"),
+        )
+        for genome_id in sorted(indexed_genomes)
+    ]
+    missing_files = [
+        tsv_path for _, tsv_path in source_files
+        if not os.path.isfile(tsv_path)
+    ]
+    if missing_files:
+        raise RuntimeError(
+            f"{catalogue_name} is missing {len(missing_files)} expected result "
+            f"files for suffix {result_suffix}. Examples: "
+            f"{', '.join(missing_files[:5])}."
+        )
+
+    rows_by_representative = {}
+    for genome_id, tsv_path in source_files:
+        rows_by_representative[genome_id] = _validate_microbiome_source_tsv(
+            tsv_path
+        )
+    total_rows = sum(rows_by_representative.values())
+    empty_files = sum(count == 0 for count in rows_by_representative.values())
+
+    unsorted_path = os.path.join(
+        results_path,
+        f"{catalogue_name}_offtarget_hits.unsorted.parquet.tmp",
+    )
+    sorted_temporary_path = f"{parquet_path}.tmp"
+    duckdb_temporary_path = os.path.join(
+        results_path,
+        f".{catalogue_name}_duckdb.tmp",
+    )
+    try:
+        _write_unsorted_microbiome_parquet(source_files, unsorted_path)
+        os.makedirs(duckdb_temporary_path)
+        _sort_microbiome_parquet(
+            unsorted_path,
+            sorted_temporary_path,
+            duckdb_temporary_path,
+        )
+        genes_with_hits, representatives_with_hits = (
+            _validate_consolidated_microbiome_parquet(
+                sorted_temporary_path,
+                total_rows,
+                taxonomy_ids,
+            )
+        )
+        parquet_sha256 = files.sha256_file(sorted_temporary_path)
+        os.replace(sorted_temporary_path, parquet_path)
+    except Exception:
+        for temporary_path in (unsorted_path, sorted_temporary_path):
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        raise
+    finally:
+        if os.path.exists(unsorted_path):
+            os.remove(unsorted_path)
+        if os.path.isdir(duckdb_temporary_path):
+            shutil.rmtree(duckdb_temporary_path)
+
+    manifest = {
+        "catalogue": catalogue_name,
+        "catalogue_url": catalogue["ftp_site"],
+        "created_at_utc": datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat(),
+        "identity_filter": float(identity_filter),
+        "coverage_filter": float(coverage_filter),
+        "evalue": MICROBIOME_EVALUE,
+        "max_target_seqs": MICROBIOME_MAX_TARGET_SEQS,
+        "max_hsps": MICROBIOME_MAX_HSPS,
+        "diamond_version": programs.diamond_version(),
+        "expected_representatives": expected_count,
+        "indexed_representatives": len(indexed_genomes),
+        "searched_representatives": len(source_files),
+        "empty_result_files": empty_files,
+        "hit_rows": total_rows,
+        "genes_with_hits": genes_with_hits,
+        "representatives_with_hits": representatives_with_hits,
+        "hits_parquet": os.path.basename(parquet_path),
+        "hits_parquet_sha256": parquet_sha256,
+        "source_result_suffix": result_suffix,
+        "rows_by_representative": rows_by_representative,
+        "raw_tsv_cleanup": (
+            "pending" if delete_source_tsvs else "disabled"
+        ),
+    }
+    files.atomic_write_json(manifest, manifest_path)
+
+    if delete_source_tsvs:
+        cleanup_consolidated_microbiome_tsvs(
+            databases_path,
+            output_path,
+            organism_name,
+            catalogue_name,
+            identity_filter,
+            coverage_filter,
+            delete_source_tsvs=True,
+        )
+
+    print(
+        f"Consolidated {total_rows} {catalogue_name} hits into {parquet_path}."
+    )
+    return parquet_path
+
+
+def cleanup_consolidated_microbiome_tsvs(
+    databases_path,
+    output_path,
+    organism_name,
+    catalogue_name,
+    identity_filter,
+    coverage_filter,
+    delete_source_tsvs=False,
+):
+    """
+    Safely removes TSVs represented by a validated consolidated Parquet file.
+
+    :param databases_path: Path where microbiome catalogues are stored.
+    :param output_path: Path of the organism output.
+    :param organism_name: Name of the organism.
+    :param catalogue_name: Name of a supported MGnify catalogue.
+    :param identity_filter: Identity threshold associated with the results.
+    :param coverage_filter: Query coverage threshold associated with the results.
+    :param delete_source_tsvs: Explicit authorization to remove source TSV files.
+    :return: Number of TSV files removed in this invocation.
+    """
+    if not delete_source_tsvs:
+        return 0
+
+    results_path, parquet_path, manifest_path = _microbiome_consolidated_paths(
+        output_path,
+        organism_name,
+        catalogue_name,
+    )
+    if not os.path.isfile(parquet_path) or not os.path.isfile(manifest_path):
+        raise RuntimeError(
+            "Cannot clean microbiome TSVs without both Parquet and manifest."
+        )
+    temporary_files = [
+        name for name in os.listdir(results_path)
+        if name.endswith(".tmp")
+    ]
+    if temporary_files:
+        raise RuntimeError(
+            f"Cannot clean microbiome TSVs while temporary files exist in "
+            f"{results_path}."
+        )
+
+    manifest = _read_microbiome_manifest(manifest_path)
+    if manifest is None:
+        raise RuntimeError(f"Invalid microbiome manifest: {manifest_path}")
+    if not is_microbiome_consolidation_compatible(
+        output_path,
+        organism_name,
+        catalogue_name,
+        identity_filter,
+        coverage_filter,
+    ):
+        raise RuntimeError(
+            "Consolidated microbiome hits are not compatible with the requested "
+            "catalogue and thresholds."
+        )
+
+    rows_by_representative = manifest.get("rows_by_representative")
+    if not isinstance(rows_by_representative, dict):
+        raise RuntimeError(
+            "Microbiome manifest does not contain per-representative row counts."
+        )
+    if any(
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 0
+        for count in rows_by_representative.values()
+    ):
+        raise RuntimeError("Manifest contains invalid per-representative row counts.")
+    if sum(rows_by_representative.values()) != manifest.get("hit_rows"):
+        raise RuntimeError(
+            "Manifest hit count does not match per-representative row counts."
+        )
+
+    species_path = catalogue_species_path(databases_path, catalogue_name)
+    _, indexed_genomes = _microbiome_catalogue_status(species_path)
+    expected_count = get_catalogue(catalogue_name)["number_of_species"]
+    if (
+        len(indexed_genomes) != expected_count
+        or set(rows_by_representative) != indexed_genomes
+    ):
+        raise RuntimeError(
+            "Manifest representatives do not match the indexed catalogue."
+        )
+
+    result_suffix = microbiome_result_suffix(
+        identity_filter,
+        coverage_filter,
+    )
+    if manifest.get("source_result_suffix") != result_suffix:
+        raise RuntimeError("Manifest result suffix does not match thresholds.")
+
+    removed = 0
+    for genome_id in rows_by_representative:
+        tsv_path = os.path.join(
+            results_path,
+            f"{genome_id}{result_suffix}",
+        )
+        if os.path.isfile(tsv_path):
+            os.remove(tsv_path)
+            removed += 1
+
+    manifest["raw_tsv_cleanup"] = "completed"
+    files.atomic_write_json(manifest, manifest_path)
+    return removed
+
+
 def _available_cpus():
+    """
+    Returns the number of CPUs available to the current process.
+
+    :return: Number of available CPUs.
+    """
     if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return multiprocessing.cpu_count()
@@ -172,7 +896,8 @@ def search_one_genome(
             blastdb=genome_db,
             query=query_faa,
             output=temporary_output_path,
-            evalue="1e-5",
+            evalue=MICROBIOME_EVALUE,
+            max_hsps=MICROBIOME_MAX_HSPS,
             outfmt=(
                 "6 qseqid sseqid pident length mismatch gapopen qstart qend "
                 "sstart send evalue bitscore qcovhsp"
@@ -180,7 +905,7 @@ def search_one_genome(
             cpus=threads,
             identity=identity_filter,
             query_cover=coverage_filter,
-            max_target_seqs=1,
+            max_target_seqs=MICROBIOME_MAX_TARGET_SEQS,
         )
         _validate_microbiome_blast_output(temporary_output_path)
         os.replace(temporary_output_path, output_path)
@@ -292,6 +1017,19 @@ def microbiome_offtarget_blast_species(
     expected_genomes = catalogue["number_of_species"]
     species_databases_path = catalogue_species_path(databases_path, catalogue_name)
 
+    if is_microbiome_consolidation_compatible(
+        output_path,
+        organism_name,
+        catalogue_name,
+        identity_filter,
+        coverage_filter,
+    ):
+        print(
+            f"Compatible consolidated {catalogue_name} results already exist; "
+            "skipping DIAMOND searches."
+        )
+        return []
+
     # Path to organism proteome (.faa file)
     organism_path = os.path.join(output_path, organism_name)
     organism_prot_seq_path = os.path.join(organism_path, "genome", f"{organism_name}.faa")
@@ -323,7 +1061,7 @@ def microbiome_offtarget_blast_species(
             f"No indexed microbiome genomes were found in {species_databases_path}."
         )
 
-    result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
+    result_suffix = microbiome_result_suffix(identity_filter, coverage_filter)
     available_cpus = _available_cpus()
     cpu_budget = max(1, min(int(cpus), available_cpus))
     genome_threads = max(1, min(int(threads_per_genome), cpu_budget))
@@ -406,6 +1144,14 @@ def microbiome_offtarget_blast_species(
             f"{len(results)} results for {len(indexed_genomes)} indexed genomes."
         )
 
+    consolidate_microbiome_hits(
+        databases_path,
+        output_path,
+        organism_name,
+        catalogue_name,
+        identity_filter,
+        coverage_filter,
+    )
     return results
 
 def microbiome_offtarget_blast_allproteins (databases_path, output_path, organism_name, cpus=multiprocessing.cpu_count()):
@@ -534,7 +1280,7 @@ def microbiome_species_parse(
         indexed_genomes,
     )
 
-    result_suffix = _microbiome_result_suffix(identity_filter, coverage_filter)
+    result_suffix = microbiome_result_suffix(identity_filter, coverage_filter)
     genome_files = {
         f.removesuffix(result_suffix): f
         for f in os.listdir(offtarget_path)

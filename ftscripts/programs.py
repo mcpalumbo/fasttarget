@@ -606,6 +606,22 @@ def run_makeblastdb(input, output, title, dbtype, taxid=None):
     else:
         logging.error(f"Blast database file '{input}' not found.")
 
+def diamond_version():
+    """
+    Returns the installed DIAMOND version.
+
+    :return: DIAMOND version string, or ``unknown`` if it cannot be determined.
+    """
+    try:
+        result = subprocess.run(
+            ["diamond", "version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return (result.stdout or result.stderr).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
 
 def run_diamond_blastp(
     blastdb,

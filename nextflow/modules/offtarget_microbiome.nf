@@ -114,22 +114,31 @@ process MICROBIOME_SHARD_SEARCH {
         genome_ids = [line.strip() for line in shard_handle if line.strip()]
 
     results = []
-    for genome_id in genome_ids:
-        genome_db = os.path.join(species_path, genome_id, f'{genome_id}_DB')
-        result = offtargets.search_one_genome(
-            genome_id,
-            genome_db,
-            '${query_faa}',
-            os.path.join(results_path, f'{genome_id}{suffix}'),
-            ${identity_filter},
-            ${coverage_filter},
-            ${threads_per_genome},
-        )
-        results.append(result)
-        if result.status == 'system_error':
-            raise RuntimeError(
-                f'Systemic DIAMOND search failure for {genome_id}: {result.error}'
+    consolidated = offtargets.is_microbiome_consolidation_compatible(
+        '${output_path}',
+        '${organism_name}',
+        catalogue_name,
+        ${identity_filter},
+        ${coverage_filter},
+        verify_checksum=False,
+    )
+    if not consolidated:
+        for genome_id in genome_ids:
+            genome_db = os.path.join(species_path, genome_id, f'{genome_id}_DB')
+            result = offtargets.search_one_genome(
+                genome_id,
+                genome_db,
+                '${query_faa}',
+                os.path.join(results_path, f'{genome_id}{suffix}'),
+                ${identity_filter},
+                ${coverage_filter},
+                ${threads_per_genome},
             )
+            results.append(result)
+            if result.status == 'system_error':
+                raise RuntimeError(
+                    f'Systemic DIAMOND search failure for {genome_id}: {result.error}'
+                )
 
     failed = [result for result in results if result.status == 'error']
     if failed:
@@ -183,6 +192,10 @@ process PARSE_MICROBIOME_RESULTS {
         emit: counts_table
     path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/*_genomes_analyzed.tsv",
         emit: genomes_analyzed_table
+    path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/${catalogue_name}_offtarget_hits.parquet",
+        emit: consolidated_hits
+    path "${organism_name}/offtarget/microbiomes/${catalogue_name}/species_blast_results/${catalogue_name}_offtarget_manifest.json",
+        emit: consolidated_manifest
     val organism_name, emit: organism_name
 
     script:
@@ -204,6 +217,15 @@ process PARSE_MICROBIOME_RESULTS {
     shutil.copy2(
         '${genome_gbk}',
         os.path.join(genome_dir, '${organism_name}.gbk'),
+    )
+
+    offtargets.consolidate_microbiome_hits(
+        '${databases_path}',
+        '${output_path}',
+        '${organism_name}',
+        '${catalogue_name}',
+        ${identity_filter},
+        ${coverage_filter},
     )
 
     tables = offtargets.microbiome_species_parse(
@@ -242,6 +264,13 @@ process PARSE_MICROBIOME_RESULTS {
         source = os.path.join(persistent_results, f'{property_name}.tsv')
         shutil.copy2(source, os.path.join(local_results, os.path.basename(source)))
 
+    for consolidated_name in (
+        '${catalogue_name}_offtarget_hits.parquet',
+        '${catalogue_name}_offtarget_manifest.json',
+    ):
+        source = os.path.join(persistent_results, consolidated_name)
+        shutil.copy2(source, os.path.join(local_results, consolidated_name))
+
     print('Parsed ${catalogue_name} microbiome results.')
     """
 
@@ -252,5 +281,7 @@ process PARSE_MICROBIOME_RESULTS {
     echo -e "gene\tstub_offtarget_norm\ngene1\t0.15" > "\$results/stub_offtarget_norm.tsv"
     echo -e "gene\tstub_offtarget_counts\ngene1\t5" > "\$results/stub_offtarget_counts.tsv"
     echo -e "gene\tstub_genomes_analyzed\ngene1\t1" > "\$results/stub_genomes_analyzed.tsv"
+    touch "\$results/${catalogue_name}_offtarget_hits.parquet"
+    echo '{}' > "\$results/${catalogue_name}_offtarget_manifest.json"
     """
 }

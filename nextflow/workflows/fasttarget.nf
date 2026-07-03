@@ -350,11 +350,7 @@ workflow FASTTARGET {
     
     // Microbiome offtarget
     if (offtarget_enabled && microbiome_enabled) {
-        def microbiome_catalogues = config.offtarget.microbiome_catalogues ?: [[
-            name: 'human-gut',
-            identity_filter: config.offtarget.microbiome_identity_filter ?: 40,
-            coverage_filter: config.offtarget.microbiome_coverage_filter ?: 70
-        ]]
+        def microbiome_catalogues = config.offtarget.microbiome_catalogues
         def microbiome_shard_size = params.microbiome_genomes_per_job
         def microbiome_threads = config.offtarget.microbiome_threads_per_genome ?: 4
         microbiome_catalogue_ch = Channel

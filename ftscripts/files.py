@@ -5,6 +5,7 @@ import pandas as pd
 import logging
 import math
 import tempfile
+import hashlib
 
 
 def file_to_list(file_path):
@@ -141,6 +142,19 @@ def dict_to_json(output_path, file_name, my_dict):
         print(f"File '{full_path}' saved.")
     else:
         print(f"The directory '{output_path}' does not exist.")
+
+def sha256_file(file_path):
+    """
+    Calculates the SHA-256 checksum of a file.
+
+    :param file_path: Path to the input file.
+    :return: Hexadecimal SHA-256 checksum.
+    """
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as input_file:
+        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 def create_organism_subfolders(output_path, organism_name):
 
