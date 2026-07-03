@@ -46,6 +46,143 @@ from requests.exceptions import (
 )
 import pandas as pd
 
+
+TAXONOMY_RANKS = (
+    "domain",
+    "phylum",
+    "class",
+    "order",
+    "family",
+    "genus",
+    "species",
+)
+TAXONOMY_RANK_PREFIXES = ("d__", "p__", "c__", "o__", "f__", "g__", "s__")
+
+def prepare_microbiome_representative_taxonomy(database_path, catalogue_name="human-gut"):
+    """
+    Prepares and validates the representative taxonomy for an MGnify catalogue.
+
+    The expected IDs are all unique, non-null ``Species_rep`` values in the source
+    metadata; their count must match the catalogue configuration.
+
+    :param database_path: Path to the databases folder.
+    :param catalogue_name: Name of a supported MGnify catalogue.
+    :return: Dataframe containing one taxonomy row per representative genome.
+    """
+    catalogue = get_catalogue(catalogue_name)
+    species_path = catalogue_species_path(
+        database_path,
+        catalogue_name,
+    )
+    metadata_path = os.path.join(species_path, "genomes-all_metadata.tsv")
+    if not os.path.isfile(metadata_path):
+        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+
+    metadata = pd.read_csv(
+        metadata_path,
+        sep="\t",
+        dtype={"Genome": "string", "Species_rep": "string", "Lineage": "string"},
+    )
+    required_columns = {"Genome", "Species_rep", "Lineage"}
+    missing_columns = required_columns - set(metadata.columns)
+    if missing_columns:
+        raise ValueError(
+            f"{catalogue_name} metadata is missing required columns: "
+            f"{', '.join(sorted(missing_columns))}."
+        )
+
+    expected_ids = set(metadata["Species_rep"].dropna())
+    expected_count = catalogue["number_of_species"]
+    if len(expected_ids) != expected_count:
+        raise ValueError(
+            f"{catalogue_name} metadata contains {len(expected_ids)} unique "
+            f"Species_rep IDs; {expected_count} were expected."
+        )
+
+    representatives = metadata.loc[
+        metadata["Genome"].eq(metadata["Species_rep"]),
+        ["Species_rep", "Lineage"],
+    ].copy()
+    representatives.rename(
+        columns={"Species_rep": "representative_genome_id"},
+        inplace=True,
+    )
+
+    if representatives["representative_genome_id"].duplicated().any():
+        duplicate_ids = representatives.loc[
+            representatives["representative_genome_id"].duplicated(keep=False),
+            "representative_genome_id",
+        ].unique()
+        raise ValueError(
+            f"{catalogue_name} has duplicate representative rows: "
+            f"{', '.join(map(str, duplicate_ids[:5]))}."
+        )
+
+    actual_ids = set(representatives["representative_genome_id"].dropna())
+    missing_ids = expected_ids - actual_ids
+    unexpected_ids = actual_ids - expected_ids
+    if missing_ids or unexpected_ids:
+        raise ValueError(
+            f"{catalogue_name} representative rows do not match Species_rep IDs "
+            f"({len(missing_ids)} missing, {len(unexpected_ids)} unexpected)."
+        )
+    if len(representatives) != expected_count:
+        raise ValueError(
+            f"{catalogue_name} has {len(representatives)} representative rows; "
+            f"{expected_count} were expected."
+        )
+
+    prefix_to_rank = dict(zip(TAXONOMY_RANK_PREFIXES, TAXONOMY_RANKS))
+
+    def parse_lineage(lineage):
+        """
+        Parses an MGnify lineage into the supported taxonomy ranks.
+
+        :param lineage: Semicolon-separated MGnify taxonomy lineage.
+        :return: Dictionary with normalized taxonomy rank values.
+        """
+        parsed = {rank: "unclassified" for rank in TAXONOMY_RANKS}
+        if pd.isna(lineage):
+            return parsed
+        for item in str(lineage).split(";"):
+            item = item.strip()
+            rank = prefix_to_rank.get(item[:3])
+            value = item[3:].strip()
+            if rank and value:
+                parsed[rank] = value
+        return parsed
+
+    taxonomy = pd.DataFrame(
+        representatives["Lineage"].map(parse_lineage).tolist(),
+        index=representatives.index,
+        columns=TAXONOMY_RANKS,
+    )
+
+    output = pd.concat(
+        [
+            representatives[["representative_genome_id"]].reset_index(drop=True),
+            taxonomy.reset_index(drop=True),
+        ],
+        axis=1,
+    )
+    taxonomy_path = os.path.join(species_path, "representative_taxonomy.parquet")
+    manifest_path = os.path.join(species_path, "taxonomy_manifest.json")
+    manifest = {
+        "catalogue": catalogue_name,
+        "catalogue_url": catalogue["ftp_site"],
+        "created_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "expected_species": expected_count,
+        "representative_rows": len(output),
+        "source_file": os.path.basename(metadata_path),
+        "taxonomy_columns": list(output.columns),
+        "unclassified_value": "unclassified",
+    }
+
+    files.atomic_write_dataframe_parquet(output, taxonomy_path)
+    files.atomic_write_json(manifest, manifest_path)
+    print(f"{catalogue_name} representative taxonomy written to {taxonomy_path}.")
+    return output
+
 def retry_on_timeout(func, *args, max_retries=3, delay=5, **kwargs):
     """
     Retry a function call if a timeout occurs.
@@ -443,7 +580,6 @@ def extract_microbiome_species_ids(database_path, catalogue_name="human-gut"):
     species_path = catalogue_species_path(
         database_path,
         catalogue_name,
-        allow_legacy=False,
     )
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
 
@@ -472,7 +608,6 @@ def download_microbiome_species_catalogue(database_path, catalogue_name="human-g
     species_path = catalogue_species_path(
         database_path,
         catalogue_name,
-        allow_legacy=False,
     )
     os.makedirs(species_path, exist_ok=True)
 
@@ -484,6 +619,7 @@ def download_microbiome_species_catalogue(database_path, catalogue_name="human-g
     meta_path = os.path.join(species_path, 'genomes-all_metadata.tsv')
     meta_url = f"{base_url}genomes-all_metadata.tsv"
     download_with_wget(meta_url, meta_path)
+    prepare_microbiome_representative_taxonomy(database_path, catalogue_name)
 
     # Download species catalogue
 
@@ -604,7 +740,6 @@ def check_microbiome_species_catalogue_download(
     species_path = catalogue_species_path(
         database_path,
         catalogue_name,
-        allow_legacy=False,
     )
     species_ids = extract_microbiome_species_ids(database_path, catalogue_name)
 
@@ -1205,9 +1340,9 @@ def index_db_blast_microbiome_species_catalogue(
     species_path = catalogue_species_path(
         database_path,
         catalogue_name,
-        allow_legacy=False,
     )
     if specific_file is None:
+        prepare_microbiome_representative_taxonomy(database_path, catalogue_name)
         faa_files = sorted(
             glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)
         )
@@ -1433,7 +1568,6 @@ def download_and_index_microbiome(database_path, catalogue_names=None):
         species_path = catalogue_species_path(
             database_path,
             catalogue_name,
-            allow_legacy=False,
         )
         check_file = os.path.join(species_path, 'download_check.txt')
 
@@ -1468,7 +1602,6 @@ def check_microbiome_species_catalogue_downloaded(
     species_path = catalogue_species_path(
         database_path,
         catalogue_name,
-        allow_legacy=False,
     )
     required_extensions = {".dmnd"}
 

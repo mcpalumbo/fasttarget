@@ -4,6 +4,8 @@ import sys
 import pandas as pd
 import logging
 import math
+import tempfile
+
 
 def file_to_list(file_path):
     
@@ -202,3 +204,56 @@ def read_blast_output(file_path, len=False):
     
     else:
         print(f'File {file_path} not found.')
+
+
+def atomic_write_dataframe_parquet(dataframe, output_path):
+    """
+    Writes a dataframe atomically in Parquet format.
+
+    :param dataframe: Pandas dataframe to write.
+    :param output_path: Path to the output Parquet file.
+    """
+    output_dir = os.path.dirname(output_path)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=output_dir,
+            prefix=f".{os.path.basename(output_path)}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+        dataframe.to_parquet(temporary_path, index=False)
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
+def atomic_write_json(data, output_path):
+    """
+    Writes data atomically in JSON format.
+
+    :param data: Data to serialize as JSON.
+    :param output_path: Path to the output JSON file.
+    """
+    output_dir = os.path.dirname(output_path)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_dir,
+            prefix=f".{os.path.basename(output_path)}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            json.dump(data, temporary_file, indent=2, sort_keys=True)
+            temporary_file.write("\n")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)

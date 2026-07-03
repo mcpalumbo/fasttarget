@@ -42,6 +42,13 @@ MGNIFY_CATALOGUES = {
 
 
 def get_catalogue(catalogue_name):
+    """
+    Returns the configuration of a supported MGnify catalogue.
+
+    :param catalogue_name: Name of the microbiome catalogue.
+    :return: Dictionary containing the catalogue configuration.
+    :raises ValueError: If the catalogue is not supported.
+    """
     try:
         return MGNIFY_CATALOGUES[catalogue_name]
     except KeyError as error:
@@ -52,34 +59,27 @@ def get_catalogue(catalogue_name):
         ) from error
 
 
-def catalogue_species_path(databases_path, catalogue_name, allow_legacy=True):
-    catalogue_path = os.path.join(
+def catalogue_species_path(databases_path, catalogue_name):
+    """
+    Returns the species catalogue directory for a microbiome catalogue.
+
+    :param databases_path: Path to the databases folder.
+    :param catalogue_name: Name of the microbiome catalogue.
+    :return: Path to the species catalogue directory.
+    """
+    return os.path.join(
         databases_path,
         "microbiomes",
         catalogue_name,
         "species_catalogue",
     )
-    legacy_path = os.path.join(databases_path, "species_catalogue")
-    if (
-        allow_legacy
-        and catalogue_name == "human-gut"
-        and not os.path.isdir(catalogue_path)
-        and os.path.isdir(legacy_path)
-    ):
-        return legacy_path
-    return catalogue_path
 
 
 def catalogue_column_prefix(catalogue_name):
+    """
+    Creates a column-safe prefix from a microbiome catalogue name.
+
+    :param catalogue_name: Name of the microbiome catalogue.
+    :return: Catalogue name with hyphens replaced by underscores.
+    """
     return catalogue_name.replace("-", "_")
-
-
-def configured_catalogues(offtarget_config):
-    catalogue_configs = offtarget_config.get("microbiome_catalogues")
-    if catalogue_configs is None:
-        catalogue_configs = [{
-            "name": "human-gut",
-            "identity_filter": offtarget_config.get("microbiome_identity_filter", 40),
-            "coverage_filter": offtarget_config.get("microbiome_coverage_filter", 70),
-        }]
-    return catalogue_configs

@@ -1,10 +1,7 @@
 import yaml
 import os
 import argparse
-from ftscripts.microbiome_catalogues import (
-    MGNIFY_CATALOGUES,
-    configured_catalogues,
-)
+from ftscripts.microbiome_catalogues import MGNIFY_CATALOGUES
 
 def validate_file_path(filepath, name, required_extensions=None):
     """
@@ -271,7 +268,7 @@ def validate_config(config):
                     "positive integer"
                 )
 
-            catalogue_configs = configured_catalogues(offt)
+            catalogue_configs = offt.get("microbiome_catalogues")
             if not isinstance(catalogue_configs, list) or not catalogue_configs:
                 errors.append("offtarget.microbiome_catalogues must be a non-empty list")
                 catalogue_configs = []
@@ -441,7 +438,7 @@ def print_config(config):
                 "Microbiome Threads per Genome: "
                 f"{config.offtarget.get('microbiome_threads_per_genome', 4)}"
             )
-            for catalogue in configured_catalogues(config.offtarget):
+            for catalogue in config.offtarget["microbiome_catalogues"]:
                 print(
                     f"Microbiome Catalogue: {catalogue['name']} "
                     f"(identity={catalogue['identity_filter']}%, "

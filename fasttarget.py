@@ -4,7 +4,6 @@ import pandas as pd
 import argparse
 import multiprocessing
 from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata
-from ftscripts.microbiome_catalogues import configured_catalogues
 from datetime import datetime
 import logging
 import sys
@@ -356,7 +355,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
                         'microbiome_threads_per_genome',
                         4,
                     )
-                    for catalogue in configured_catalogues(config.offtarget):
+                    for catalogue in config.offtarget["microbiome_catalogues"]:
                         catalogue_name = catalogue['name']
                         identity_filter = float(catalogue['identity_filter'])
                         coverage_filter = float(catalogue['coverage_filter'])
