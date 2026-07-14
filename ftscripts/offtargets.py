@@ -522,7 +522,7 @@ def consolidate_microbiome_hits(
     catalogue_name,
     identity_filter,
     coverage_filter,
-    delete_source_tsvs=False,
+    delete_source_tsvs=True,
 ):
     """
     Consolidates validated per-genome DIAMOND results into a sorted Parquet file.
@@ -651,6 +651,8 @@ def consolidate_microbiome_hits(
     )
     try:
         _write_unsorted_microbiome_parquet(source_files, unsorted_path)
+        if os.path.isdir(duckdb_temporary_path):
+            shutil.rmtree(duckdb_temporary_path)
         os.makedirs(duckdb_temporary_path)
         _sort_microbiome_parquet(
             unsorted_path,
