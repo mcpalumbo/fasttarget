@@ -57,6 +57,17 @@ MICROBIOME_TAXONOMY_RANKS = (
 )
 
 
+def _duckdb_identifier(identifier):
+    """
+    Escapes a column identifier for DuckDB SQL.
+
+    :param identifier: Column identifier.
+    :return: Double-quoted DuckDB identifier.
+    """
+    escaped_identifier = identifier.replace('"', '""')
+    return f'"{escaped_identifier}"'
+
+
 def _microbiome_rank_path(rank, table_alias=None):
     """
     Returns a DuckDB expression for the hierarchical taxonomy path of a rank.
@@ -68,7 +79,7 @@ def _microbiome_rank_path(rank, table_alias=None):
     rank_index = MICROBIOME_TAXONOMY_RANKS.index(rank)
     prefix = f"{table_alias}." if table_alias else ""
     return " || ';' || ".join(
-        f"{prefix}{taxonomy_rank}"
+        f"{prefix}{_duckdb_identifier(taxonomy_rank)}"
         for taxonomy_rank in MICROBIOME_TAXONOMY_RANKS[:rank_index + 1]
     )
 
@@ -84,7 +95,7 @@ def _microbiome_classified_path_filter(rank, table_alias=None):
     rank_index = MICROBIOME_TAXONOMY_RANKS.index(rank)
     prefix = f"{table_alias}." if table_alias else ""
     return " AND ".join(
-        f"{prefix}{taxonomy_rank} <> 'unclassified'"
+        f"{prefix}{_duckdb_identifier(taxonomy_rank)} <> 'unclassified'"
         for taxonomy_rank in MICROBIOME_TAXONOMY_RANKS[:rank_index + 1]
     )
 
