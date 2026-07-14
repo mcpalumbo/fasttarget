@@ -100,6 +100,66 @@ def _microbiome_classified_path_filter(rank, table_alias=None):
     )
 
 
+def _validate_microbiome_taxonomy_manifest(manifest, current_group_ids, taxonomy_path):
+    """
+    Validates taxonomy normalization groups against the catalogue manifest.
+
+    :param manifest: Loaded taxonomy manifest.
+    :param current_group_ids: Dictionary with group IDs calculated from the parquet.
+    :param taxonomy_path: Path to the representative taxonomy parquet.
+    :return: Dictionary with normalization denominators by rank.
+    :raises RuntimeError: If manifest denominators or group IDs do not match.
+    """
+    expected_denominators = manifest.get("taxonomy_denominators")
+    expected_group_ids = manifest.get("taxonomy_group_ids")
+    if not isinstance(expected_denominators, dict) or not isinstance(
+        expected_group_ids,
+        dict,
+    ):
+        raise RuntimeError(
+            f"Taxonomy manifest for {taxonomy_path} does not define "
+            "taxonomy_denominators and taxonomy_group_ids. Regenerate the "
+            "microbiome catalogue taxonomy."
+        )
+
+    denominators = {}
+    for rank in MICROBIOME_TAXONOMY_RANKS:
+        if rank not in expected_denominators or rank not in expected_group_ids:
+            raise RuntimeError(
+                f"Taxonomy manifest for {taxonomy_path} is missing {rank} "
+                "normalization groups."
+            )
+
+        current_ids = current_group_ids[rank]
+        expected_ids = expected_group_ids[rank]
+        current_denominator = len(current_ids)
+        expected_denominator = int(expected_denominators[rank])
+        if current_denominator != expected_denominator:
+            raise RuntimeError(
+                f"{rank} taxonomy denominator mismatch for {taxonomy_path}: "
+                f"manifest={expected_denominator}, parquet={current_denominator}."
+            )
+        if current_ids != expected_ids:
+            missing_ids = sorted(set(expected_ids) - set(current_ids))
+            unexpected_ids = sorted(set(current_ids) - set(expected_ids))
+            examples = []
+            if missing_ids:
+                examples.append(f"missing={missing_ids[:3]}")
+            if unexpected_ids:
+                examples.append(f"unexpected={unexpected_ids[:3]}")
+            raise RuntimeError(
+                f"{rank} taxonomy group IDs differ from manifest for "
+                f"{taxonomy_path}: {'; '.join(examples)}."
+            )
+        if expected_denominator == 0:
+            raise RuntimeError(
+                f"No classified {rank} taxa are available in {taxonomy_path}."
+            )
+        denominators[rank] = expected_denominator
+
+    return denominators
+
+
 @dataclass(frozen=True)
 class GenomeSearchResult:
     genome_id: str
@@ -1315,6 +1375,7 @@ def microbiome_species_parse(
         species_path,
         "representative_taxonomy.parquet",
     )
+    taxonomy_manifest_path = os.path.join(species_path, "taxonomy_manifest.json")
     offtarget_path, hits_path, _ = _microbiome_consolidated_paths(
         output_path,
         organism_name,
@@ -1336,11 +1397,17 @@ def microbiome_species_parse(
         raise FileNotFoundError(
             f"Representative taxonomy not found: {taxonomy_path}"
         )
+    if not os.path.isfile(taxonomy_manifest_path):
+        raise FileNotFoundError(
+            f"Representative taxonomy manifest not found: {taxonomy_manifest_path}"
+        )
+    with open(taxonomy_manifest_path, "r", encoding="utf-8") as manifest_file:
+        taxonomy_manifest = json.load(manifest_file)
 
     hits_source = f"read_parquet('{_duckdb_path(hits_path)}')"
     taxonomy_source = f"read_parquet('{_duckdb_path(taxonomy_path)}')"
     counts_by_rank = {}
-    denominators = {}
+    current_group_ids = {}
     connection = duckdb.connect()
     try:
         invalid_hits = connection.execute(
@@ -1362,9 +1429,13 @@ def microbiome_species_parse(
 
         for rank in MICROBIOME_TAXONOMY_RANKS:
             if rank == "species":
-                denominator = connection.execute(
-                    f"SELECT count(*) FROM {taxonomy_source}"
-                ).fetchone()[0]
+                taxonomy_group_rows = connection.execute(
+                    f"""
+                    SELECT {_duckdb_identifier("representative_genome_id")}
+                    FROM {taxonomy_source}
+                    ORDER BY {_duckdb_identifier("representative_genome_id")}
+                    """
+                ).fetchall()
                 rows = connection.execute(
                     f"""
                     SELECT gene, count(DISTINCT representative_genome_id)
@@ -1377,13 +1448,14 @@ def microbiome_species_parse(
                 joined_path_expression = _microbiome_rank_path(rank, "t")
                 taxonomy_path_filter = _microbiome_classified_path_filter(rank)
                 joined_path_filter = _microbiome_classified_path_filter(rank, "t")
-                denominator = connection.execute(
+                taxonomy_group_rows = connection.execute(
                     f"""
-                    SELECT count(DISTINCT {taxonomy_path_expression})
+                    SELECT DISTINCT {taxonomy_path_expression} AS taxonomy_group_id
                     FROM {taxonomy_source}
                     WHERE {taxonomy_path_filter}
+                    ORDER BY taxonomy_group_id
                     """
-                ).fetchone()[0]
+                ).fetchall()
                 rows = connection.execute(
                     f"""
                     SELECT h.gene, count(DISTINCT {joined_path_expression})
@@ -1394,14 +1466,19 @@ def microbiome_species_parse(
                     GROUP BY h.gene
                     """
                 ).fetchall()
-            if denominator == 0:
-                raise RuntimeError(
-                    f"No classified {rank} taxa are available in {taxonomy_path}."
-                )
-            denominators[rank] = denominator
+            current_group_ids[rank] = [
+                row[0]
+                for row in taxonomy_group_rows
+            ]
             counts_by_rank[rank] = dict(rows)
     finally:
         connection.close()
+
+    denominators = _validate_microbiome_taxonomy_manifest(
+        taxonomy_manifest,
+        current_group_ids,
+        taxonomy_path,
+    )
 
     print(f"Parsing consolidated microbiome hits for {catalogue_name}...")
     column_prefix = catalogue_column_prefix(catalogue_name)

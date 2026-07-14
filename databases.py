@@ -58,6 +58,41 @@ TAXONOMY_RANKS = (
 )
 TAXONOMY_RANK_PREFIXES = ("d__", "p__", "c__", "o__", "f__", "g__", "s__")
 
+def microbiome_taxonomy_group_ids(taxonomy):
+    """
+    Returns stable taxonomy group IDs used as normalization denominators.
+
+    Species are represented by representative genome IDs. Higher ranks are
+    represented by semicolon-separated taxonomy paths and only include fully
+    classified paths up to the selected rank.
+
+    :param taxonomy: Dataframe with representative_genome_id and taxonomy ranks.
+    :return: Dictionary mapping each rank to sorted group identifiers.
+    """
+    group_ids = {}
+    for rank in TAXONOMY_RANKS:
+        if rank == "species":
+            group_ids[rank] = sorted(
+                taxonomy["representative_genome_id"].astype(str).unique()
+            )
+            continue
+
+        rank_index = TAXONOMY_RANKS.index(rank)
+        path_columns = TAXONOMY_RANKS[:rank_index + 1]
+        classified = taxonomy.loc[
+            (taxonomy.loc[:, path_columns] != "unclassified").all(axis=1),
+            path_columns,
+        ]
+        if classified.empty:
+            group_ids[rank] = []
+            continue
+
+        paths = classified.astype(str).agg(";".join, axis=1)
+        group_ids[rank] = sorted(paths.unique())
+
+    return group_ids
+
+
 def prepare_microbiome_representative_taxonomy(database_path, catalogue_name="human-gut"):
     """
     Prepares and validates the representative taxonomy for an MGnify catalogue.
@@ -167,6 +202,7 @@ def prepare_microbiome_representative_taxonomy(database_path, catalogue_name="hu
     )
     taxonomy_path = os.path.join(species_path, "representative_taxonomy.parquet")
     manifest_path = os.path.join(species_path, "taxonomy_manifest.json")
+    taxonomy_group_ids = microbiome_taxonomy_group_ids(output)
     manifest = {
         "catalogue": catalogue_name,
         "catalogue_url": catalogue["ftp_site"],
@@ -176,6 +212,15 @@ def prepare_microbiome_representative_taxonomy(database_path, catalogue_name="hu
         "source_file": os.path.basename(metadata_path),
         "taxonomy_columns": list(output.columns),
         "unclassified_value": "unclassified",
+        "taxonomy_group_id_format": (
+            "species=representative_genome_id; "
+            "higher ranks=semicolon-separated fully classified lineage path"
+        ),
+        "taxonomy_denominators": {
+            rank: len(ids)
+            for rank, ids in taxonomy_group_ids.items()
+        },
+        "taxonomy_group_ids": taxonomy_group_ids,
     }
 
     files.atomic_write_dataframe_parquet(output, taxonomy_path)
