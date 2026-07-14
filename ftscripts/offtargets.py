@@ -1294,7 +1294,7 @@ def microbiome_species_parse(
     :param identity_filter: Identity threshold associated with the consolidated hits.
     :param coverage_filter: Coverage threshold associated with the consolidated hits.
     :param genome_output_path: Optional root containing the staged organism genome.
-    :return: Tuple containing count and normalized metadata tables for every rank,
+    :return: Tuple containing normalized and count metadata tables for every rank,
         followed by the species normalization denominator table.
     """
     species_path = catalogue_species_path(databases_path, catalogue_name)
