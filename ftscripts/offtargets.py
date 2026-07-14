@@ -46,6 +46,15 @@ MICROBIOME_MAX_TARGET_SEQS = 1
 MICROBIOME_MAX_HSPS = 1
 MICROBIOME_PARQUET_BATCH_ROWS = 75000
 MICROBIOME_PARQUET_ROW_GROUP_ROWS = 100000
+MICROBIOME_TAXONOMY_RANKS = (
+    "domain",
+    "phylum",
+    "class",
+    "order",
+    "family",
+    "genus",
+    "species",
+)
 
 
 @dataclass(frozen=True)
@@ -1240,154 +1249,141 @@ def microbiome_species_parse(
     genome_output_path=None,
 ):
     """
-    Parse Diamond BLASTP results against all genomes in the microbiome species catalogue.
-    Each genome has its own BLAST output file under 'offtarget' folder of the organism.
+    Parses consolidated microbiome hits at every supported taxonomy rank.
 
-    For each protein (qseqid) of the organism, this function determines in which genomes
-    it has at least one hit passing the identity and coverage filters.
+    Counts distinct classified taxa per protein and normalizes them by the total
+    classified taxa available at each rank. Unclassified values are excluded from
+    ranks above species. Species are represented by their representative genome ID.
 
-    :param output_path: Directory of the organism output.
-    :param databases_path: Base path where MICROBIOME database is stored.
+    :param databases_path: Path where microbiome catalogues are stored.
+    :param output_path: Path of the organism output.
     :param organism_name: Name of the organism.
     :param catalogue_name: Name of a supported MGnify catalogue.
-    :param identity_filter: Minimum percentage identity accepted in the pident column.
-    :param coverage_filter: Minimum query coverage accepted in the qcovhsp column.
+    :param identity_filter: Identity threshold associated with the consolidated hits.
+    :param coverage_filter: Coverage threshold associated with the consolidated hits.
     :param genome_output_path: Optional root containing the staged organism genome.
-
-    Returns:
-        - df_microbiome_norm: DataFrame with one row per protein and a column with normalized counts
-        - df_microbiome_counts: DataFrame with one row per protein and a column with number of genomes with hits
-        - df_microbiome_total_genomes: DataFrame with one row per protein and a column with total number of genomes analyzed
+    :return: Tuple containing count and normalized metadata tables for every rank,
+        followed by the species normalization denominator table.
     """
-
-    offtarget_path = os.path.join(
+    species_path = catalogue_species_path(databases_path, catalogue_name)
+    taxonomy_path = os.path.join(
+        species_path,
+        "representative_taxonomy.parquet",
+    )
+    offtarget_path, hits_path, _ = _microbiome_consolidated_paths(
         output_path,
         organism_name,
-        "offtarget",
-        "microbiomes",
         catalogue_name,
-        "species_blast_results",
     )
-
-    catalogue = get_catalogue(catalogue_name)
-    expected_genomes = catalogue["number_of_species"]
-    species_path = catalogue_species_path(databases_path, catalogue_name)
-    genome_dirs, indexed_genomes = _microbiome_catalogue_status(species_path)
-    _warn_incomplete_microbiome_catalogue(
+    if not is_microbiome_consolidation_compatible(
+        output_path,
+        organism_name,
         catalogue_name,
-        expected_genomes,
-        genome_dirs,
-        indexed_genomes,
-    )
-
-    result_suffix = microbiome_result_suffix(identity_filter, coverage_filter)
-    genome_files = {
-        f.removesuffix(result_suffix): f
-        for f in os.listdir(offtarget_path)
-        if f.endswith(result_suffix)
-    }
-    searched_genomes = sorted(indexed_genomes.intersection(genome_files))
-
-    if not searched_genomes:
+        identity_filter,
+        coverage_filter,
+    ):
         raise RuntimeError(
-            f"No completed microbiome searches were found in {offtarget_path}. "
-            "Run microbiome_offtarget_blast_species first."
+            f"No compatible consolidated microbiome hits were found for "
+            f"{catalogue_name} with identity={identity_filter} and "
+            f"coverage={coverage_filter}."
+        )
+    if not os.path.isfile(taxonomy_path):
+        raise FileNotFoundError(
+            f"Representative taxonomy not found: {taxonomy_path}"
         )
 
-    if len(searched_genomes) < len(indexed_genomes):
-        print(
-            f"Warning: Only {len(searched_genomes)} of {len(indexed_genomes)} indexed "
-            "microbiome genomes have search results."
-        )
-    if len(searched_genomes) < expected_genomes:
-        print(
-            f"Warning: Microbiome scores will be normalized using the "
-            f"{len(searched_genomes)} genomes actually analyzed instead of the "
-            f"{expected_genomes} genomes expected for {catalogue_name}."
-        )
+    hits_source = f"read_parquet('{_duckdb_path(hits_path)}')"
+    taxonomy_source = f"read_parquet('{_duckdb_path(taxonomy_path)}')"
+    counts_by_rank = {}
+    denominators = {}
+    connection = duckdb.connect()
+    try:
+        for rank in MICROBIOME_TAXONOMY_RANKS:
+            if rank == "species":
+                denominator = connection.execute(
+                    f"SELECT count(*) FROM {taxonomy_source}"
+                ).fetchone()[0]
+                rows = connection.execute(
+                    f"""
+                    SELECT gene, count(DISTINCT representative_genome_id)
+                    FROM {hits_source}
+                    GROUP BY gene
+                    """
+                ).fetchall()
+            else:
+                denominator = connection.execute(
+                    f"""
+                    SELECT count(DISTINCT {rank})
+                    FROM {taxonomy_source}
+                    WHERE {rank} <> 'unclassified'
+                    """
+                ).fetchone()[0]
+                rows = connection.execute(
+                    f"""
+                    SELECT h.gene, count(DISTINCT t.{rank})
+                    FROM {hits_source} h
+                    JOIN {taxonomy_source} t
+                    USING (representative_genome_id)
+                    WHERE t.{rank} <> 'unclassified'
+                    GROUP BY h.gene
+                    """
+                ).fetchall()
+            if denominator == 0:
+                raise RuntimeError(
+                    f"No classified {rank} taxa are available in {taxonomy_path}."
+                )
+            denominators[rank] = denominator
+            counts_by_rank[rank] = dict(rows)
+    finally:
+        connection.close()
 
-    print("Parsing microbiome species BLAST results...")
-    print(f"Catalogue: {catalogue_name}")
-    print(f"Expected genomes: {expected_genomes}")
-    print(f"Genome directories found: {len(genome_dirs)}")
-    print(f"Indexed genomes found: {len(indexed_genomes)}")
-    print(f"Genomes analyzed: {len(searched_genomes)}")
-
-    protein_hits = {}
-    for genome_name in tqdm(searched_genomes, desc="Parsing microbiome species BLAST results"):
-        blast_output_path = os.path.join(offtarget_path, genome_files[genome_name])
-
-        if os.stat(blast_output_path).st_size == 0:
-            continue
-
-        df = pd.read_csv(blast_output_path, sep="\t", header=None)
-        df.columns = [
-            "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
-            "qstart", "qend", "sstart", "send", "evalue", "bitscore",
-            "qcovhsp"
-        ]
-
-        filtered_df = df[
-            (df["pident"] >= identity_filter)
-            & (df["qcovhsp"] >= coverage_filter)
-        ]
-        for qseqid in filtered_df["qseqid"].unique():
-            protein_hits.setdefault(qseqid, set()).add(genome_name)
-
-    protein_hits = {
-        protein: sorted(genomes)
-        for protein, genomes in protein_hits.items()
-    }
-    analyzed_genomes = len(searched_genomes)
-    protein_hit_counts = {
-        protein: len(genomes) / analyzed_genomes
-        for protein, genomes in protein_hits.items()
-    }
-    protein_hit_totals = {
-        protein: len(genomes)
-        for protein, genomes in protein_hits.items()
-    }
-    protein_total_genomes = {
-        protein: analyzed_genomes
-        for protein in protein_hits
-    }
-
+    print(f"Parsing consolidated microbiome hits for {catalogue_name}...")
     column_prefix = catalogue_column_prefix(catalogue_name)
     genome_output_path = genome_output_path or output_path
-    metadata.metadata_table_with_values(
-        genome_output_path,
-        organism_name,
-        protein_hits,
-        f'{column_prefix}_offtarget',
-        offtarget_path,
-        'no_hit',
-    )
-    df_microbiome_norm = metadata.metadata_table_with_values(
-        genome_output_path,
-        organism_name,
-        protein_hit_counts,
-        f'{column_prefix}_offtarget_norm',
-        offtarget_path,
-        0,
-    )
-    df_hit_totals = metadata.metadata_table_with_values(
-        genome_output_path,
-        organism_name,
-        protein_hit_totals,
-        f'{column_prefix}_offtarget_counts',
-        offtarget_path,
-        0,
-    )
+    result_tables = []
+    for rank in MICROBIOME_TAXONOMY_RANKS:
+        counts = counts_by_rank[rank]
+        normalized = {
+            gene: count / denominators[rank]
+            for gene, count in counts.items()
+        }
+        property_prefix = (
+            column_prefix
+            if rank == "species"
+            else f"{column_prefix}_{rank}"
+        )
+        result_tables.append(
+            metadata.metadata_table_with_values(
+                genome_output_path,
+                organism_name,
+                normalized,
+                f"{property_prefix}_offtarget_norm",
+                offtarget_path,
+                0,
+            )
+        )
+        result_tables.append(
+            metadata.metadata_table_with_values(
+                genome_output_path,
+                organism_name,
+                counts,
+                f"{property_prefix}_offtarget_counts",
+                offtarget_path,
+                0,
+            )
+        )
+
+    species_denominator = denominators["species"]
     df_total_genomes = metadata.metadata_table_with_values(
         genome_output_path,
         organism_name,
-        protein_total_genomes,
+        {},
         f'{column_prefix}_genomes_analyzed',
         offtarget_path,
-        analyzed_genomes,
+        species_denominator,
     )
-
-    return df_microbiome_norm, df_hit_totals, df_total_genomes
+    result_tables.append(df_total_genomes)
+    return tuple(result_tables)
 
 
 def microbiome_protein_clusters_parse (output_path, organism_name, identity_filter, coverage_filter):

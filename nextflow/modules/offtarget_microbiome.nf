@@ -106,7 +106,7 @@ process MICROBIOME_SHARD_SEARCH {
         results_path,
     )
 
-    suffix = offtargets._microbiome_result_suffix(
+    suffix = offtargets.microbiome_result_suffix(
         ${identity_filter},
         ${coverage_filter},
     )
@@ -203,6 +203,7 @@ process PARSE_MICROBIOME_RESULTS {
     """
     #!/usr/bin/env python3
     import os
+    import glob
     import shutil
     import sys
 
@@ -256,12 +257,15 @@ process PARSE_MICROBIOME_RESULTS {
     )
     os.makedirs(local_results, exist_ok=True)
 
-    for property_name in (
-        f'{prefix}_offtarget_norm',
-        f'{prefix}_offtarget_counts',
-        f'{prefix}_genomes_analyzed',
+    result_tables = []
+    for pattern in (
+        f'{prefix}*_offtarget_norm.tsv',
+        f'{prefix}*_offtarget_counts.tsv',
+        f'{prefix}_genomes_analyzed.tsv',
     ):
-        source = os.path.join(persistent_results, f'{property_name}.tsv')
+        result_tables.extend(glob.glob(os.path.join(persistent_results, pattern)))
+
+    for source in sorted(set(result_tables)):
         shutil.copy2(source, os.path.join(local_results, os.path.basename(source)))
 
     for consolidated_name in (
