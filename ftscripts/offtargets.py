@@ -57,6 +57,38 @@ MICROBIOME_TAXONOMY_RANKS = (
 )
 
 
+def _microbiome_rank_path(rank, table_alias=None):
+    """
+    Returns a DuckDB expression for the hierarchical taxonomy path of a rank.
+
+    :param rank: Taxonomy rank to represent.
+    :param table_alias: Optional SQL table alias to prepend to column names.
+    :return: SQL expression joining the taxonomy path up to the selected rank.
+    """
+    rank_index = MICROBIOME_TAXONOMY_RANKS.index(rank)
+    prefix = f"{table_alias}." if table_alias else ""
+    return " || ';' || ".join(
+        f"{prefix}{taxonomy_rank}"
+        for taxonomy_rank in MICROBIOME_TAXONOMY_RANKS[:rank_index + 1]
+    )
+
+
+def _microbiome_classified_path_filter(rank, table_alias=None):
+    """
+    Returns a DuckDB filter that keeps fully classified paths for a rank.
+
+    :param rank: Taxonomy rank to filter.
+    :param table_alias: Optional SQL table alias to prepend to column names.
+    :return: SQL boolean expression excluding unclassified values in the path.
+    """
+    rank_index = MICROBIOME_TAXONOMY_RANKS.index(rank)
+    prefix = f"{table_alias}." if table_alias else ""
+    return " AND ".join(
+        f"{prefix}{taxonomy_rank} <> 'unclassified'"
+        for taxonomy_rank in MICROBIOME_TAXONOMY_RANKS[:rank_index + 1]
+    )
+
+
 @dataclass(frozen=True)
 class GenomeSearchResult:
     genome_id: str
@@ -1298,6 +1330,23 @@ def microbiome_species_parse(
     denominators = {}
     connection = duckdb.connect()
     try:
+        invalid_hits = connection.execute(
+            f"""
+            SELECT count(*)
+            FROM {hits_source}
+            WHERE pident IS NULL
+                OR qcovhsp IS NULL
+                OR pident < {float(identity_filter)}
+                OR qcovhsp < {float(coverage_filter)}
+            """
+        ).fetchone()[0]
+        if invalid_hits:
+            raise RuntimeError(
+                f"Consolidated microbiome hits contain {invalid_hits} rows below "
+                f"the requested filters: identity={identity_filter}, "
+                f"coverage={coverage_filter}."
+            )
+
         for rank in MICROBIOME_TAXONOMY_RANKS:
             if rank == "species":
                 denominator = connection.execute(
@@ -1311,20 +1360,24 @@ def microbiome_species_parse(
                     """
                 ).fetchall()
             else:
+                taxonomy_path_expression = _microbiome_rank_path(rank)
+                joined_path_expression = _microbiome_rank_path(rank, "t")
+                taxonomy_path_filter = _microbiome_classified_path_filter(rank)
+                joined_path_filter = _microbiome_classified_path_filter(rank, "t")
                 denominator = connection.execute(
                     f"""
-                    SELECT count(DISTINCT {rank})
+                    SELECT count(DISTINCT {taxonomy_path_expression})
                     FROM {taxonomy_source}
-                    WHERE {rank} <> 'unclassified'
+                    WHERE {taxonomy_path_filter}
                     """
                 ).fetchone()[0]
                 rows = connection.execute(
                     f"""
-                    SELECT h.gene, count(DISTINCT t.{rank})
+                    SELECT h.gene, count(DISTINCT {joined_path_expression})
                     FROM {hits_source} h
                     JOIN {taxonomy_source} t
                     USING (representative_genome_id)
-                    WHERE t.{rank} <> 'unclassified'
+                    WHERE {joined_path_filter}
                     GROUP BY h.gene
                     """
                 ).fetchall()
