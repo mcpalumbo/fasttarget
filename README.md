@@ -534,6 +534,27 @@ The output columns vary depending on your configuration:
 **Metadata columns** (if `metadata.enabled: True`):
 - Additional columns from your metadata tables will be merged based on the `gene` column
 
+### Post-run microbiome hit plots
+
+After running FastTarget with `offtarget.microbiome: True`, use `ftscripts/microbiome_hit_plots.py` to visualize MGnify/offtarget hits for selected locus tags:
+
+```bash
+python ftscripts/microbiome_hit_plots.py \
+  --output-path <output-path> \
+  --organism-name <organism-name> \
+  --databases-path <databases-path> \
+  --catalogue human-gut \
+  --locus-tags <locus_tag_1> <locus_tag_2>
+```
+
+The script writes static PNG/SVG plots, reproducible TSV summaries, and an interactive Plotly HTML report under:
+
+```text
+<output-path>/<organism-name>/offtarget/microbiomes/<catalogue>/plots
+```
+
+If a Newick tree is provided with `--tree`, it also writes SVG radial trees highlighting representatives with hits.
+
 ## Running (Nextflow)
 
 Nextflow is not bundled with FastTarget. Install Nextflow on your system before running the Nextflow pipeline. Tested with Nextflow v25.10.3.

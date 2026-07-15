@@ -10,6 +10,8 @@ dependencies:
   - pyarrow
   - duckdb
   - numpy=2.4.1
+  - matplotlib
+  - plotly
   - networkx=2.8
   - urllib3=2.6.3
   - tqdm=4.67.1
