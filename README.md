@@ -456,6 +456,51 @@ After editing the `config.yml` file, you can use the `configuration.py` script t
    - After validation, the script will print the loaded configuration details, allowing you to verify that everything is set up correctly.
 
 
+### Ligands: AlphaFill (standalone)
+
+Set `ligands.enabled: True` and `ligands.alphafill.enabled: True` in your YAML to
+add AlphaFill ligand annotations to the standalone pipeline. Disable the entire
+module with `ligands.enabled: False`, or only AlphaFill with
+`ligands.alphafill.enabled: False`. Older YAMLs without `ligands` keep it disabled. This module can run
+with `structures.enabled: False`: it reuses the structure module's UniProt mapping
+or builds that mapping without running pocket detection or ColabFold. Creating a
+new mapping requires UniProt access, CD-HIT and BLAST in the FastTarget environment.
+
+```yaml
+ligands:
+  enabled: True
+  alphafill:
+    enabled: True
+    download_cif: always
+    generate_pymol: True
+    enrich_donors: True
+    max_workers: 4
+    strict_errors: False
+```
+
+The final FastTarget table contains one row per reference CDS, with unique compound
+codes and counts for high, intermediate, low and unknown confidence. Each compound
+is assigned to its best known confidence across all associated UniProt accessions.
+High plus intermediate counts equal `alphafill_unique_accepted_compounds`. Unavailable
+results have empty counts; `alphafill_complete` indicates whether metadata was
+obtained for all mapped accessions.
+
+Detailed transfers and donor annotations are written to
+`organism/<name>/ligands/alphafill/alphafill_ligands_all.tsv`; the separate
+`alphafill_accession_summary.tsv` provides per-accession status, transfer counts and
+artifact paths. CIFs are primary outputs at
+`models/<locus_tag>/<uniprot_id>_alphafill.cif`, alongside
+`<uniprot_id>_view_alphafill.py`. Open a viewer with PyMOL's `run /path/to/viewer.py`.
+All stored artifact paths are relative to the `ligands/alphafill/` directory.
+
+The default confidence limits are local RMSD <0.92 Å and TCS <0.64 for high, or
+local RMSD <3.10 Å and TCS <1.27 for intermediate; both metrics must meet a tier's
+limits. Global RMSD and identity do not filter transfers. `download_cif` accepts
+`always`, `accepted_only` (at least one high/intermediate transfer), or `never`.
+`refresh_cache: True` forces new API downloads. With `strict_errors: True`, execution
+errors stop the pipeline after available AlphaFill outputs are saved. Missing
+AlphaFill entries remain valid results. Nextflow integration is not yet implemented.
+
 ## Running the FastTarget Pipeline
 
 
@@ -631,3 +676,60 @@ Package containing all analysis implementations called by both `fasttarget.py` a
 - `README.md` — project overview and information
 - `tutorial/` — additional tutorials (e.g., obtaining Pathway Tools files)
 - `validate_test.py` — script to validate test case results
+
+### ChEMBL and BindingDB in standalone FastTarget
+
+Enable `ligands.enabled` and independently `ligands.chembl.enabled` and/or
+`ligands.bindingdb.enabled` in the YAML. These analyses do not require
+`structures.enabled`. Nextflow integration is pending.
+
+Prepare local inputs with the **fasttarget conda environment**:
+
+```bash
+python databases.py --download ligands
+# Or prepare only the missing taxonomy:
+python databases.py --download taxonomy
+```
+
+`ligands` downloads ChEMBL, BindingDB and NCBI Taxonomy. BindingDB's native
+MySQL dump is converted once to a reusable SQLite copy when first used;
+no MySQL server is needed. ChEMBL uses the local SQLite release directly.
+No DuckDB or TaxonKit installation is required. The biological analysis
+never downloads these databases. Taxonomy download failure must be resolved
+before running these sources.
+
+Each source's `database: null` selects the latest prepared local release.
+`ligands.taxonomy_dir: null` uses `databases/ncbi_taxonomy`. Explicit relative
+paths are resolved against the databases directory passed to FastTarget;
+absolute paths are also accepted. Species descendants are expanded from
+NCBI `nodes.dmp`, including merged taxids, without a remote taxonomy query.
+
+Defaults: identity >=90%, coverage >=70% of **both** sequences. Each source
+donor is assigned to its best passing BLAST match (bit score, then E-value);
+exact best ties assign evidence to all tied loci. Evidence from multiple
+strains accumulates at the locus. Counts represent unique compounds, not
+measurements; ChEMBL compounds collapse to parent IDs. No active/inactive
+classification is inferred.
+
+Each source adds exactly five columns to the final table: `gene`,
+`<source>_status`, `<source>_target_count`, `<source>_compounds`, and
+`<source>_compound_count` (`gene` remains the shared merge key).
+All reference loci remain represented. No evidence produces zero counts;
+an execution failure produces status `error` and missing counts.
+`strict_errors: true` stops the pipeline on source errors.
+
+Details and provenance are written to `<output>/<organism>/ligands/chembl/`
+and `.../bindingdb/`. `pipeline_status.json` indicates whether the latest
+pipeline invocation completed; after a failed rerun, older detail files
+must not be treated as current results. `include_human: true` enables human
+protein and complex evidence in detail tables only. This is an off-target
+hint, not a toxicity or selectivity conclusion.
+
+ChEMBL preserves direct and source-inferred homology evidence separately
+from the local BLAST mapping; its homology label has no universal percentage
+identity threshold. `direct_only`, `min_confidence_score`, `require_pchembl`
+and `exclude_problematic` control protein evidence filtering. Bacterial
+targets are restricted to single proteins. `include_species_context: true`
+adds structured cellular/organism assays and other bacterial target context
+for the selected compounds, **only in detail tables**. BindingDB general/MIC
+assays remain deferred because species attribution is unreliable in its dump.
