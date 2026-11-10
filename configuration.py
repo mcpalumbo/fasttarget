@@ -231,7 +231,7 @@ def validate_config(config):
         taxonomy = parent.get('taxonomy_dir')
         if taxonomy is not None and (not isinstance(taxonomy, str) or not taxonomy.strip()):
             errors.append('ligands.taxonomy_dir must be a non-empty path or null')
-        from ftscripts.ligand_pipeline import validate_options as validate_ligand_options
+        from ftscripts.ligand_inputs import validate_options as validate_ligand_options
         for source in ('chembl', 'bindingdb'):
             if source not in parent:
                 continue

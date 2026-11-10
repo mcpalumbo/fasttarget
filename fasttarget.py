@@ -3,7 +3,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata
+from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill
 from datetime import datetime
 import logging
 import sys
@@ -206,6 +206,114 @@ def structure_module(config, databases_path, output_path, cpus):
         logging.info('Structures analysis not enabled')
     
     return module_tables
+
+def prepare_alphafill_mapping(config, output_path, cpus):
+    """Reuse the structure mapping or build only the UniProt mapping stages."""
+    organism_name = config.organism['name']
+    tax_id = config.organism['tax_id']
+    strain_taxid = config.organism['strain_taxid']
+    loci = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism_name)))
+    if not loci:
+        raise ValueError('AlphaFill requires genome CDS features with locus_tag and translation')
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
+    mapping_path = os.path.join(uniprot_dir, f'uniprot_{organism_name}_id_mapping.json')
+    if files.file_check(mapping_path):
+        logging.info('AlphaFill reusing UniProt mapping: %s', mapping_path)
+        mapping = files.json_to_dict(mapping_path)
+    else:
+        logging.info('Preparing UniProt mapping for AlphaFill without pocket analysis')
+        structures.download_species_uniprot_data(output_path, organism_name, tax_id)
+        species_file = os.path.join(uniprot_dir, f'uniprot_specie_taxid_{tax_id}_data.tsv')
+        structures.parse_uniprot_species_data(species_file, tax_id, strain_taxid)
+        structures.cluster_uniprot_specie(output_path, organism_name, tax_id)
+        structures.create_uniprot_blast_db(output_path, organism_name, tax_id, strain_taxid)
+        structures.uniprot_proteome_blast(output_path, organism_name, tax_id, strain_taxid, cpus=cpus)
+        mapping = structures.uniprot_proteome_mapping(output_path, organism_name, tax_id, strain_taxid)
+    if not isinstance(mapping, dict):
+        raise ValueError(f'Invalid UniProt mapping for AlphaFill: {mapping_path}')
+    genome_mapping = {gene: mapping.get(gene) for gene in loci}
+    for gene, values in genome_mapping.items():
+        if values is None:
+            continue
+        values = values if isinstance(values, list) else [values]
+        if any(value is not None and not isinstance(value, str) for value in values):
+            raise ValueError(f'Invalid UniProt accession value in mapping for {gene}')
+    return genome_mapping
+
+
+def alphafill_module(config, output_path, cpus):
+    """Return only the one-row-per-locus summary for the final FastTarget table."""
+    options = getattr(config, 'alphafill', False)
+    if not options:
+        logging.info('AlphaFill analysis not enabled')
+        return []
+    logging.info('Starting AlphaFill ligand annotation')
+    mapping = prepare_alphafill_mapping(config, output_path, cpus)
+    summary = alphafill.run_alphafill(output_path, config.organism['name'], mapping, options)
+    if summary['gene'].duplicated().any():
+        raise ValueError('AlphaFill summary must have exactly one row per locus_tag')
+    logging.info('AlphaFill finished for %s loci; details in ligands/alphafill', len(summary))
+    return [summary]
+
+
+def ligands_module(config, output_path, cpus, databases_path=None):
+    """Run independent ligand sources and retain one summary row per locus."""
+    if not getattr(config, 'ligands', False):
+        return []
+    from pathlib import Path
+    import json
+    from ftscripts import chembl, bindingdb
+    from ftscripts.ligand_inputs import resolve_database, local_path, validate_options
+    print_stylized('LIGANDS')
+    try:
+        tables = alphafill_module(config, output_path, cpus)
+    except Exception:
+        if getattr(config, 'alphafill', False) and config.alphafill.get('strict_errors', False):
+            raise
+        logging.exception('AlphaFill failed; continuing independent ligand sources')
+        tables = []
+    databases_path = Path(databases_path or Path(__file__).resolve().parent / 'databases')
+    organism = config.organism['name']
+    base = Path(output_path) / organism
+    for source, runner in (('chembl', chembl.run_chembl), ('bindingdb', bindingdb.run_bindingdb)):
+        options = getattr(config, source, False)
+        if not options:
+            continue
+        destination = base / 'ligands' / source
+        try:
+            settings = validate_options(source, options)
+            database = resolve_database(source, settings.pop('database'), databases_path)
+            settings.pop('enabled', None)
+            settings.pop('strict_errors')
+            taxonomy = local_path(config.ligands.get('taxonomy_dir') or 'ncbi_taxonomy', databases_path)
+            logging.info('Starting %s with local database %s', source, database)
+            result = runner(database, config.organism['tax_id'], destination,
+                            proteins_fasta=base / 'genome' / f'{organism}.faa',
+                            taxonomy_dir=taxonomy, threads=cpus, **settings)
+            summary = result['summary']
+            genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism)))
+            expected = ['gene', f'{source}_status', f'{source}_target_count',
+                        f'{source}_compounds', f'{source}_compound_count']
+            if list(summary.columns) != expected or summary['gene'].duplicated().any() or set(summary['gene']) != set(genes):
+                raise ValueError(f'{source} summary must contain exactly one row per reference locus and the five summary columns')
+            destination.mkdir(parents=True, exist_ok=True)
+            (destination / 'pipeline_status.json').write_text(json.dumps({'status': 'completed'}) + '\n')
+            tables.append(summary)
+        except Exception as error:
+            logging.exception('%s ligand analysis failed', source)
+            destination.mkdir(parents=True, exist_ok=True)
+            (destination / 'pipeline_status.json').write_text(json.dumps({'status': 'failed', 'error': str(error)}) + '\n')
+            genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism)))
+            summary = pd.DataFrame({'gene': genes, f'{source}_status': 'error',
+                                    f'{source}_target_count': pd.NA, f'{source}_compounds': pd.NA,
+                                    f'{source}_compound_count': pd.NA})
+            for extension, separator in (('tsv', '\t'), ('csv', ',')):
+                summary.to_csv(destination / f'{source}_summary.{extension}', sep=separator, index=False)
+            if options.get('strict_errors', False):
+                raise
+            tables.append(summary)
+    return tables
+
 
 def conservation_module(config, databases_path, output_path, cpus):
     """
@@ -575,6 +683,9 @@ def merge_final_tables(config, output_path, tables):
     """
 
     organism_name = config.organism['name']
+    if any(getattr(config, source, False) for source in ('alphafill', 'chembl', 'bindingdb')) and tables:
+        reference_genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism_name)))
+        tables = [pd.DataFrame({'gene': reference_genes}), *tables]
 
     # Merge dfs
     print_stylized('RESULTS')
@@ -681,6 +792,18 @@ def main(config, databases_path, output_path):
         logging.exception(f'Fatal error in structure module: {e}')
         error_modules.append('structure')
         print(f'Warning: Structure module failed - {e}')
+
+    # Ligands can run on its own, or reuse the mapping made by structures.
+    try:
+        ligand_tables = ligands_module(config, output_path, cpus, databases_path=databases_path)
+        tables.extend(ligand_tables)
+    except Exception as e:
+        logging.exception(f'Error in ligands module: {e}')
+        error_modules.append('ligands')
+        if any(getattr(config, source, False) and getattr(config, source).get('strict_errors', False)
+               for source in ('alphafill', 'chembl', 'bindingdb')):
+            raise
+        print(f'Warning: Ligands module failed - {e}')
 
     # Run conservation module
     try:
