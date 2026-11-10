@@ -10,13 +10,18 @@ It also includes functions to create BLAST and FOLDSEEK databases.
 
 
 import gzip
+import hashlib
+import sqlite3
+import subprocess
+import zipfile
+from pathlib import Path
 import tarfile
 import shutil
 import os
 import time
 import sys
 import datetime
-from ftscripts import programs,files, structures
+from ftscripts import programs,files
 from ftscripts.microbiome_catalogues import (
     MGNIFY_CATALOGUES,
     catalogue_species_path,
@@ -281,6 +286,9 @@ def retry_with_backoff(max_retries=5, initial_delay=2, backoff_factor=2, max_del
             raise last_exception
         return wrapper
     return decorator
+
+# Imported after retry_with_backoff: structures uses this decorator.
+from ftscripts import structures
 
 def download_with_progress(url, filepath, max_retries=3, backoff_factor=2):
     """
@@ -1702,6 +1710,250 @@ def download_and_index_deg(database_path):
 
 
 
+# Official sources. ChEMBL is pinned to a release after resolving latest.
+CHEMBL_DOWNLOAD_ROOT = "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/"
+BINDINGDB_DOWNLOAD_ROOT = "https://www.bindingdb.org/rwd/bind/"
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_ligand_file(url, destination, expected_sha256=None):
+    """Resume interrupted downloads; never expose a partial file as complete."""
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file():
+        if expected_sha256 and _file_sha256(destination) != expected_sha256:
+            raise ValueError(f"Checksum mismatch for existing file: {destination}")
+        return destination
+    partial = destination.with_name(destination.name + ".part")
+    # aria2 is optional: parallel ranges speed up the multi-GB official dumps.
+    accelerator = Path(sys.prefix) / "bin" / "aria2c"
+    aria2 = str(accelerator) if accelerator.is_file() else None
+    if aria2 and destination.name.endswith((".tar.gz", ".zip")):
+        subprocess.run([
+            aria2, "--continue=true", "--allow-overwrite=true", "--auto-file-renaming=false",
+            "--file-allocation=none", "--max-connection-per-server=8", "--split=8",
+            "--min-split-size=16M", "--max-tries=3", "--retry-wait=5",
+            "--summary-interval=30", "--console-log-level=warn", "--enable-color=false",
+            "--show-console-readout=false",
+            "--dir=" + str(partial.parent.resolve()), "--out=" + partial.name, url,
+        ], check=True)
+        if expected_sha256 and _file_sha256(partial) != expected_sha256:
+            partial.unlink()
+            raise ValueError(f"SHA256 mismatch: {destination.name}")
+        partial.replace(destination)
+        return destination
+    if partial.with_name(partial.name + ".aria2").exists():
+        raise RuntimeError("This partial download requires aria2c to resume safely")
+    for attempt in range(3):
+        try:
+            offset = partial.stat().st_size if partial.exists() else 0
+            headers = {"Range": f"bytes={offset}-"} if offset else {}
+            with requests.get(url, headers=headers, stream=True, timeout=(30, 120)) as response:
+                response.raise_for_status()
+                if response.status_code == 206:
+                    content_range = response.headers.get("Content-Range", "")
+                    if not content_range.startswith(f"bytes {offset}-"):
+                        raise ValueError(f"Invalid Content-Range: {content_range}")
+                else:
+                    offset = 0
+                length = response.headers.get("Content-Length")
+                total = offset + int(length) if length else None
+                with open(partial, "ab" if offset else "wb") as output:
+                    with tqdm.tqdm(total=total, initial=offset, unit="B", unit_scale=True,
+                                   desc=destination.name, mininterval=10) as progress:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                output.write(chunk)
+                                progress.update(len(chunk))
+                if total is not None and partial.stat().st_size != total:
+                    raise IOError(f"Incomplete download: {partial}")
+            if expected_sha256 and _file_sha256(partial) != expected_sha256:
+                partial.unlink()
+                raise ValueError(f"SHA256 mismatch: {destination.name}")
+            partial.replace(destination)
+            return destination
+        except (requests.RequestException, OSError, ValueError):
+            if attempt == 2:
+                raise
+            logging.warning("Download attempt %s failed for %s; retrying", attempt + 1, url)
+            time.sleep(2 ** attempt)
+
+
+def _extract_ligand_archive(archive, output_dir):
+    """Extract regular files only; reject traversal, links and special entries."""
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extracted = []
+
+    def copy_member(name, size, source):
+        target = (output_dir / name).resolve()
+        if not target.is_relative_to(output_dir):
+            raise ValueError(f"Unsafe archive member: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file() or target.stat().st_size != size:
+            partial = target.with_name(target.name + ".part")
+            with source() as incoming, open(partial, "wb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing, 8 * 1024 * 1024)
+            if partial.stat().st_size != size:
+                raise IOError(f"Incomplete extraction: {name}")
+            partial.replace(target)
+        extracted.append(target)
+
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as bundle:
+            for member in bundle.infolist():
+                if member.is_dir():
+                    continue
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError(f"Archive contains a symlink: {member.filename}")
+                copy_member(member.filename, member.file_size, lambda m=member: bundle.open(m))
+    else:
+        with tarfile.open(archive, "r:gz") as bundle:
+            for member in bundle:
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise ValueError(f"Non-regular archive member: {member.name}")
+                copy_member(member.name, member.size, lambda m=member: bundle.extractfile(m))
+    return extracted
+
+
+def _write_ligand_metadata(folder, metadata):
+    destination = Path(folder) / "metadata.json"
+    partial = destination.with_suffix(".json.part")
+    partial.write_text(json.dumps(metadata, indent=2) + "\n")
+    partial.replace(destination)
+
+
+def download_chembl(database_path):
+    """Download and unpack the current official ChEMBL SQLite release."""
+    latest = CHEMBL_DOWNLOAD_ROOT + "latest/"
+    response = requests.get(latest, timeout=(30, 120))
+    response.raise_for_status()
+    versions = re.findall(r'href="chembl_(\d+)_sqlite\.tar\.gz"', response.text)
+    if not versions:
+        raise ValueError("No SQLite release found in the official ChEMBL directory")
+    version = str(max(map(int, versions)))
+    root = CHEMBL_DOWNLOAD_ROOT + f"releases/chembl_{version}/"
+    folder = Path(database_path).expanduser().resolve() / "chembl" / f"chembl_{version}"
+    archive_name = f"chembl_{version}_sqlite.tar.gz"
+    checksum_file = _download_ligand_file(root + "checksums.txt", folder / "checksums.txt")
+    checksums = dict((parts[1].lstrip("*"), parts[0]) for line in checksum_file.read_text().splitlines()
+                     if len(parts := line.split()) == 2)
+    expected = checksums.get(archive_name)
+    if not expected or not re.fullmatch(r"[a-fA-F0-9]{64}", expected):
+        raise ValueError(f"Missing official SHA256 for {archive_name}")
+    archive = _download_ligand_file(root + archive_name, folder / archive_name, expected)
+    extracted = _extract_ligand_archive(archive, folder)
+    databases = [path for path in extracted if path.suffix in (".db", ".sqlite", ".sqlite3")]
+    if len(databases) != 1:
+        raise ValueError(f"Expected one ChEMBL SQLite database, found {len(databases)}")
+    db = databases[0]
+    connection = sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)
+    try:
+        tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        required = {"activities", "assays", "target_dictionary", "target_components",
+                    "component_sequences", "molecule_dictionary", "molecule_hierarchy", "compound_structures"}
+        if not required.issubset(tables):
+            raise ValueError(f"ChEMBL missing tables: {required - set(tables)}")
+        schema = {name: [dict(zip(("cid", "name", "type", "notnull", "default", "pk"), row))
+                         for row in connection.execute('PRAGMA table_info("' + name.replace('"', '""') + '")')]
+                  for name in tables}
+        release_info = connection.execute("SELECT * FROM version").fetchall() if "version" in tables else []
+    finally:
+        connection.close()
+    (folder / "schema.json").write_text(json.dumps(schema, indent=2) + "\n")
+    for name in ("LICENSE", "REQUIRED.ATTRIBUTION", "README"):
+        _download_ligand_file(root + name, folder / name)
+    _write_ligand_metadata(folder, {
+        "source": "ChEMBL", "version": version, "format": "sqlite", "status": "ready",
+        "source_url": root + archive_name, "archive": archive.name, "sha256": expected,
+        "checksum_verified": True, "database": str(db.relative_to(folder)),
+        "schema": "schema.json", "release_info": release_info,
+        "prepared_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    logging.info("ChEMBL %s ready: %s (%s tables)", version, db, len(tables))
+    return db
+
+
+def download_bindingdb(database_path):
+    """Download and unpack the current monthly BindingDB MySQL dump."""
+    version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m")
+    name = f"BDB-mySQL_All_{version}_dmp.zip"
+    url = BINDINGDB_DOWNLOAD_ROOT + name
+    folder = Path(database_path).expanduser().resolve() / "bindingdb" / version
+    archive = _download_ligand_file(url, folder / name)
+    if not zipfile.is_zipfile(archive):
+        raise ValueError(f"BindingDB response is not a ZIP archive: {archive}")
+    extracted = _extract_ligand_archive(archive, folder)
+    sql_files = [path for path in extracted if path.suffix.lower() in (".sql", ".dmp")]
+    if not sql_files:
+        raise ValueError("BindingDB archive has no SQL files")
+    schema = {}
+    for sql_file in sql_files:
+        current_table = None
+        with open(sql_file, encoding="utf-8") as handle:
+            for line in handle:
+                match = re.match(r"CREATE TABLE `([^`]+)` \(", line)
+                if match:
+                    current_table = match.group(1)
+                    schema[current_table] = [line.rstrip()]
+                elif current_table:
+                    schema[current_table].append(line.rstrip())
+                    if line.startswith(")"):
+                        current_table = None
+    if not schema:
+        raise ValueError("BindingDB dump has no CREATE TABLE definitions")
+    (folder / "schema.json").write_text(json.dumps(schema, indent=2) + "\n")
+    _write_ligand_metadata(folder, {
+        "source": "BindingDB", "version": version, "format": "mysql_dump",
+        "status": "extracted", "source_url": url, "archive": name,
+        "sha256": _file_sha256(archive), "checksum_verified": False,
+        "checksum_note": "Local SHA256; ZIP CRC checked during extraction. No upstream SHA256 supplied.",
+        "sql_files": [str(path.relative_to(folder)) for path in sql_files],
+        "schema": "schema.json", "tables": sorted(schema),
+        "usage": "Native MySQL SQL dump; import instructions in INSTALL_mysql. Not a SQLite database.",
+        "prepared_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
+    logging.info("BindingDB %s extracted: %s SQL files in %s", version, len(sql_files), folder)
+    return sql_files
+
+
+def download_ncbi_taxonomy(database_path):
+    """Prepare the official taxonomy locally; no TaxonKit dependency required."""
+    root = Path(database_path) / 'ncbi_taxonomy'
+    root.mkdir(parents=True, exist_ok=True)
+    url = 'https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz'
+    response = requests.get(url + '.md5', timeout=(30, 120))
+    response.raise_for_status()
+    checksum = response.text.split()[0].lower()
+    if not re.fullmatch(r'[0-9a-f]{32}', checksum):
+        raise ValueError('Invalid NCBI taxonomy checksum')
+    archive = root / 'taxdump.tar.gz'
+    _download_ligand_file(url, archive)
+    digest = hashlib.md5()
+    with archive.open('rb') as handle:
+        for block in iter(lambda: handle.read(8 * 1024 * 1024), b''):
+            digest.update(block)
+    if digest.hexdigest() != checksum:
+        raise ValueError('NCBI taxonomy checksum mismatch; remove the stale archive and retry')
+    _extract_ligand_archive(archive, root)
+    for name in ('nodes.dmp', 'names.dmp', 'merged.dmp', 'delnodes.dmp'):
+        if not (root / name).is_file():
+            raise ValueError(f'Incomplete NCBI taxonomy: missing {name}')
+    _write_ligand_metadata(root, {'source': 'NCBI Taxonomy', 'status': 'ready',
+                                'url': url, 'md5': checksum,
+                                'prepared_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    return root
+
+
 def main_download(
     database_path,
     selected_databases,
@@ -1719,6 +1971,8 @@ def main_download(
     
     success_count = 0
     failed_databases = []
+    selected_databases = [name for selected in selected_databases
+                          for name in (("chembl", "bindingdb", "taxonomy") if selected == "ligands" else (selected,))]
     for db_name in selected_databases:
         try:
             print(f"\n{'='*20} {db_name.upper()} {'='*20}")
@@ -1738,6 +1992,18 @@ def main_download(
                 )
                 success_count += 1
                     
+            elif db_name == 'taxonomy':
+                download_ncbi_taxonomy(database_path)
+                success_count += 1
+
+            elif db_name == 'chembl':
+                download_chembl(database_path)
+                success_count += 1
+
+            elif db_name == 'bindingdb':
+                download_bindingdb(database_path)
+                success_count += 1
+
             elif db_name == 'deg':
                 download_and_index_deg(database_path)
                 success_count += 1
@@ -1784,11 +2050,14 @@ if __name__ == '__main__':
         python databases.py --download human-structures  # Download only human structures (needed for foldseek)
         python databases.py --download microbiome --microbiome-catalogues human-gut marine
         python databases.py --download deg            # Download DEG database
+        python databases.py --download ligands        # Download ChEMBL SQLite and BindingDB SQL
+        python databases.py --download chembl         # Download only ChEMBL
+        python databases.py --download bindingdb      # Download only BindingDB
                 """
         )
     
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--download', choices=['human-sequences', 'human-structures', 'microbiome', 'deg', 'all'], 
+    group.add_argument('--download', choices=['human-sequences', 'human-structures', 'microbiome', 'deg', 'chembl', 'bindingdb', 'taxonomy', 'ligands', 'all'],
                       help="Download specified database(s)")
     parser.add_argument('--database-path', type=str, default=default_base_path,
                        help="Path to the database folder (default: ./databases)")
@@ -1811,7 +2080,7 @@ if __name__ == '__main__':
 
     # Determine databases to process
     if hasattr(args, 'download') and args.download:
-        databases_to_process = ['human-sequences', 'human-structures', 'microbiome', 'deg'] if args.download == 'all' else [args.download]
+        databases_to_process = ['human-sequences', 'human-structures', 'microbiome', 'deg', 'chembl', 'bindingdb', 'taxonomy'] if args.download == 'all' else [args.download]
         main_download(
             database_path,
             databases_to_process,
