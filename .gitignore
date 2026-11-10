@@ -2,6 +2,9 @@ databases/human_structures
 databases/species_catalogue
 databases/DEG*
 databases/HUMAN*
+databases/bindingdb*
+databases/chembl*
+databases/ncbi_taxonomy*
 databases/*.faa
 singularity_sfi_files/
 ftscripts/*.pyc
