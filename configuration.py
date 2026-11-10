@@ -57,6 +57,13 @@ class Config:
         self.offtarget = config['offtarget'] if config['offtarget']['enabled'] else False
         self.deg = config['deg'] if config['deg']['enabled'] else False
         self.psortb = config['psortb'] if config['psortb']['enabled'] else False
+        ligands_config = config.get('ligands', {})
+        self.ligands = ligands_config.copy() if ligands_config.get('enabled', False) else False
+        alphafill_config = self.ligands.get('alphafill', {}) if self.ligands else {}
+        self.alphafill = alphafill_config.copy() if alphafill_config.get('enabled', False) else False
+        for source in ('chembl', 'bindingdb'):
+            section = self.ligands.get(source, {}) if self.ligands else {}
+            setattr(self, source, section.copy() if section.get('enabled', False) else False)
 
 def load_config(config_path):
     """
@@ -192,6 +199,50 @@ def validate_config(config):
                 for bool_field in ['amber', 'gpu', 'colabfold_run_all']:
                     if not isinstance(config['colabfold'][bool_field], bool):
                         errors.append(f"colabfold.{bool_field} must be boolean (got {config['colabfold'][bool_field]})")
+
+    # Ligands is optional for older configurations and independent of pockets.
+    if 'alphafill' in config:
+        errors.append("Move top-level alphafill settings under ligands.alphafill")
+    if 'ligands' in config:
+        ligands_section = config['ligands']
+        if not isinstance(ligands_section, dict):
+            errors.append("'ligands' must be a dictionary with 'enabled' key")
+        elif 'enabled' not in ligands_section:
+            errors.append("'ligands' section missing 'enabled' key")
+        elif not isinstance(ligands_section['enabled'], bool):
+            errors.append("ligands.enabled must be boolean")
+        elif 'alphafill' in ligands_section:
+            section = ligands_section['alphafill']
+            if not isinstance(section, dict):
+                errors.append("'ligands.alphafill' must be a dictionary with 'enabled' key")
+            elif 'enabled' not in section:
+                errors.append("'ligands.alphafill' section missing 'enabled' key")
+            elif not isinstance(section['enabled'], bool):
+                errors.append("ligands.alphafill.enabled must be boolean")
+            elif ligands_section['enabled'] and section['enabled']:
+                from ftscripts.alphafill import validate_options
+                try:
+                    section.update(validate_options(section))
+                except (ValueError, TypeError, OverflowError) as error:
+                    errors.append(f"ligands.alphafill: {error}")
+
+    if isinstance(config.get('ligands'), dict):
+        parent = config['ligands']
+        taxonomy = parent.get('taxonomy_dir')
+        if taxonomy is not None and (not isinstance(taxonomy, str) or not taxonomy.strip()):
+            errors.append('ligands.taxonomy_dir must be a non-empty path or null')
+        from ftscripts.ligand_pipeline import validate_options as validate_ligand_options
+        for source in ('chembl', 'bindingdb'):
+            if source not in parent:
+                continue
+            section = parent[source]
+            if not isinstance(section, dict) or not isinstance(section.get('enabled'), bool):
+                errors.append(f'ligands.{source} must contain a boolean enabled key')
+            elif parent.get('enabled') and section['enabled']:
+                try:
+                    section.update(validate_ligand_options(source, section))
+                except (ValueError, TypeError) as error:
+                    errors.append(f'ligands.{source}: {error}')
 
     # Validate metabolism-PathwayTools section
     if 'metabolism-PathwayTools' in config and config['metabolism-PathwayTools'].get('enabled'):
@@ -402,6 +453,18 @@ def print_config(config):
     else:
         print(f"ColabFold Enabled: {config.colabfold}")
     
+    for source in ("chembl", "bindingdb"):
+        print(f"{source} Enabled: {bool(getattr(config, source, False))}")
+    print("\n---- Ligands ----")
+    print(f"Ligands Enabled: {bool(getattr(config, 'ligands', False))}")
+    if getattr(config, 'alphafill', False):
+        print("AlphaFill Enabled: True")
+        for key, value in config.alphafill.items():
+            if key != 'enabled':
+                print(f"  {key}: {value}")
+    else:
+        print("AlphaFill Enabled: False")
+
     print("\n---- Metabolism ----")
     if config.metabolism_pathwaytools:
         print("PathwayTools Metabolism analysis will be used.")
@@ -481,6 +544,8 @@ def print_config(config):
     if config.metabolism_pathwaytools or config.metabolism_sbml: enabled_modules.append("Metabolism")
     if config.structures: enabled_modules.append("Structures") 
     if config.colabfold: enabled_modules.append("ColabFold")
+    if getattr(config, "ligands", False):
+        enabled_modules.append("Ligands (AlphaFill)" if config.alphafill else "Ligands")
     if config.core: enabled_modules.append("Core Analysis")
     if config.offtarget: enabled_modules.append("Off-target")
     if config.deg: enabled_modules.append("DEG")

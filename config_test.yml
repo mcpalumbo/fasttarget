@@ -46,6 +46,38 @@ colabfold:
   gpu: False
   colabfold_run_all: False
 
+# ---- Ligands (standalone; opt in to additional API downloads) ----
+ligands:
+  enabled: False
+  # Relative paths resolve against --databases_path; null uses prepared local databases.
+  taxonomy_dir: null
+  chembl:
+    enabled: False
+    database: null
+    include_human: False
+    include_species_context: True
+    min_identity: 90
+    min_coverage: 70
+    direct_only: False
+    min_confidence_score: null
+    require_pchembl: False
+    exclude_problematic: True
+    strict_errors: False
+  bindingdb:
+    enabled: False
+    database: null
+    include_human: False
+    min_identity: 90
+    min_coverage: 70
+    strict_errors: False
+  alphafill:
+    enabled: True
+    download_cif: always
+    generate_pymol: True
+    enrich_donors: True
+    max_workers: 4
+    strict_errors: False
+
 # ---- Core ----
 core:
   enabled: True

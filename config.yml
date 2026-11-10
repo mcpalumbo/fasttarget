@@ -68,6 +68,54 @@ colabfold:
   colabfold_run_all: False
 
 
+# ---- Ligands (standalone) ----
+# Independent of structures.enabled. Reuses its UniProt mapping when available;
+# otherwise creates the mapping without running pockets or ColabFold.
+ligands:
+  enabled: False
+  # Relative paths resolve against --databases_path; null uses prepared local databases.
+  taxonomy_dir: null
+  chembl:
+    enabled: False
+    database: null
+    include_human: False
+    include_species_context: True
+    min_identity: 90
+    min_coverage: 70
+    direct_only: False
+    min_confidence_score: null
+    require_pchembl: False
+    exclude_problematic: True
+    strict_errors: False
+  bindingdb:
+    enabled: False
+    database: null
+    include_human: False
+    min_identity: 90
+    min_coverage: 70
+    strict_errors: False
+  alphafill:
+    enabled: True
+    # Primary CIF outputs and PyMOL viewers: organism/<name>/ligands/alphafill/models/<locus_tag>/
+    # always: all available CIFs; accepted_only: high/intermediate transfers; never: metadata only.
+    download_cif: always
+    generate_pymol: True
+    enrich_donors: True
+    max_workers: 4
+    timeout: 30
+    retries: 3
+    backoff: 1
+    refresh_cache: False
+    # True: save available results, then stop on execution errors (allows external retries).
+    # Missing AlphaFill entries and absent donor mappings are valid outcomes.
+    strict_errors: False
+    # Strict local RMSD (Angstrom) and TCS limits. Identity is categorized;
+    # global RMSD is reported without filtering.
+    high_local_rmsd: 0.92
+    high_tcs: 0.64
+    intermediate_local_rmsd: 3.10
+    intermediate_tcs: 1.27
+
 # ---- Core ----
 core:
   enabled: False
