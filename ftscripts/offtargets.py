@@ -1324,24 +1324,32 @@ def human_offtarget_parse (output_path, organism_name):
     human_blast_output = os.path.join(offtarget_path, 'human_offtarget_blast.tsv')
     human_results = os.path.join(offtarget_path, 'human_offtarget.tsv')
 
-    if not files.file_check(human_results):
-        blast_output_df = files.read_blast_output(human_blast_output)
-
-        highest_pident_values = {}
-
-        for index,row in blast_output_df.iterrows():
-            qseqid = row['qseqid']
-            pident = row['pident']
-
-            if qseqid not in highest_pident_values or pident > highest_pident_values[qseqid]:
-                highest_pident_values[qseqid] = pident
-
-        df_human = metadata.metadata_table_with_values(output_path, organism_name, highest_pident_values, 
-                                            'human_offtarget', offtarget_path, 'no_hit')
+    # Reparse inexpensive evidence so old summaries cannot hide newly added columns.
+    if os.path.isfile(human_blast_output) and os.path.getsize(human_blast_output) == 0:
+        if not files.step_completed(human_blast_output):
+            raise ValueError('Empty human BLAST output has no completion evidence')
+        blast_output_df = pd.DataFrame(columns=['qseqid', 'sseqid', 'pident', 'qcovhsp', 'qcovs'])
     else:
-        print('Human offtarget analysis already done, output file found')
-        print(human_results)
-        df_human = pd.read_csv(human_results, sep='\t', header=0)
+        blast_output_df = files.read_blast_output(human_blast_output)
+    for field in ('pident', 'qcovhsp', 'qcovs'):
+        values = pd.to_numeric(blast_output_df[field], errors='raise')
+        if values.isna().any() or ((values < 0) | (values > 100)).any():
+            raise ValueError(f'Invalid human BLAST {field}')
+        blast_output_df[field] = values
+    selected = {}
+    for _, row in blast_output_df.iterrows():
+        query = row['qseqid']
+        if query not in selected or row['pident'] > selected[query]['pident']:
+            selected[query] = row
+    values = {query: row['pident'] for query, row in selected.items()}
+    df_human = metadata.metadata_table_with_values(
+        output_path, organism_name, values, 'human_offtarget', offtarget_path, 'no_hit')
+    for field in ('qcovhsp', 'qcovs'):
+        df_human[f'human_offtarget_{field}'] = df_human['gene'].map(
+            {query: row[field] for query, row in selected.items()})
+    df_human['human_offtarget_subject'] = df_human['gene'].map(
+        {query: row['sseqid'] for query, row in selected.items()})
+    df_human.to_csv(human_results, sep='\t', index=False)
 
     return df_human
 
@@ -2011,6 +2019,33 @@ def run_foldseek_human_colabfold_structures(databases_path, output_path, organis
 
     return foldseek_results_mapping
 
+# A gene with no Foldseek hit can be in one of three situations, and they used to
+# be indistinguishable: every one produced the same record with thirteen None
+# fields, so the results table showed 'No hit' whether the search found no human
+# homolog, never ran, or left no readable output. The first is a finding about the
+# protein; the others are failures of the run.
+FOLDSEEK_FIELDS = (
+    'query_structure', 'target_foldseek', 'alnlen_foldseek', 'qcov_foldseek',
+    'tcov_foldseek', 'lddt_foldseek', 'qtmscore_foldseek', 'ttmscore_foldseek',
+    'alntmscore_foldseek', 'rmsd_foldseek', 'prob_foldseek', 'pident_foldseek',
+    'evalue_foldseek',
+)
+
+
+def empty_foldseek_record(status):
+    """
+    A Foldseek record with no match, saying why there is none.
+
+    :param status: One of 'no_hits' (the search ran and found nothing),
+        'not_searched' (no result file was produced for the gene) or
+        'result_unreadable' (a result file was expected but is missing or empty).
+    :return: Record with every metric unset and the reason recorded.
+    """
+    record = {field: None for field in FOLDSEEK_FIELDS}
+    record['foldseek_status'] = status
+    return record
+
+
 def foldseek_human_parser (output_path, organism_name, map_foldseek):
 
     """
@@ -2062,21 +2097,7 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
             
             # Skip if no result files (e.g., foldseek search failed)
             if not result_files:
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('not_searched')
                 print(f'  {locus_tag}: Foldseek search failed, no results')
                 continue
             
@@ -2085,21 +2106,7 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
             
             if not files.file_check(result_file):
                 print(f'  {locus_tag}: Result file not found: {result_file}')
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('result_unreadable')
                 continue
             
             try:
@@ -2123,45 +2130,18 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
                         'rmsd_foldseek': best_row['rmsd'],
                         'prob_foldseek': best_row['prob'],
                         'pident_foldseek': best_row['pident'],
-                        'evalue_foldseek': best_row['evalue']
+                        'evalue_foldseek': best_row['evalue'],
+                        'foldseek_status': 'hit',
                     }
                     print(f'  {locus_tag}: Best match = {best_row["target"]} (TM-score={best_row["max_tmscore"]:.3f})')
                 else:
                     # Empty result file
-                    results_foldseek_dict[locus_tag] = {
-                        'query_structure': None,
-                        'target_foldseek': None,
-                        'alnlen_foldseek': None,
-                        'qcov_foldseek': None,
-                        'tcov_foldseek': None,
-                        'lddt_foldseek': None,
-                        'qtmscore_foldseek': None,
-                        'ttmscore_foldseek': None,
-                        'alntmscore_foldseek': None,
-                        'rmsd_foldseek': None,
-                        'prob_foldseek': None,
-                        'pident_foldseek': None,
-                        'evalue_foldseek': None
-                    }
+                    results_foldseek_dict[locus_tag] = empty_foldseek_record('no_hits')
                     print(f'  {locus_tag}: No hits found in foldseek results')
                     
             except Exception as e:
                 logging.exception(f'Could not read {result_file}: {e}')
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('result_unreadable')
         
         # Save results
         files.dict_to_json(foldseek_results_path, 'human_foldseek_dict.json', results_foldseek_dict)
@@ -2208,21 +2188,7 @@ def foldseek_human_colabfold_parser(output_path, organism_name, map_foldseek):
         for locus_tag, result_files in map_foldseek.items():
 
             if not result_files:
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('not_searched')
                 print(f'  {locus_tag}: Foldseek ColabFold search failed, no results')
                 continue
 
@@ -2230,21 +2196,7 @@ def foldseek_human_colabfold_parser(output_path, organism_name, map_foldseek):
 
             if not files.file_check(result_file):
                 print(f'  {locus_tag}: Result file not found: {result_file}')
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('result_unreadable')
                 continue
 
             try:
@@ -2267,44 +2219,17 @@ def foldseek_human_colabfold_parser(output_path, organism_name, map_foldseek):
                         'rmsd_foldseek': best_row['rmsd'],
                         'prob_foldseek': best_row['prob'],
                         'pident_foldseek': best_row['pident'],
-                        'evalue_foldseek': best_row['evalue']
+                        'evalue_foldseek': best_row['evalue'],
+                        'foldseek_status': 'hit',
                     }
                     print(f'  {locus_tag}: Best ColabFold match = {best_row["target"]} (TM-score={best_row["max_tmscore"]:.3f})')
                 else:
-                    results_foldseek_dict[locus_tag] = {
-                        'query_structure': None,
-                        'target_foldseek': None,
-                        'alnlen_foldseek': None,
-                        'qcov_foldseek': None,
-                        'tcov_foldseek': None,
-                        'lddt_foldseek': None,
-                        'qtmscore_foldseek': None,
-                        'ttmscore_foldseek': None,
-                        'alntmscore_foldseek': None,
-                        'rmsd_foldseek': None,
-                        'prob_foldseek': None,
-                        'pident_foldseek': None,
-                        'evalue_foldseek': None
-                    }
+                    results_foldseek_dict[locus_tag] = empty_foldseek_record('no_hits')
                     print(f'  {locus_tag}: No hits found in Foldseek ColabFold results')
 
             except Exception as e:
                 logging.exception(f'Could not read {result_file}: {e}')
-                results_foldseek_dict[locus_tag] = {
-                    'query_structure': None,
-                    'target_foldseek': None,
-                    'alnlen_foldseek': None,
-                    'qcov_foldseek': None,
-                    'tcov_foldseek': None,
-                    'lddt_foldseek': None,
-                    'qtmscore_foldseek': None,
-                    'ttmscore_foldseek': None,
-                    'alntmscore_foldseek': None,
-                    'rmsd_foldseek': None,
-                    'prob_foldseek': None,
-                    'pident_foldseek': None,
-                    'evalue_foldseek': None
-                }
+                results_foldseek_dict[locus_tag] = empty_foldseek_record('result_unreadable')
 
         files.dict_to_json(foldseek_results_path, 'human_foldseek_colabfold_dict.json', results_foldseek_dict)
         print(f'\nFoldseek ColabFold results saved to {foldseek_dict_file}')
@@ -2373,7 +2298,9 @@ def merge_foldseek_data (output_path, organism_name):
                     'rmsd': foldseek_data.get('rmsd_foldseek'),
                     'prob': foldseek_data.get('prob_foldseek'),
                     'pident': foldseek_data.get('pident_foldseek'),
-                    'evalue': foldseek_data.get('evalue_foldseek')
+                    'evalue': foldseek_data.get('evalue_foldseek'),
+                    # Why there is no match, when there is none.
+                    'status': foldseek_data.get('foldseek_status'),
                 }
 
             files.dict_to_json(offtargets_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)
@@ -2427,7 +2354,9 @@ def merge_foldseek_colabfold_data(output_path, organism_name):
                     'rmsd': foldseek_data.get('rmsd_foldseek'),
                     'prob': foldseek_data.get('prob_foldseek'),
                     'pident': foldseek_data.get('pident_foldseek'),
-                    'evalue': foldseek_data.get('evalue_foldseek')
+                    'evalue': foldseek_data.get('evalue_foldseek'),
+                    # Why there is no match, when there is none.
+                    'status': foldseek_data.get('foldseek_status'),
                 }
 
             files.dict_to_json(offtargets_dir, f'{organism_name}_final_foldseek_colabfold_results.json', mapped_dict)
@@ -2482,7 +2411,7 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             if locus_tag in mapped_dict:
                 rows.append(mapped_dict[locus_tag])
             else:
-                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'alnlen': None, 'qcov': None, 'tcov': None, 'lddt': None, 'qtmscore': None, 'ttmscore': None, 'alntmscore': None, 'rmsd': None, 'prob': None, 'pident': None, 'evalue': None })
+                rows.append({'gene': locus_tag, 'query_structure': None, 'structure': 'No hit', 'target': None, 'alnlen': None, 'qcov': None, 'tcov': None, 'lddt': None, 'qtmscore': None, 'ttmscore': None, 'alntmscore': None, 'rmsd': None, 'prob': None, 'pident': None, 'evalue': None, 'status': 'no_reference_structure' })
 
         final_foldseek_df = pd.DataFrame(rows).rename(columns={
             'query_structure': 'FS_query_structure',
@@ -2498,7 +2427,8 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             'rmsd': 'FS_rmsd',
             'prob': 'FS_prob',
             'pident': 'FS_pident',
-            'evalue': 'FS_evalue'
+            'evalue': 'FS_evalue',
+            'status': 'FS_status',
         })
 
         final_foldseek_df.to_csv(final_foldseek_file, sep='\t', index=False)

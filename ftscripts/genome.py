@@ -349,7 +349,7 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
             os.replace(path, os.path.join(output_path, names[ext]))
         files.atomic_write_json(manifest, manifest_path)
 
-def id_to_locustag_gff(file_path: str, ids, fix=False):
+def id_to_locustag_gff(file_path: str, ids, fix=False, return_mapping=False):
     """Map tab-separated Roary members to unique loci using exact GFF IDs.
 
     For original GFFs only, accept the existing BioPerl .p01 protein suffix
@@ -361,6 +361,8 @@ def id_to_locustag_gff(file_path: str, ids, fix=False):
         for feature in features:
             loci = feature.qualifiers.get('locus_tag', inherited_loci)
             feature_ids = feature.qualifiers.get('ID', [])
+            if not loci and feature.type == 'gene':
+                loci = feature_ids
             for feature_id in feature_ids:
                 # Preserve the historic ID fallback; the caller validates against
                 # the reference gene universe before producing boolean results.
@@ -372,6 +374,7 @@ def id_to_locustag_gff(file_path: str, ids, fix=False):
         for record in GFF.parse(handle):
             visit(record.features)
     mapped = []
+    member_loci = {}
     seen = set()
     problems = []
     for cell in ids:
@@ -390,6 +393,7 @@ def id_to_locustag_gff(file_path: str, ids, fix=False):
                 problems.append(member)
                 continue
             locus = next(iter(candidates))
+            member_loci[member] = locus
             if locus not in seen:
                 seen.add(locus)
                 mapped.append(locus)
@@ -399,7 +403,7 @@ def id_to_locustag_gff(file_path: str, ids, fix=False):
             + ', '.join(problems[:20])
             + (f' (total: {len(problems)})' if len(problems) > 20 else '')
         )
-    return mapped
+    return member_loci if return_mapping else mapped
 
 def core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=None):
     """
@@ -916,12 +920,17 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     if (not samples or len(samples) != len(set(samples)) or any(not x for x in samples)
             or organism_name not in samples or set(samples) != prepared):
         raise ValueError('Roary sample columns must match the prepared GFF cohort and include the reference once')
+    cohort_manifest = os.path.join(conservation_dir, 'cohort.json')
+    if os.path.isfile(cohort_manifest):
+        with open(cohort_manifest) as handle:
+            if set(json.load(handle)['cohort']) != set(samples):
+                raise ValueError('Roary samples differ from the authoritative cohort')
     total_genomes = len(samples)
     mapping_file = os.path.join(fixed_input_dir, f'{organism_name}.gff')
     if not os.path.isfile(mapping_file):
         mapping_file = os.path.join(gff_dir, f'{organism_name}.gff')
     reference_file = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
-    table_parameters = {'core_threshold': core_threshold, 'parser_schema': 3,
+    table_parameters = {'core_threshold': core_threshold, 'parser_schema': 4,
                         'csv_sha256': files.sha256_file(genes_csv_file),
                         'mapping_sha256': files.sha256_file(mapping_file),
                         'reference_sha256': files.sha256_file(reference_file),
@@ -977,7 +986,30 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
         raise ValueError('Roary mapped loci absent from translated reference CDS: '
                          + ', '.join(sorted(unknown_loci)[:20]))
 
+    cells = [cell for cell in df[organism_name] if cell.strip()]
+    mapping = id_to_locustag_gff(mapping_file, cells,
+                               fix=os.path.isfile(gff_file_fixed), return_mapping=True)
+    occupancy = {}
+    for row_index, row in df.iterrows():
+        if not row[organism_name].strip():
+            continue
+        loci = {mapping[member.strip()] for member in row[organism_name].split('\t')}
+        for locus in loci:
+            if locus not in reference_loci or locus in occupancy:
+                raise ValueError(f'Unknown or multi-family reference locus in Roary: {locus}')
+            occupancy[locus] = int(counts.loc[row_index])
+    missing = reference_loci - set(occupancy)
+    if missing:
+        logging.warning('Roary did not report %d reference loci; conservation remains unavailable', len(missing))
     roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
+    roary_table['roary_genomes_present'] = roary_table['gene'].map(occupancy).astype('Int64')
+    roary_table['roary_genomes_total'] = total_genomes
+    roary_table['roary_conservation_pct'] = 100 * roary_table['roary_genomes_present'] / total_genomes
+    roary_table['core_roary'] = roary_table['core_roary'].astype('boolean')
+    roary_table.loc[roary_table['gene'].isin(missing), 'core_roary'] = pd.NA
+    roary_table['roary_occupancy_status'] = roary_table['gene'].map(
+        lambda gene: 'evaluated' if gene in occupancy else 'reference_not_reported')
+    roary_table.to_csv(roary_results_table, sep='\t')
     files.write_manifest(
         roary_results_table,
         table_parameters,
@@ -1005,53 +1037,55 @@ def corecruncher_output(output_path, organism_name, core_threshold=None):
     ref_genome = f'{organism_name}.faa'
     cc_results_table = os.path.join(conservation_dir, 'core_corecruncher.tsv')
 
-    core_locus_tag = []
-    core_total = 0
-
-    if not files.file_check(cc_results_table):
-        # A missing output file used to be logged and then ignored, leaving
-        # core_locus_tag empty and producing a table that declares no gene core.
-        # That is wrong data rather than a failure, so refuse instead.
-        if not os.path.exists(cc_output_file):
-            raise FileNotFoundError(
-                f"CoreCruncher output file '{cc_output_file}' not found; "
-                f'cannot determine the core genome.'
-            )
-
-        with open(cc_output_file, 'r') as tsvfile:
-            reader = csv.reader(tsvfile, delimiter='\t')
-            for row in reader:
-                core_total += 1
-                for value in row:
-                    if isinstance(value, str) and value.startswith(ref_genome):
-                        core_locus_tag.append(value.split('&')[1])
-
-        # CoreCruncher already applied the frequency threshold when it ran, so this
-        # is only a label. It used to say 90% unconditionally, which did not match
-        # the value the run actually used.
-        threshold_label = f'{core_threshold}%' if core_threshold is not None else 'the configured frequency'
-        print(f'CoreCruncher total core genes (> {threshold_label} strains): {core_total}')
-        print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')
-
-        corecruncher_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_corecruncher',conservation_dir)
-        # Unlike core_roary.tsv, this parse applies no threshold of its own: the
-        # frequency was applied by CoreCruncher when it ran, and a changed value is
-        # refused at that gate. The manifest is provenance, not a cache key.
-        files.write_manifest(
-            cc_results_table,
-            {'core_threshold': core_threshold},
-            extra={'core_families': core_total, 'core_genes': len(core_locus_tag)},
-        )
-    else:
-        print(f'CoreCruncher output file already exists: {cc_results_table}.')
-        corecruncher_table = pd.read_csv(cc_results_table, sep='\t', index_col=0, header=0)
-        threshold_percent = core_threshold if core_threshold is not None else float('nan')
-        report_core_table(
-            corecruncher_table, 'core_corecruncher', 'CoreCruncher',
-            threshold_percent, cc_results_table,
-        )
-
-    return corecruncher_table
+    if not os.path.isfile(cc_output_file):
+        raise FileNotFoundError(cc_output_file)
+    if os.path.getsize(cc_output_file) == 0 and not files.step_completed(cc_output_file):
+        raise ValueError('Empty CoreCruncher output has no completion evidence')
+    faa_dir = os.path.join(conservation_dir, 'corecruncher_output', 'faa')
+    cohort = {os.path.basename(path) for path in glob.glob(os.path.join(faa_dir, '*.faa'))}
+    if ref_genome not in cohort:
+        raise ValueError('CoreCruncher cohort is missing the reference')
+    manifest_path = os.path.join(conservation_dir, 'cohort.json')
+    if os.path.isfile(manifest_path):
+        with open(manifest_path) as handle:
+            expected = {name + '.faa' for name in json.load(handle)['cohort']}
+        if cohort != expected:
+            raise ValueError('CoreCruncher inputs differ from the shared cohort')
+    reference_loci = set(metadata.ref_gbk_locus(output_path, organism_name))
+    occupancy = {}
+    families = 0
+    with open(cc_output_file) as handle:
+        for row in csv.reader(handle, delimiter='\t'):
+            if not row or not any(value.strip() for value in row):
+                continue
+            if row[0].startswith('fam') and row[0][3:].isdigit():
+                row = row[1:]
+            if not row:
+                raise ValueError('CoreCruncher family has no members')
+            members = []
+            for value in row:
+                genome_id, separator, locus = value.strip().partition('&')
+                if not separator or not locus or genome_id not in cohort:
+                    raise ValueError(f'Invalid CoreCruncher member: {value!r}')
+                members.append((genome_id, locus))
+            families += 1
+            present = len({name for name, locus in members})
+            for locus in {locus for name, locus in members if name == ref_genome}:
+                if locus not in reference_loci or locus in occupancy:
+                    raise ValueError(f'Unknown or multi-family CoreCruncher reference locus: {locus}')
+                occupancy[locus] = present
+    table = metadata.metadata_table_bool(output_path, organism_name, list(occupancy),
+                                         'core_corecruncher', conservation_dir)
+    table['corecruncher_genomes_present'] = table['gene'].map(occupancy).astype('Int64')
+    table['corecruncher_genomes_total'] = len(cohort)
+    table['corecruncher_conservation_pct'] = 100 * table['corecruncher_genomes_present'] / len(cohort)
+    table['corecruncher_occupancy_status'] = table['gene'].map(
+        lambda gene: 'retained_core_family' if gene in occupancy else 'occupancy_unavailable')
+    table.to_csv(cc_results_table, sep='\t')
+    files.write_manifest(cc_results_table, {'core_threshold': core_threshold, 'parser_schema': 2,
+                         'source_sha256': files.sha256_file(cc_output_file)},
+                         extra={'genomes_analyzed': len(cohort), 'core_families': families})
+    return table
 
 GRAM_TYPE_NAMES = {'n': 'Gram-negative', 'p': 'Gram-positive', 'a': 'archaea'}
 
@@ -1172,3 +1206,65 @@ def localization_prediction(output_path, organism_name, organism_type, container
         return psort_df
         
     
+
+
+def conservation_annotation_report(dataset, destination):
+    """Export downloaded annotation provenance without inferring absent fields."""
+    report = os.path.join(dataset, 'assembly_data_report.jsonl')
+    rows = []
+    if os.path.isfile(report):
+        with open(report) as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                annotation = item.get('annotationInfo', {})
+                assembly = item.get('assemblyInfo', {})
+                rows.append({'accession': item.get('accession'),
+                             'source_database': item.get('sourceDatabase'),
+                             'assembly_level': assembly.get('assemblyLevel'),
+                             'annotation_name': annotation.get('name'),
+                             'annotation_provider': annotation.get('provider'),
+                             'annotation_pipeline': annotation.get('pipeline'),
+                             'annotation_software_version': annotation.get('softwareVersion'),
+                             'annotation_date': annotation.get('releaseDate'),
+                             'reported_protein_count': annotation.get('stats', {}).get('geneCounts', {}).get('proteinCoding')})
+    columns = ['accession', 'source_database', 'assembly_level', 'annotation_name',
+               'annotation_provider', 'annotation_pipeline', 'annotation_software_version',
+               'annotation_date', 'reported_protein_count']
+    table = pd.DataFrame(rows, columns=columns)
+    table.to_csv(destination, sep='\t', index=False)
+    files.write_manifest(destination, {'report_sha256': files.sha256_file(report)
+                                      if os.path.isfile(report) else None},
+                         extra={'status': 'reported' if rows else 'metadata_unavailable'})
+    return table
+
+
+def conservation_protein_qc(genomes, destination, reference=None, warn_ratio=0.8, exclude_ratio=0.5):
+    """Count annotated translated CDS; median is over eligible comparators only."""
+    import statistics
+    if not 0 <= exclude_ratio <= warn_ratio <= 1:
+        raise ValueError('Protein QC requires 0 <= exclude_ratio <= warn_ratio <= 1')
+    rows = []
+    for accession, path in sorted(genomes.items()):
+        count = sum(feature.type == 'CDS' and bool(feature.qualifiers.get('translation', [''])[0])
+                    for record in SeqIO.parse(path, 'genbank') for feature in record.features)
+        rows.append({'accession': accession, 'role': 'comparator', 'protein_count': count})
+    median = statistics.median(row['protein_count'] for row in rows) if rows else None
+    if reference:
+        count = sum(feature.type == 'CDS' and bool(feature.qualifiers.get('translation', [''])[0])
+                    for record in SeqIO.parse(reference, 'genbank') for feature in record.features)
+        rows.append({'accession': 'user_reference', 'role': 'reference', 'protein_count': count})
+    excluded = set()
+    for row in rows:
+        ratio = row['protein_count'] / median if median else None
+        row.update({'comparator_median': median, 'median_ratio': ratio,
+                    'low_protein_count': ratio is not None and ratio < warn_ratio,
+                    'excluded': row['role'] == 'comparator' and ratio is not None and ratio < exclude_ratio})
+        if row['excluded']:
+            excluded.add(row['accession'])
+    pd.DataFrame(rows, columns=['accession', 'role', 'protein_count', 'comparator_median',
+                              'median_ratio', 'low_protein_count', 'excluded']).to_csv(destination, sep='\t', index=False)
+    files.write_manifest(destination, {'warn_ratio': warn_ratio, 'exclude_ratio': exclude_ratio},
+                         extra={'comparator_median': median, 'reference_exempt': True})
+    return excluded

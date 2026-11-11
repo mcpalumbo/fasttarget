@@ -22,7 +22,19 @@ def ref_gbk_locus(output_path, organism_name):
             if feature.type == "CDS":
                 if 'translation' in feature.qualifiers and 'locus_tag' in feature.qualifiers:
                     locus_tags.append(feature.qualifiers["locus_tag"][0])
-    
+
+    # This list is the gene set of every module table and of the final merge, so a
+    # repeated locus_tag made each of them carry one gene twice, with no way to
+    # tell the rows apart. Reporting it here names the annotation, which is where
+    # it can be fixed, instead of surfacing later as duplicated result rows.
+    duplicated = sorted({tag for tag in locus_tags if locus_tags.count(tag) > 1})
+    if duplicated:
+        raise ValueError(
+            f'{len(duplicated)} locus_tag(s) appear on more than one CDS in {ref_gbk}, '
+            f'e.g. {duplicated[:5]}. Locus tags identify genes throughout the pipeline, '
+            f'so they have to be unique in the annotation.'
+        )
+
     return locus_tags
 
 

@@ -449,20 +449,41 @@ def sha256_file(file_path):
             sha256.update(chunk)
     return sha256.hexdigest()
 
-def fileset_fingerprint(paths):
+def fileset_fingerprint(paths, by_content=True):
     """
     Short digest identifying a set of input files.
 
-    Recording the file names themselves would make a manifest unreadable for a
-    few thousand genomes, and a mismatch message unusable. The digest is reported
+    Recording the names themselves would make a manifest unreadable for a few
+    thousand genomes, and a mismatch message unusable. The digest is reported
     alongside a count, which is what makes it meaningful to a reader.
 
-    :param paths: Iterable of file paths. Only the base names are used, so the set
+    By default the content of each file is hashed as well as its name, because
+    names and counts staying the same while the content changes is exactly the
+    case a resume must notice: re-downloading a genome under the same accession,
+    or regenerating a GFF from a corrected annotation, leaves the set looking
+    identical. Pass by_content=False only where re-reading the inputs is too
+    expensive to be worth it, and accept that such a change goes unnoticed.
+
+    :param paths: Iterable of file paths. Base names are used, so the set
         survives being moved or staged into a work directory.
-    :return: First 12 hex characters of the SHA-256 of the sorted base names.
+    :param by_content: Whether to include each file's own checksum.
+    :return: First 12 hex characters of the SHA-256 of the sorted entries.
     """
-    names = sorted(os.path.basename(path) for path in paths)
-    digest = hashlib.sha256('\n'.join(names).encode('utf-8')).hexdigest()
+    entries = []
+    for path in sorted(paths, key=os.path.basename):
+        name = os.path.basename(path)
+        if not by_content:
+            entries.append(name)
+            continue
+        try:
+            entries.append(f'{name}:{sha256_file(path)}')
+        except OSError as error:
+            # A path that cannot be read is still part of the set, and its
+            # unreadability is itself a difference worth recording.
+            logging.warning(f'Could not checksum {path} for a fileset fingerprint: {error}')
+            entries.append(f'{name}:unreadable')
+
+    digest = hashlib.sha256('\n'.join(entries).encode('utf-8')).hexdigest()
     return digest[:12]
 
 

@@ -26,10 +26,17 @@ def options(core):
         raise ValueError('core.dereplication.enabled must be boolean')
     if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
         raise ValueError('core.dereplication.min_genomes must be a nonnegative integer')
+    quality = core.get('protein_qc', {})
+    if not isinstance(quality, dict):
+        raise ValueError('core.protein_qc must be a mapping')
+    warn, exclude = quality.get('warn_ratio', 0.8), quality.get('exclude_ratio', 0.5)
+    if (any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in (warn, exclude))
+            or not 0 <= exclude <= warn <= 1):
+        raise ValueError('protein_qc requires 0 <= exclude_ratio <= warn_ratio <= 1')
     return enabled, threshold
 
 
-def select(dataset, destination, min_genomes=300, cpus=4, reference=None, human_only=False):
+def select(dataset, destination, min_genomes=300, cpus=4, reference=None, human_only=False, quality=None, enabled=True):
     """Run above threshold, counting downloaded assemblies before host selection.
 
     Returns a manifest. Destination must be new; never resume partial dRep output.
@@ -72,7 +79,18 @@ def select(dataset, destination, min_genomes=300, cpus=4, reference=None, human_
         SeqIO.write(records, fasta, 'fasta')
         candidates[fasta.name] = {'accession': folder.name, 'gbk': str(path.resolve()),
                                   'gbk_sha256': digest(path), 'fna_sha256': digest(fasta)}
-    active = len(folders) > min_genomes and len(candidates) > 1
+    from ftscripts import genome
+    quality = quality or {}
+    qc_excluded = genome.conservation_protein_qc(
+        {info['accession']: info['gbk'] for info in candidates.values()},
+        str(destination / 'protein_qc.tsv'), reference,
+        quality.get('warn_ratio', 0.8), quality.get('exclude_ratio', 0.5))
+    for name in list(candidates):
+        if candidates[name]['accession'] in qc_excluded:
+            excluded[candidates[name]['accession']] = 'protein_count_below_median_cutoff'
+            del candidates[name]
+    genome.conservation_annotation_report(str(dataset), str(destination / 'annotation_provenance.tsv'))
+    active = enabled and len(folders) > min_genomes and len(candidates) > 1
     clusters = {name: name for name in candidates}
     scores = {name: 0.0 for name in candidates}
     command = None
@@ -120,7 +138,7 @@ def select(dataset, destination, min_genomes=300, cpus=4, reference=None, human_
                            'coverage_semantics': 'dRep native directional fragment fraction > 0.90 before reciprocal ANI averaging',
                            'representative': 'maximum dRep within-cluster mean ANI; accession lexical tie-break'},
                 'clusters': clusters, 'centrality': scores, 'representatives': representatives,
-                'qc_status': 'host and readable sequence only; contamination/low-CDS policy pending'}
+                'qc_status': 'host, readable sequence and relative translated-CDS count; contamination filtering out of scope'}
     (destination / 'selection.json').write_text(json.dumps(manifest, indent=2) + '\n')
     return manifest
 
@@ -129,15 +147,13 @@ def prepare(output_path, organism, core, cpus, human_only, engine):
     """Prepare a fresh shared cohort workspace for the Python core entry point."""
     from ftscripts import genome
     enabled, threshold = options(core)
-    if not enabled:
-        return output_path
     base = Path(output_path).resolve() / organism
     runs = base / 'conservation' / 'cohort_runs'
     runs.mkdir(exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix='cohort-', dir=runs))
     reference = base / 'genome' / f'{organism}.gbk'
     selection = select(base / 'conservation' / f'{organism}_dataset' / 'ncbi_dataset' / 'data',
-                       work / 'selection', threshold, cpus, reference, human_only)
+                       work / 'selection', threshold, cpus, reference, human_only, core.get('protein_qc'), enabled)
     target = work / organism
     shutil.copytree(base / 'genome', target / 'genome')
     conservation = target / 'conservation'

@@ -1626,8 +1626,13 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
     selects the best structure to use as reference according to new criteria:
     
     Reference structure have BOTH:
-      - Resolution < resolution_cutoff (default 3.5Å)
-      - Coverage > coverage_cutoff (default 40%)
+      - Resolution <= resolution_cutoff (default 3.5Å)
+      - Coverage >= coverage_cutoff (default 40%)
+
+    Both limits are inclusive, so a structure at exactly 3.5 Å and exactly 40%
+    coverage qualifies. The text here used to say '<' and '>', which did not
+    match passes_cutoffs below; the behaviour is what selects structures today,
+    so the description was the part that was wrong.
     
     Selection priority from PDB structures that pass both cutoffs.
     Always X-ray has priority over EM:
@@ -4460,6 +4465,13 @@ def _check_structure_pipeline_parameters(output_path, organism_name, structure_d
             f'Warning: {final_table_path} does not record how it was built '
             f'({", ".join(unrecorded)} unknown). Reusing it; see the README if you '
             f'have changed any of those since it was built.'
+        )
+
+    if files.manifest_output_changed(final_table_path):
+        raise RuntimeError(
+            f'{final_table_path} no longer matches the checksum recorded when it was '
+            f'built, so it was truncated or modified since. Remove it and the files '
+            f'listed in the README to rebuild the structure summary.'
         )
 
     differences = files.manifest_differences(final_table_path, parameters)

@@ -6,6 +6,7 @@ import re
 import numpy
 import pandas as pd
 import logging
+import hashlib
 import networkx as nx
 from networkx.algorithms.centrality.betweenness import betweenness_centrality
 from networkx.algorithms.components.connected import connected_components
@@ -356,7 +357,7 @@ def mapping_chokepoints(locus_reaction_dict, producing_ck, consuming_ck, both_ck
 
     return producing_chokepoint, consuming_chokepoint, both_chokepoint
 
-def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file=None):
+def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file=None, network_settings=None):
     """
     Runs the metabolism pipeline. 
     It processes the SBML file, generates the Ubiquitous Compounds file, the network SIF file, and the gene-reaction mapping. 
@@ -417,6 +418,8 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
     both_df = metadata.metadata_table_with_values(output_path, organism_name, both_chokepoint, "PTOOLS_both_chokepoints", metabolism_dir, 'None')
     print(f'---------- 7. Finished ----------')
 
+    bcentrality_df = add_network_gene_metrics(bcentrality_df, subgraph, locus_reaction_dict, metabolism_dir, 'PTOOLS', network_settings)
+    bcentrality_df.to_csv(os.path.join(metabolism_dir, 'PTOOLS_betweenness_centrality.tsv'), sep='\t', index=False)
     return bcentrality_df, edges_df, producing_df, consuming_df, both_df
 
 # Functions for process an external SBML with MetaGraphTools (docker)
@@ -621,10 +624,10 @@ def pick_mgt_results_dir(metabolism_dir):
                 print(f"Removed older valid MGT_results folder: {d}")
             except Exception as e:
                 logging.exception(f"Error removing folder {d}: {e}")
-        
+
     return valid_dirs[-1]  # Return the most recent valid directory
 
-def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine='docker'):
+def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine='docker', network_settings=None):
 
     """
     Runs the metabolism pipeline using an external SBML file with MetaGraphTools.
@@ -650,7 +653,7 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, con
 
     mgt_results_dir = pick_mgt_results_dir(metabolism_dir)
 
-    if not mgt_results_dir:   
+    if not mgt_results_dir:
         try:
             process_external_sbml(sbml_file, metabolism_dir, filter_file, container_engine=container_engine)
             # After running MetaGraphTools, try to pick the results directory again
@@ -658,7 +661,7 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, con
         except Exception as e:
             logging.exception(f'Error processing external SBML file: {e}')
             return None, None, None, None
-    
+
     # Parse results if we have a valid MGT results directory
     if mgt_results_dir:
         consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
@@ -666,14 +669,95 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, con
         bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, 0)
         degree_df = metadata.metadata_table_with_values(output_path, organism_name, degree_dict, "MGT_edges", metabolism_dir, 0)
         consumption_df = metadata.metadata_table_with_values(output_path, organism_name, consumption_chokepoint_dict, "MGT_consuming_chokepoints", metabolism_dir, 'False')
-        production_df = metadata.metadata_table_with_values(output_path, organism_name, production_chokepoint_dict, "MGT_producing_chokepoints", metabolism_dir, 'False')                                                                
+        production_df = metadata.metadata_table_with_values(output_path, organism_name, production_chokepoint_dict, "MGT_producing_chokepoints", metabolism_dir, 'False')
 
         print(f'---------- Finished processing external SBML file ----------')
 
+        graph = nx.DiGraph()
+        with open(os.path.join(mgt_results_dir, 'metabolic_network_filter.sif')) as handle:
+            for line in handle:
+                fields = line.split()
+                if len(fields) == 3:
+                    graph.add_edge(fields[0], fields[2])
+                elif fields:
+                    raise ValueError('Malformed filtered MGT SIF')
+        associations = pd.read_csv(os.path.join(mgt_results_dir, 'betweenness_centrality.tsv'),
+                                   sep='\t', dtype=str, keep_default_na=False)
+        mapping = associations.groupby('Gene')['Reaction'].agg(list).to_dict()
+        bcentrality_df = add_network_gene_metrics(bcentrality_df, graph, mapping, metabolism_dir, 'MGT', network_settings)
+        bcentrality_df.to_csv(os.path.join(metabolism_dir, 'MGT_betweenness_centrality.tsv'), sep='\t', index=False)
         return bcentrality_df, degree_df, consumption_df, production_df
     else:
         logging.error('MetaGraphTools did not produce valid results.')
         return None, None, None, None
-    
- 
-    
+
+
+
+
+def extended_network_metrics(graph, destination, prefix, settings=None):
+    """Node metrics and descriptive global comparisons to directed G(n,m)."""
+    import random
+    settings = settings or {}
+    repetitions = settings.get('random_networks', 100)
+    seed = settings.get('seed', 42)
+    alpha = settings.get('pagerank_alpha', 0.85)
+    if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
+        raise ValueError('random_networks must be a positive integer')
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 < alpha < 1:
+        raise ValueError('seed must be an integer and pagerank_alpha must be in (0,1)')
+    graph = nx.DiGraph(graph)
+    n, m = graph.number_of_nodes(), graph.number_of_edges()
+    loops = nx.number_of_selfloops(graph)
+
+    def measure(network):
+        ranks = nx.pagerank(network, alpha=alpha, max_iter=1000, tol=1e-10) if len(network) else {}
+        indegree, outdegree = dict(network.in_degree()), dict(network.out_degree())
+        summary = {'pagerank_max': max(ranks.values(), default=0.0),
+                   'pagerank_std': float(numpy.std(list(ranks.values()))) if ranks else 0.0,
+                   'in_degree_std': float(numpy.std(list(indegree.values()))) if indegree else 0.0,
+                   'out_degree_std': float(numpy.std(list(outdegree.values()))) if outdegree else 0.0,
+                   'weak_components': nx.number_weakly_connected_components(network),
+                   'strong_components': nx.number_strongly_connected_components(network)}
+        return {'pagerank': ranks, 'in_degree': indegree, 'out_degree': outdegree}, summary
+
+    metrics, observed = measure(graph)
+    rng = random.Random(seed)
+    null_rows = []
+    for iteration in range(repetitions):
+        null = nx.gnm_random_graph(n, m - loops, seed=rng, directed=True)
+        null.add_edges_from((node, node) for node in rng.sample(range(n), loops))
+        _, summary = measure(null)
+        null_rows.append({'iteration': iteration, **summary})
+    nulls = pd.DataFrame(null_rows)
+    comparisons = []
+    for metric, value in observed.items():
+        values = nulls[metric]
+        mean, spread = float(values.mean()), float(values.std(ddof=0))
+        comparisons.append({'metric': metric, 'observed': value, 'null_mean': mean,
+                            'null_std': spread, 'difference': value - mean,
+                            'z_score': (value - mean) / spread if spread > 0 else None,
+                            'null_min': float(values.min()), 'null_max': float(values.max())})
+    os.makedirs(destination, exist_ok=True)
+    pd.DataFrame(metrics).rename_axis('reaction').to_csv(os.path.join(destination, prefix + '_reaction_metrics.tsv'), sep='\t')
+    nulls.to_csv(os.path.join(destination, prefix + '_random_networks.tsv'), sep='\t', index=False)
+    pd.DataFrame(comparisons).to_csv(os.path.join(destination, prefix + '_network_comparison.tsv'), sep='\t', index=False)
+    files.atomic_write_json({'nodes': n, 'edges': m, 'self_loops': loops,
+                             'random_networks': repetitions, 'seed': seed, 'pagerank_alpha': alpha,
+                             'networkx_version': nx.__version__, 'model': 'directed G(n,m), fixed self-loop count',
+                             'pagerank_policy': 'uniform personalization and dangling redistribution',
+                             'interpretation': 'descriptive global comparison, no node-level significance',
+                             'edges_sha256': hashlib.sha256(
+                                 repr(sorted((str(u), str(v)) for u,v in graph.edges())).encode()).hexdigest()},
+                            os.path.join(destination, prefix + '_network_parameters.json'))
+    return metrics
+
+
+def add_network_gene_metrics(table, graph, mapping, destination, prefix, settings=None):
+    metrics = extended_network_metrics(graph, destination, prefix, settings)
+    for name, values in metrics.items():
+        # Match the established maximum-over-associated-reactions aggregation;
+        # leave genes outside the analyzed graph unavailable rather than zero.
+        mapped = {gene: max(values[r] for r in reactions if r in values)
+                  for gene, reactions in mapping.items() if any(r in values for r in reactions)}
+        table[prefix + '_' + name] = table['gene'].map(mapped)
+    return table
