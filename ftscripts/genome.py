@@ -195,10 +195,11 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
     def split_sequence(seq, chunk_size=60):
         return [seq[i:i+chunk_size] for i in range(0, len(seq), chunk_size)]
 
-    for record in SeqIO.parse(gbk_file, "genbank"):
-        if output_file_fna:
-            SeqIO.write(record, output_file_fna, "fasta")
+    if output_file_fna:
+        with open(gbk_file) as gbk_handle, open(output_file_fna, "w") as fna_handle:
+            SeqIO.write(SeqIO.parse(gbk_handle, "genbank"), fna_handle, "fasta")
 
+    for record in SeqIO.parse(gbk_file, "genbank"):
         for feature in record.features:
             if feature.type == "CDS":
                 if 'translation' in feature.qualifiers:
