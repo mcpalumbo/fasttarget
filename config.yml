@@ -57,6 +57,13 @@ structures:
   # pocket_full_mode: Set to True to find pockets to all structures for each protein, not only the best one.
   # Set to True will significantly increase runtime and resource usage.
   pocket_full_mode: False
+  # uniparc_fallback: Set to True to resolve genes that BLAST could not map by looking them
+  # up in UniParc by sequence checksum, then accepting an AlphaFold DB model only when its
+  # sequence is byte-identical to your protein. Useful for under-studied organisms, whose
+  # UniProt entries are pruned as "not part of a reference proteome" even though AlphaFold
+  # still serves a model. Runs after the BLAST tiers, so it never displaces a PDB hit.
+  # Requires internet access and adds a few requests per unmapped gene.
+  uniparc_fallback: False
   
 colabfold:
   enabled: False

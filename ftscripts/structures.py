@@ -770,7 +770,387 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, subje
 
     return best_hits
 
-def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_taxid):
+## ------------------- UNIPARC EXACT-IDENTITY FALLBACK ------------------- ##
+#
+# UniProtKB prunes redundant proteomes, so under-studied organisms lose entries
+# (deletion reason: "Not part of a reference proteome"). The BLAST tiers above
+# then find nothing, even when AlphaFold DB still serves a model of the exact
+# same sequence under the withdrawn accession.
+#
+# This fallback recovers those cases without weakening the identity requirement:
+# UniParc is keyed on the sequence itself (CRC64 checksum), so a hit is the same
+# protein by definition, not a homolog and not a domain match. The AFDB model is
+# accepted only when its sequence is byte-identical to the query.
+#
+# It runs after tiers 1-3 so that a BLAST hit against a PDB-bearing entry always
+# wins: a near-identical experimental structure is worth more than an exact
+# predicted one.
+
+UNIPARC_SEARCH_URL = 'https://rest.uniprot.org/uniparc/search'
+UNIPARC_ENTRY_URL = 'https://rest.uniprot.org/uniparc/{upi}.json'
+ALPHAFOLD_PREDICTION_URL = 'https://alphafold.ebi.ac.uk/api/prediction/{accession}'
+
+
+def normalize_protein_sequence(sequence):
+    """
+    Normalize a protein sequence for exact comparison against UniParc/AFDB.
+
+    Only whitespace and a trailing stop codon are removed; every residue is kept,
+    because the whole point of this route is byte-level identity.
+
+    :param sequence: Protein sequence.
+    :return: Normalized sequence string.
+    """
+    return ''.join(str(sequence).split()).upper().rstrip('*')
+
+
+def protein_sequence_checksum(sequence):
+    """
+    CRC64 checksum of a protein sequence, in the variant UniParc indexes on.
+
+    This is the SWISS-PROT reflected CRC64 (polynomial 0xd800000000000000),
+    not CRC64-ISO; Biopython implements exactly this one.
+
+    :param sequence: Protein sequence.
+    :return: Uppercase 16-character hexadecimal checksum.
+    """
+    from Bio.SeqUtils.CheckSum import crc64
+
+    return crc64(normalize_protein_sequence(sequence)).replace('CRC-', '')
+
+
+def _rest_get_json(url, params=None, timeout=30, retries=3, backoff=1):
+    """
+    GET a JSON document, retrying transient network failures.
+
+    :param url: URL to request.
+    :param params: Optional query parameters.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts before giving up.
+    :param backoff: Base seconds for linear backoff between attempts.
+    :return: Parsed JSON, or None when the resource is absent or unusable.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={'Accept': 'application/json'},
+            )
+            # 404: no such model/entry. 400/410: identifier the API will not serve
+            # (e.g. a UniParc UPI passed to AlphaFold DB). Neither is retryable.
+            if response.status_code in (400, 404, 410):
+                return None
+            response.raise_for_status()
+            return response.json()
+        except (
+            RequestsSSLError,
+            SSLError,
+            ConnectionError,
+            Timeout,
+            requests.HTTPError,
+            ValueError,
+        ) as exc:
+            if attempt == retries:
+                logging.warning(f'Giving up on {url} after {retries} attempts: {exc}')
+                return None
+            time.sleep(backoff * attempt)
+    return None
+
+
+def uniparc_entry_by_checksum(checksum, timeout=30, retries=3):
+    """
+    Resolve a sequence checksum to its UniParc entry, cross-references included.
+
+    :param checksum: CRC64 checksum from protein_sequence_checksum.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts per request.
+    :return: UniParc entry dict, or None when the sequence is not in UniParc.
+    """
+    hits = _rest_get_json(
+        UNIPARC_SEARCH_URL,
+        params={'query': f'checksum:{checksum}', 'format': 'json'},
+        timeout=timeout,
+        retries=retries,
+    )
+    results = (hits or {}).get('results') or []
+    if not results:
+        return None
+
+    upi = results[0].get('uniParcId')
+    if not upi:
+        return None
+
+    # Search hits carry no cross-references; the entry endpoint is the one that
+    # reports organism and 'active' per xref, which strain ranking needs.
+    entry = _rest_get_json(
+        UNIPARC_ENTRY_URL.format(upi=upi), timeout=timeout, retries=retries
+    )
+    if entry and entry.get('uniParcCrossReferences'):
+        return entry
+    return results[0]
+
+
+def rank_uniparc_uniprot_xrefs(entry, specie_taxid, strain_taxid):
+    """
+    UniProtKB cross-references of a UniParc entry, ranked by taxonomic closeness.
+
+    Tier 4 is the user's strain, tier 5 the species, tier 6 any other organism
+    carrying the identical sequence. Active entries outrank inactive ones within
+    a tier. Note that a UniParc entry lists whichever source records exist, so
+    the user's strain is not always present even when the sequence matches.
+
+    :param entry: UniParc entry dict.
+    :param specie_taxid: Species-level NCBI Taxonomy ID.
+    :param strain_taxid: Strain-level NCBI Taxonomy ID.
+    :return: List of candidate dicts, best first.
+    """
+    ranked = []
+
+    for xref in entry.get('uniParcCrossReferences') or []:
+        if not str(xref.get('database', '')).startswith('UniProtKB'):
+            continue
+        accession = xref.get('id')
+        if not accession:
+            continue
+
+        taxid = str((xref.get('organism') or {}).get('taxonId', ''))
+        if taxid == str(strain_taxid):
+            tier = 4
+        elif taxid == str(specie_taxid):
+            tier = 5
+        else:
+            tier = 6
+
+        ranked.append(
+            {
+                'accession': accession,
+                'taxid': taxid,
+                'tier': tier,
+                'active': bool(xref.get('active')),
+                'database': xref.get('database'),
+            }
+        )
+
+    ranked.sort(key=lambda c: (c['tier'], not c['active'], c['accession']))
+    return ranked
+
+
+def alphafold_model_for_accession(accession, timeout=30, retries=3):
+    """
+    AlphaFold DB model metadata for a UniProt accession.
+
+    AFDB is keyed on UniProtKB accessions and rejects UniParc UPIs, so the
+    accession is the only usable key. It keeps serving withdrawn accessions
+    until the next rebuild drops them.
+
+    :param accession: UniProt accession.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts per request.
+    :return: Dict with model metadata, or None when no model exists.
+    """
+    payload = _rest_get_json(
+        ALPHAFOLD_PREDICTION_URL.format(accession=accession),
+        timeout=timeout,
+        retries=retries,
+    )
+    if not isinstance(payload, list) or not payload:
+        return None
+
+    model = payload[0]
+    return {
+        'sequence': model.get('uniprotSequence'),
+        'plddt': model.get('globalMetricValue'),
+        'version': model.get('latestVersion'),
+        'cif_url': model.get('cifUrl'),
+        'pdb_url': model.get('pdbUrl'),
+    }
+
+
+def uniparc_mapping_for_sequence(sequence, specie_taxid, strain_taxid, timeout=30, retries=3):
+    """
+    Map one protein sequence to a UniProt accession with an identical AFDB model.
+
+    The AFDB model is verified residue-by-residue against the query, because a
+    model is built for one sequence version: if the entry's sequence changed
+    after the model was made, the model is of a different protein.
+
+    :param sequence: Protein sequence of the user's gene.
+    :param specie_taxid: Species-level NCBI Taxonomy ID.
+    :param strain_taxid: Strain-level NCBI Taxonomy ID.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts per request.
+    :return: Dict describing the accepted mapping, or None.
+    """
+    query_seq = normalize_protein_sequence(sequence)
+    if not query_seq:
+        return None
+
+    checksum = protein_sequence_checksum(query_seq)
+    entry = uniparc_entry_by_checksum(checksum, timeout=timeout, retries=retries)
+    if not entry:
+        return None
+
+    candidates = rank_uniparc_uniprot_xrefs(entry, specie_taxid, strain_taxid)
+
+    for candidate in candidates:
+        model = alphafold_model_for_accession(
+            candidate['accession'], timeout=timeout, retries=retries
+        )
+        if not model:
+            continue
+        if normalize_protein_sequence(model.get('sequence') or '') != query_seq:
+            logging.info(
+                f"AlphaFold model for {candidate['accession']} does not match the query "
+                f'sequence exactly; rejected.'
+            )
+            continue
+
+        return {
+            'uniprot_id': candidate['accession'],
+            'uniparc_id': entry.get('uniParcId'),
+            'checksum': checksum,
+            'tier': candidate['tier'],
+            'taxid': candidate['taxid'],
+            'active': candidate['active'],
+            'alphafold_version': model.get('version'),
+            'plddt': model.get('plddt'),
+            'sequence': query_seq,
+        }
+
+    return None
+
+
+def uniparc_fallback_mapping(output_path, organism_name, specie_taxid, strain_taxid,
+                             unmapped_loci, timeout=30, retries=3):
+    """
+    Run the UniParc exact-identity fallback for genes left unmapped by BLAST.
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of organism.
+    :param specie_taxid: Species-level NCBI Taxonomy ID.
+    :param strain_taxid: Strain-level NCBI Taxonomy ID.
+    :param unmapped_loci: Locus tags with no UniProt ID from tiers 1-3.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts per request.
+    :return: Dict with locus_tag as key and mapping detail dict as value.
+    """
+    if not unmapped_loci:
+        return {}
+
+    proteome_path = os.path.join(
+        output_path, organism_name, 'genome', f'{organism_name}.faa'
+    )
+    if not files.file_check(proteome_path):
+        logging.warning(
+            f'UniParc fallback skipped: proteome FASTA not found at {proteome_path}.'
+        )
+        print(f'WARNING: UniParc fallback skipped, {proteome_path} not found.')
+        return {}
+
+    wanted = set(unmapped_loci)
+    sequences = {
+        record.id: str(record.seq)
+        for record in SeqIO.parse(proteome_path, 'fasta')
+        if record.id in wanted
+    }
+
+    recovered = {}
+
+    print(f'Running UniParc exact-identity fallback for {len(wanted)} unmapped genes...')
+
+    for locus_tag in tqdm(sorted(wanted), desc='UniParc fallback'):
+        sequence = sequences.get(locus_tag)
+        if not sequence:
+            logging.warning(f'No sequence found for {locus_tag} in {proteome_path}.')
+            continue
+
+        try:
+            result = uniparc_mapping_for_sequence(
+                sequence, specie_taxid, strain_taxid, timeout=timeout, retries=retries
+            )
+        except Exception as exc:
+            # A fallback tier must never take down a mapping that already succeeded.
+            logging.warning(f'UniParc fallback failed for {locus_tag}: {exc}')
+            continue
+
+        if result:
+            recovered[locus_tag] = result
+            print(
+                f"  {locus_tag} -> {result['uniprot_id']} "
+                f"(UniParc {result['uniparc_id']}, tier {result['tier']}, "
+                f"taxid {result['taxid']}, plDDT {result['plddt']})"
+            )
+
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
+    files.dict_to_json(
+        uniprot_dir, f'uniparc_{organism_name}_fallback.json', recovered
+    )
+
+    logging.info(
+        f'UniParc fallback recovered {len(recovered)} of {len(wanted)} unmapped genes.'
+    )
+    print(f'UniParc fallback recovered {len(recovered)} of {len(wanted)} unmapped genes.')
+
+    return recovered
+
+
+def uniparc_fallback_annotations(output_path, organism_name):
+    """
+    Build synthetic UniProt annotation records for UniParc-recovered accessions.
+
+    UniProtKB serves a withdrawn accession as an empty document, so the normal
+    annotation fetch returns nothing and the gene would be reported as having no
+    structure. The sequence is known exactly (it is the user's own, verified
+    identical to the model), which is all the structure summary needs.
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of organism.
+    :return: Dict with UniProt accession as key and annotation dict as value.
+    """
+    fallback_path = os.path.join(
+        output_path,
+        organism_name,
+        'structures',
+        'uniprot_files',
+        f'uniparc_{organism_name}_fallback.json',
+    )
+
+    if not files.file_check(fallback_path):
+        return {}
+
+    fallback = files.json_to_dict(fallback_path)
+    annotations = {}
+
+    for locus_tag, detail in fallback.items():
+        accession = detail.get('uniprot_id')
+        sequence = detail.get('sequence')
+        if not accession or not sequence:
+            continue
+
+        annotations[accession] = {
+            'Version': None,
+            'Dataset': 'UniParc fallback',
+            'Protein_name': None,
+            'Locus_tag': locus_tag,
+            'EC_number': None,
+            'Refseq_ProtID': None,
+            'AlphaFoldDB': accession,
+            'PDB_id': None,
+            'Sequence': sequence,
+            'UniParc_id': detail.get('uniparc_id'),
+            'UniParc_tier': detail.get('tier'),
+            'UniParc_taxid': detail.get('taxid'),
+            'UniProt_active': detail.get('active'),
+            'AlphaFold_version': detail.get('alphafold_version'),
+            'AlphaFold_plddt': detail.get('plddt'),
+        }
+
+    return annotations
+
+
+def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_taxid, uniparc_fallback=False):
 
     """
     Map locus_tags to uniprot ids using blastp results for specie specific proteome.
@@ -778,10 +1158,17 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
     1) Look for proteins that have an structures in PDB (specie-level)
     2) Map proteins to strain-specific uniprot proteome
     3) Map proteins to rest of specie-level uniprot proteome (cross-strain search)
+    4) UniParc exact-identity fallback, strain-level  (only if uniparc_fallback)
+    5) UniParc exact-identity fallback, species-level (only if uniparc_fallback)
+
+    Tiers 1-3 run first so a BLAST hit on a PDB-bearing entry always wins; the
+    UniParc tiers only ever fill genes those tiers left unmapped.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of organism.
     :param strain_taxid: Strain Taxonomy ID.
+    :param uniparc_fallback: Resolve genes left unmapped by BLAST through UniParc,
+        accepting only AlphaFold models of a byte-identical sequence (default False).
     :return: Dictionary with locus_tag as key and list of uniprot ids as values.
 
     """
@@ -828,12 +1215,18 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
             print(f'WARNING: No strain-specific BLAST results found. Continuing with species-level data only.')
      
         # 3) Map with IDs within the specie
-        if files.file_check(blast_output_species_rest_path):
-            parse_rest = parse_best_result_blast (blast_output_species_rest_path, 
-                                    identity_cutoff=95, 
-                                    coverage_cutoff=90, 
+        # An empty output file is a valid result, not a failure: BLAST ran and found
+        # no hits (e.g. every protein already matched the strain or PDB databases).
+        # Only a genuinely absent file means the search never ran.
+        if os.path.exists(blast_output_species_rest_path):
+            parse_rest = parse_best_result_blast (blast_output_species_rest_path,
+                                    identity_cutoff=95,
+                                    coverage_cutoff=90,
                                     subject_cov_cutoff=90,
                                     all_hits=False)
+            if not parse_rest:
+                logging.warning('No species-level REST BLAST hits passed the thresholds. Continuing with PDB/strain mappings.')
+                print('WARNING: No species-level REST BLAST hits passed the thresholds. Continuing with PDB/strain mappings.')
         else:
             logging.error(f'No species-level REST BLAST results found. Cannot proceed with mapping.')
             raise FileNotFoundError(f'{blast_output_species_rest_path} not found.')
@@ -853,7 +1246,20 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
             else:
                 map_results[locus_tag] = None
                 print(f'No UniProt ID found for {locus_tag}')
-        
+
+        # 4-5) UniParc exact-identity fallback for whatever BLAST could not map
+        if uniparc_fallback:
+            unmapped_loci = [lt for lt, value in map_results.items() if not value]
+            if unmapped_loci:
+                recovered = uniparc_fallback_mapping(
+                    output_path, organism_name, specie_taxid, strain_taxid, unmapped_loci
+                )
+                for locus_tag, detail in recovered.items():
+                    map_results[locus_tag] = detail['uniprot_id']
+            else:
+                logging.info('UniParc fallback not needed: BLAST mapped every gene.')
+                print('UniParc fallback not needed: BLAST mapped every gene.')
+
         files.dict_to_json(uniprot_dir, f'uniprot_{organism_name}_id_mapping.json', map_results)
     else:
         map_results = files.json_to_dict(proteome_ids_file)
@@ -1467,6 +1873,15 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
     else:
         batch_annotations = files.json_to_dict(os.path.join(uniprot_files_dir, f'uniprot_{organism_name}_annotations.json'))
         print(f'UniProt annotations file found for {len(batch_annotations)} UniProt IDs.')
+
+    # Accessions recovered through UniParc may be withdrawn from UniProtKB, which
+    # serves them as an empty document. Supply their records from the fallback
+    # results so the structure summary can still be built.
+    uniparc_annotations = uniparc_fallback_annotations(output_path, organism_name)
+    for accession, annotation in uniparc_annotations.items():
+        if accession not in batch_annotations:
+            batch_annotations[accession] = annotation
+            print(f'Using UniParc fallback annotation for {accession}.')
 
     for locus_tag in tqdm(map_results.keys(), desc='Locus tags'):
         
@@ -3969,7 +4384,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
-def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, coverage_cutoff=40.0, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False):
+def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, coverage_cutoff=40.0, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False, uniparc_fallback=False):
     """
     Complete pipeline to obtain and process structures for drug target identification.
     
@@ -3993,6 +4408,9 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     :param gpu_option: Boolean indicating whether to use GPU acceleration (default: False).
     :param colabfold: Boolean indicating whether to run ColabFold or not (default: False).
     :param colabfold_all_models: Boolean indicating whether to run ColabFold for all proteins (default: False).
+    :param uniparc_fallback: Boolean indicating whether to resolve genes left unmapped
+        by BLAST through UniParc, accepting only AlphaFold models of a byte-identical
+        sequence (default: False).
     :return: DataFrame with final structure summary table.
     """
     
@@ -4032,7 +4450,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
             uniprot_proteome_blast(output_path, organism_name, specie_taxid, strain_taxid, cpus=cpus)
             
             print(f'\n[1.6] Mapping organism genes to UniProt IDs...')
-            mapping_dict = uniprot_proteome_mapping(output_path, organism_name, specie_taxid, strain_taxid)
+            mapping_dict = uniprot_proteome_mapping(output_path, organism_name, specie_taxid, strain_taxid, uniparc_fallback=uniparc_fallback)
             print(f'    ✓ Mapped {len(mapping_dict)} genes to UniProt IDs')
             
         except Exception as e:

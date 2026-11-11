@@ -182,7 +182,11 @@ def structure_module(config, databases_path, output_path, cpus):
             logging.info(f'ColabFold Amber option: {amber_option}')
             logging.info(f'ColabFold GPU option: {gpu_option}')
             logging.info(f'ColabFold Run All Models option: {colabfold_all_models_option}')
-            
+
+            uniparc_fallback_option = bool(config.structures.get('uniparc_fallback', False)) if config.structures else False
+            logging.info(f'UniParc exact-identity fallback option: {uniparc_fallback_option}')
+
+
             # Run complete structure pipeline: UniProt mapping, structure download, and pocket detection
             df_structures = structures.pipeline_structures(output_path, 
                                                             organism_name, 
@@ -196,7 +200,8 @@ def structure_module(config, databases_path, output_path, cpus):
                                                             amber_option=amber_option, 
                                                             gpu_option=gpu_option,
                                                             colabfold=config.colabfold,
-                                                            colabfold_all_models=colabfold_all_models_option)
+                                                            colabfold_all_models=colabfold_all_models_option,
+                                                            uniparc_fallback=uniparc_fallback_option)
             logging.info('Structures analysis finished')
             module_tables.append(df_structures)
 
@@ -228,7 +233,8 @@ def prepare_alphafill_mapping(config, output_path, cpus):
         structures.cluster_uniprot_specie(output_path, organism_name, tax_id)
         structures.create_uniprot_blast_db(output_path, organism_name, tax_id, strain_taxid)
         structures.uniprot_proteome_blast(output_path, organism_name, tax_id, strain_taxid, cpus=cpus)
-        mapping = structures.uniprot_proteome_mapping(output_path, organism_name, tax_id, strain_taxid)
+        uniparc_fallback_option = bool(config.structures.get('uniparc_fallback', False)) if config.structures else False
+        mapping = structures.uniprot_proteome_mapping(output_path, organism_name, tax_id, strain_taxid, uniparc_fallback=uniparc_fallback_option)
     if not isinstance(mapping, dict):
         raise ValueError(f'Invalid UniProt mapping for AlphaFill: {mapping_path}')
     genome_mapping = {gene: mapping.get(gene) for gene in loci}

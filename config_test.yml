@@ -39,6 +39,7 @@ structures:
   enabled: True
   proteome_uniprot: UP000000808
   pocket_full_mode: True
+  uniparc_fallback: True
 
 colabfold:
   enabled: False

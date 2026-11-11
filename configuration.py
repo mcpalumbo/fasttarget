@@ -38,6 +38,7 @@ class Config:
         if config['structures']['enabled']:
             self.structures = config['structures'].copy()
             self.structures.setdefault('pocket_full_mode', False)
+            self.structures.setdefault('uniparc_fallback', False)
         else:
             self.structures = False
         
@@ -179,6 +180,12 @@ def validate_config(config):
                     config['structures']['pocket_full_mode'] = False
                 elif not isinstance(config['structures']['pocket_full_mode'], bool):
                     errors.append(f"structures.pocket_full_mode must be boolean (got {config['structures']['pocket_full_mode']})")
+
+                # Validate uniparc_fallback (set default if missing)
+                if 'uniparc_fallback' not in config['structures']:
+                    config['structures']['uniparc_fallback'] = False
+                elif not isinstance(config['structures']['uniparc_fallback'], bool):
+                    errors.append(f"structures.uniparc_fallback must be boolean (got {config['structures']['uniparc_fallback']})")
     
     #Validate colabfold section
     if 'colabfold' in config:
@@ -441,6 +448,7 @@ def print_config(config):
         print("Structures will be used in the analysis.")
         print(f"Proteome UniProt ID: {config.structures['proteome_uniprot']}")
         print(f"Pocket Full Mode: {config.structures['pocket_full_mode']}")
+        print(f"UniParc Fallback: {config.structures['uniparc_fallback']}")
     else:
         print(f"Structures Enabled: {config.structures}")
 
