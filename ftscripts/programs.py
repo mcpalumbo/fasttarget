@@ -131,21 +131,31 @@ def run_bash_command(cmd_list, capture_output=True):
     :param cmd_list: List of command arguments [program, arg1, arg2, ...]
     :param capture_output: Whether to capture stdout/stderr
     """
+    # A successful command and its output are detail, not progress: echoing them
+    # put 4744 DIAMOND invocations and their output into one 23 MB log, which
+    # buried the lines describing what the run was doing. They are kept at DEBUG,
+    # so --log_level DEBUG still records everything. A failure is reported at
+    # ERROR, with the command and its stderr, because that is what has to be
+    # findable afterwards.
+    command_text = " ".join(repr(a) for a in cmd_list)
     try:
-        print("Running:", " ".join(repr(a) for a in cmd_list))
+        logging.debug(f'Running: {command_text}')
         result = subprocess.run(
             cmd_list,  # List, not string
             check=True,  # Raises CalledProcessError on failure
             capture_output=capture_output,
             text=True
         )
-        print(f"STDOUT:\n{result.stdout}")
+        if result.stdout:
+            logging.debug(f'STDOUT:\n{result.stdout}')
         if result.stderr:
-            print(f"STDERR:\n{result.stderr}")
+            logging.debug(f'STDERR:\n{result.stderr}')
         return result.stdout
     except subprocess.CalledProcessError as e:
-        print(f"Command failed with return code {e.returncode}")
-        print(f"STDERR:\n{e.stderr}")
+        logging.error(
+            f'Command failed with return code {e.returncode}: {command_text}\n'
+            f'STDERR:\n{e.stderr}'
+        )
         raise
 
 
@@ -1220,18 +1230,16 @@ def run_ubiquitous(sbml_file, out_dir):
     :param out_dir: Output directory path.
     """
     
-    if os.path.exists(sbml_file):
-        if os.path.exists(out_dir):
-            try:
-                ubiquitous_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/']
-                run_bash_command(ubiquitous_command)
-                print(f'Ubiquitous compounds file generated.')
-            except Exception as e:
-                logging.exception(f"Error generating ubiquitous compounds file: {e}")
-        else:
-            logging.error(f"Directory '{out_dir}' not found.")
-    else:
-        logging.error(f"SBML file '{sbml_file}' not found.")
+    # Each failure below used to be logged and then ignored, so the caller went on
+    # to announce that the file had been written and the step had finished.
+    if not os.path.exists(sbml_file):
+        raise FileNotFoundError(f"SBML file '{sbml_file}' not found.")
+    if not os.path.exists(out_dir):
+        raise FileNotFoundError(f"Directory '{out_dir}' not found.")
+
+    ubiquitous_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/']
+    run_bash_command(ubiquitous_command)
+    print(f'Ubiquitous compounds file generated.')
   
 def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
     
@@ -1243,21 +1251,19 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
     :param out_dir: Output directory path.
     """
 
-    if os.path.exists(sbml_file):
-        if os.path.exists(ubiquitous_file):
-            if os.path.exists(out_dir):
-                try:
-                    sif_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/', '-f', ubiquitous_file]
-                    run_bash_command(sif_command)
-                    print(f'Sif file generated.')
-                except Exception as e:
-                    logging.exception(f"Error generating SIF file: {e}")
-            else:
-                logging.error(f"Directory '{out_dir}' not found.")
-        else:
-            logging.error(f"Ubiquitous compounds file '{ubiquitous_file}' not found.")
-    else:
-        logging.error(f"SBML file '{sbml_file}' not found.") 
+    # As in run_ubiquitous: the SIF file is what the centrality calculation reads,
+    # so swallowing a failure here only moved the error to a later, less obvious
+    # place.
+    if not os.path.exists(sbml_file):
+        raise FileNotFoundError(f"SBML file '{sbml_file}' not found.")
+    if not os.path.exists(ubiquitous_file):
+        raise FileNotFoundError(f"Ubiquitous compounds file '{ubiquitous_file}' not found.")
+    if not os.path.exists(out_dir):
+        raise FileNotFoundError(f"Directory '{out_dir}' not found.")
+
+    sif_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/', '-f', ubiquitous_file]
+    run_bash_command(sif_command)
+    print(f'Sif file generated.')
 
 def run_psort(input, organism_type, output_dir, output_format='terse', container_engine='docker'):
     """

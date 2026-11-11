@@ -85,6 +85,13 @@ def deg_parse (output_path, organism_name, identity_filter, coverage_filter):
         print('DEG analysis already done, output file found')
         print(deg_results)
         df_deg = pd.read_csv(deg_results, sep='\t', header=0)
+        # A resumed run used to report nothing about the result it reused.
+        if 'hit_in_deg' in df_deg.columns:
+            hits = int(df_deg['hit_in_deg'].astype(str).str.lower().eq('true').sum())
+            print(
+                f'Genes with a DEG hit (identity > {identity_filter}%, '
+                f'coverage > {coverage_filter}%): {hits} of {len(df_deg)} (from cache)'
+            )
         
     return df_deg
 

@@ -1,6 +1,7 @@
 from Bio import SeqIO
 import pandas as pd
 import os
+import logging
 from ftscripts import files
 
 def ref_gbk_locus(output_path, organism_name):
@@ -136,7 +137,7 @@ def metadata_table_bool(output_path, organism_name, locus_tag_true:str, property
     metadata_table.to_csv(f"{out_dir}/{property}.csv", index=False)
     metadata_table.to_csv(f"{out_dir}/{property}.tsv", index=False, sep='\t')
 
-    print(f"{out_dir}/{property}.csv and .tsv have been created.")
+    logging.debug(f"{out_dir}/{property}.csv and .tsv have been created.")
 
     return metadata_table
 
@@ -169,7 +170,7 @@ def metadata_table_with_values(output_path, organism_name, values_dict:str, prop
     metadata_table.to_csv(f"{out_dir}/{property}.csv", index=False)
     metadata_table.to_csv(f"{out_dir}/{property}.tsv", index=False, sep='\t')
 
-    print(f"{out_dir}/{property}.csv and .tsv have been created.")
+    logging.debug(f"{out_dir}/{property}.csv and .tsv have been created.")
 
     return metadata_table
 
@@ -188,7 +189,7 @@ def tables_for_TP(organism_name, results_path):
     results_table_path = os.path.join(results_path, f'{organism_name}_results_table.tsv')
 
     os.makedirs(TP_metadata_path, exist_ok=True)
-    print(f"{TP_metadata_path} has been created.")
+    logging.debug(f"{TP_metadata_path} has been created.")
 
     if files.file_check(results_table_path):
         
@@ -199,7 +200,7 @@ def tables_for_TP(organism_name, results_path):
         for column in results_table.columns[1:]:
             sub_table = results_table[['gene', column]]
             sub_table.to_csv(f"{TP_metadata_path}/{column}.tsv", index=False, sep='\t')
-            print(f"{TP_metadata_path}/{column}.tsv has been created.")
+            logging.debug(f"{TP_metadata_path}/{column}.tsv has been created.")
     
     else:
         print(f"{results_table_path} not found.")

@@ -594,6 +594,9 @@ def core_check_files(output_path, organism_name, container_engine='docker', filt
             )
 
     genomes_list = files.file_to_list(genomes_file)
+    # The caller only logged 'Genomes filtered', with no indication of how many
+    # survived, which is the number the core genome is computed over.
+    print(f'Genomes selected for the core genome analysis: {len(genomes_list)}')
     pending = find_pending_files(genomes_list)
 
     if pending:
@@ -606,6 +609,31 @@ def core_check_files(output_path, organism_name, container_engine='docker', filt
             )
 
     return pending
+
+def report_core_table(table, column, program, core_percent, table_path):
+
+    """
+    Report the size of a core genome read back from a cached table.
+
+    :param table: Table with one boolean column per gene.
+    :param column: Name of the boolean column.
+    :param program: Name of the program that produced it.
+    :param core_percent: Frequency threshold the table was built with.
+    :param table_path: Path of the table, used to read the stored genome count.
+    """
+
+    manifest = files.read_manifest(table_path) or {}
+    genomes = manifest.get('extra', {}).get('genomes_analyzed')
+    genome_note = f' over {genomes} genomes' if genomes else ''
+
+    if column in table.columns:
+        core_genes = int(table[column].astype(str).str.lower().eq('true').sum())
+        print(
+            f'{program} core genes (> {core_percent:g}% strains){genome_note}: '
+            f'{core_genes} of {len(table)} genes (from cache)'
+        )
+    else:
+        print(f'{program} table read from cache: {len(table)} genes, column {column} absent')
 
 def _check_core_run_parameters(output_file, parameters, program, stale_dir):
 
@@ -637,7 +665,6 @@ def _check_core_run_parameters(output_file, parameters, program, stale_dir):
             f'rebuild it with core frequency {parameters["min_core_freq"]}% and '
             f'identity {parameters["min_identity"]}% over the current genomes.'
         )
-        logging.warning(f'{program} output has unrecorded parameters {unrecorded}: {output_file}')
 
     differences = files.manifest_differences(output_file, parameters)
     if differences:
@@ -776,7 +803,12 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
 
     if files.manifest_matches(roary_results_table, table_parameters, label='core_roary.tsv'):
         print(f'Roary output file already exists: {roary_results_table}.')
-        return pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
+        cached_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
+        # Reporting the counts only when the table is computed meant a resumed run
+        # said nothing about the size of the core genome, which is the number the
+        # run exists to produce.
+        report_core_table(cached_table, 'core_roary', 'Roary', core_threshold * 100, roary_results_table)
+        return cached_table
 
     dtypes = {'No. isolates': 'int', f'{organism_name}': 'str'}
     df = pd.read_csv(genes_csv_file, usecols= ['No. isolates', f'{organism_name}'], dtype=dtypes)
@@ -873,6 +905,11 @@ def corecruncher_output(output_path, organism_name, core_threshold=None):
     else:
         print(f'CoreCruncher output file already exists: {cc_results_table}.')
         corecruncher_table = pd.read_csv(cc_results_table, sep='\t', index_col=0, header=0)
+        threshold_percent = core_threshold if core_threshold is not None else float('nan')
+        report_core_table(
+            corecruncher_table, 'core_corecruncher', 'CoreCruncher',
+            threshold_percent, cc_results_table,
+        )
 
     return corecruncher_table
 
@@ -901,7 +938,6 @@ def _check_psortb_gram_type(psortb_file, organism_type):
             f'Warning: {psortb_file} does not record the gram type it was produced '
             f'with. Reusing it as a {requested} prediction; remove it to re-run PSORTb.'
         )
-        logging.warning(f'PSORTb output has no gram type manifest: {psortb_file}')
         return
 
     differences = files.manifest_differences(psortb_file, {'gram_type': organism_type})
@@ -988,6 +1024,10 @@ def localization_prediction(output_path, organism_name, organism_type, container
         # Load previously processed results
         print(f"Loading previously processed PSORTb results from {psort_results}")
         psort_df = pd.read_csv(psort_results, sep='\t', index_col=0, header=0)
+        if 'psortb_localization' in psort_df.columns:
+            counts = psort_df['psortb_localization'].value_counts()
+            summary = ', '.join(f'{name} {count}' for name, count in counts.items())
+            print(f'Localizations for {len(psort_df)} genes (from cache): {summary}')
 
         return psort_df
         

@@ -4461,7 +4461,6 @@ def _check_structure_pipeline_parameters(output_path, organism_name, structure_d
             f'({", ".join(unrecorded)} unknown). Reusing it; see the README if you '
             f'have changed any of those since it was built.'
         )
-        logging.warning(f'Structure summary has unrecorded options {unrecorded}: {final_table_path}')
 
     differences = files.manifest_differences(final_table_path, parameters)
     if not differences:

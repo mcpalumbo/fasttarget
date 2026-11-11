@@ -309,9 +309,10 @@ def manifest_matches(output_path, parameters, label=None):
     if not reasons:
         return True
 
+    # print only: stdout is captured into the log (see ftscripts.logger), so also
+    # calling logging.info here would write the same line to the file twice.
     name = label or os.path.basename(output_path)
     print(f'Rebuilding {name}: {"; ".join(reasons)}')
-    logging.info(f'Rebuilding {name}: {"; ".join(reasons)}')
     return False
 
 

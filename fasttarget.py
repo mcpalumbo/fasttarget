@@ -7,7 +7,8 @@ from ftscripts import files, structures, pathways, offtargets, genome, essential
 from datetime import datetime
 import logging
 import sys
-from ftscripts.logger import logger 
+from ftscripts.logger import setup_logging
+from ftscripts import logger as logger_module
 import shutil
 
 # Steps that failed during the current run.
@@ -591,10 +592,9 @@ def offtarget_module(config, databases_path, output_path, cpus):
                 elif len(available) < total_loci:
                     # Partial coverage is legitimate (a gene may have no structure at
                     # all), but it must be visible rather than inferred from counts.
-                    logging.warning(
-                        f'Foldseek will cover {len(available)} of {total_loci} genes; '
-                        f'{total_loci - len(available)} have no reference structure.'
-                    )
+                    # print only: stdout is captured into the log, so a paired
+                    # logging call would record the same line twice and echo it to
+                    # the terminal a second time.
                     print(
                         f'WARNING: Foldseek will cover {len(available)} of {total_loci} genes; '
                         f'{total_loci - len(available)} have no reference structure.'
@@ -876,6 +876,144 @@ def merge_final_tables(config, output_path, tables):
     
     return results
 
+def summarize_column(name, values):
+    """
+    One line describing what a results column contains.
+
+    :param name: Column name.
+    :param values: Column as a pandas Series.
+    :return: Summary string, or None for a column not worth reporting.
+    """
+    present = values.dropna()
+    if present.empty:
+        return f'{name}: no values'
+
+    as_text = present.astype(str).str.lower()
+    if as_text.isin(['true', 'false']).all():
+        return f'{name}: {int(as_text.eq("true").sum())} of {len(values)} genes'
+
+    numeric = pd.to_numeric(present, errors='coerce').dropna()
+    if len(numeric) == len(present) and not numeric.empty:
+        non_zero = int((numeric != 0).sum())
+        return (
+            f'{name}: {non_zero} of {len(values)} genes with a value, '
+            f'min {numeric.min():g}, median {numeric.median():g}, max {numeric.max():g}'
+        )
+
+    distinct = present.nunique()
+    longest = int(present.astype(str).str.len().max())
+    # Value counts are only readable for short labels. Some columns hold
+    # semicolon-separated species lists hundreds of characters long, which would
+    # take over the summary.
+    if distinct <= 6 and longest <= 30:
+        counts = present.value_counts()
+        rendered = ', '.join(
+            f'{value if str(value).strip() else "(blank)"} {count}'
+            for value, count in counts.items()
+        )
+        return f'{name}: {rendered}'
+    return f'{name}: {len(present)} of {len(values)} genes, {distinct} distinct values'
+
+
+def print_run_summary(config, results):
+    """
+    Report what the run produced, in one block at the end of the log.
+
+    The per-module lines of a run are hundreds of lines apart, so whether a
+    module ran, was skipped or failed, and what it found, could only be
+    established by reading the whole log. This reads the merged results table, so
+    it reports what actually reached the output rather than what each step
+    believed it had done.
+
+    :param config: Configuration object.
+    :param results: Merged results table, or None when there is none.
+    """
+
+    # The step names come from the record_failure() call sites, so they are matched
+    # explicitly. Deriving them from the module label does not work: the step for
+    # 'metabolism (Pathway Tools)' is named 'metabolic analysis (Pathway Tools)',
+    # which does not contain the word the label would supply.
+    modules = [
+        ('metabolism (Pathway Tools)', bool(config.metabolism_pathwaytools),
+         ('metabolic analysis (pathway tools)', 'metabolic module')),
+        ('metabolism (SBML)', bool(config.metabolism_sbml),
+         ('metabolic analysis (sbml)',)),
+        ('structures', bool(config.structures),
+         ('structures analysis', 'structure module')),
+        ('ligands', bool(config.ligands and config.ligands.get('enabled')),
+         ('ligand analysis', 'ligands module', 'alphafill')),
+        ('core genome', bool(config.core),
+         ('core analysis', 'roary analysis', 'corecruncher analysis', 'conservation module')),
+        ('offtarget', bool(config.offtarget),
+         ('offtarget', 'foldseek', 'silva', 'microbiome')),
+        ('essentiality (DEG)', bool(config.deg),
+         ('essentiality',)),
+        ('localization (PSORTb)', bool(config.psortb),
+         ('localization',)),
+        ('metadata', bool(config.metadata),
+         ('metadata',)),
+    ]
+
+    errors = failed_steps()
+
+    print('')
+    print('=' * 80)
+    print('RUN SUMMARY'.center(80))
+    print('=' * 80)
+    print(f'Organism: {config.organism["name"]} '
+          f'(species taxid {config.organism["tax_id"]}, strain taxid {config.organism["strain_taxid"]})')
+
+    log_path = logger_module.log_file_path()
+    if log_path:
+        print(f'Log file: {log_path}')
+
+    print('')
+    print('Modules:')
+    matched_steps = set()
+    for label, enabled, keywords in modules:
+        if not enabled:
+            status = 'not enabled'
+        else:
+            failed = [
+                step for step in errors
+                if any(keyword in step.lower() for keyword in keywords)
+            ]
+            matched_steps.update(failed)
+            if failed:
+                status = 'FAILED: ' + '; '.join(failed)
+            else:
+                status = 'ok'
+        print(f'  {label:<28} {status}')
+
+    # A failure whose name matches no module must still be reported, rather than
+    # being counted only in the total below.
+    unmatched = [step for step in errors if step not in matched_steps]
+    for step in unmatched:
+        print(f'  {"(other)":<28} FAILED: {step}')
+
+    if results is None:
+        print('')
+        print('No results table was produced.')
+    else:
+        print('')
+        print(f'Results: {len(results)} genes, {len(results.columns)} columns')
+        skip = {'gene', 'gene_name', 'product'}
+        for name in results.columns:
+            if name in skip:
+                continue
+            line = summarize_column(name, results[name])
+            if line:
+                print(f'  {line}')
+
+    if errors:
+        print('')
+        print(f'Failed steps ({len(errors)}):')
+        for step in errors:
+            print(f'  - {step}')
+
+    print('=' * 80)
+
+
 def main(config, databases_path, output_path):
     """
     Main function to run FastTarget.
@@ -1003,6 +1141,8 @@ def main(config, databases_path, output_path):
     results = merge_final_tables(config, output_path, tables)
 
 
+    print_run_summary(config, results)
+
     errors = failed_steps()
     if errors:
         # The tables above are still written, but the run is not a success: say so
@@ -1018,7 +1158,7 @@ def main(config, databases_path, output_path):
     return results
 
 if __name__ == "__main__":
-    
+
     base_path = os.path.dirname(os.path.abspath(__file__))
 
     databases_default_path = os.path.join(base_path, 'databases')
@@ -1028,8 +1168,17 @@ if __name__ == "__main__":
     parser.add_argument('--config_file', type=str, default='config.yml', help='Path to the configuration file')
     parser.add_argument('--databases_path', type=str, default=databases_default_path, help='Path to the databases directory')
     parser.add_argument('--output_path', type=str, default=output_default_path, help='Path to the output directory')
-    
+    parser.add_argument('--log_level', type=str, default='INFO',
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                        help='Detail recorded in the log. DEBUG adds every command '
+                             'run and its output, which is large but complete.')
+
     args = parser.parse_args()
+
+    # Configure logging here rather than on import, so importing this module or
+    # anything in ftscripts does not create a log file or take over the process
+    # streams. Done before the config is read, so validation errors are logged.
+    setup_logging(level=getattr(logging, args.log_level))
 
     config = configuration.get_config(args.config_file)
 

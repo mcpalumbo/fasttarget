@@ -9,6 +9,31 @@ import logging
 import networkx as nx
 from networkx.algorithms.centrality.betweenness import betweenness_centrality
 from networkx.algorithms.components.connected import connected_components
+from contextlib import contextmanager
+
+
+@contextmanager
+def metabolism_step(number, title):
+    """
+    Announce a numbered step and report whether it finished or failed.
+
+    Every step used to print 'Finished' unconditionally, so a log read as a list
+    of completed steps even where one of them had failed. The failure is now
+    named at the step that caused it, and then re-raised for the caller to
+    record.
+
+    :param number: Step number, as shown in the log.
+    :param title: What the step does.
+    """
+    print(f'---------- {number}. {title} ----------')
+    try:
+        yield
+    except Exception as error:
+        print(f'---------- {number}. FAILED: {title} ----------')
+        logging.error(f'Metabolism step {number} ({title}) failed: {error}')
+        raise
+    print(f'---------- {number}. Finished ----------')
+
 
 # Functions to process Pathway Tools output files
 
@@ -25,17 +50,24 @@ def process_sbml(output_path, organism_name, sbml_file):
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
     sbml_path = os.path.join(metabolism_dir, f'{organism_name}.sbml')
 
-    if os.path.exists(sbml_file):
-        shutil.copyfile(sbml_file, sbml_path)
+    if not os.path.exists(sbml_file):
+        raise FileNotFoundError(f"SBML file '{sbml_file}' not found.")
 
-        print(f'Processing {sbml_path}')
+    shutil.copyfile(sbml_file, sbml_path)
 
-        programs.run_ubiquitous(sbml_path, metabolism_dir)
+    print(f'Processing {sbml_path}')
 
-        print(f'List of Ubiquitous Compounds saved to {metabolism_dir}/ubiquitous_compounds.txt.')
- 
-    else:
-        logging.error(f"SBML file '{sbml_file}' not found.")
+    programs.run_ubiquitous(sbml_path, metabolism_dir)
+
+    # The message used to be printed whether or not the file had been written, so
+    # a failed run still reported a saved file.
+    ubiquitous_path = os.path.join(metabolism_dir, 'ubiquitous_compounds.txt')
+    if not files.file_check(ubiquitous_path):
+        raise FileNotFoundError(
+            f'{ubiquitous_path} was not written, although generating it reported no error.'
+        )
+    compounds = files.file_to_list(ubiquitous_path)
+    print(f'Ubiquitous compounds: {len(compounds)} saved to {ubiquitous_path}')
 
 def ubiquitous_checker(output_path, organism_name, curated_ubiquitous_file=None):
     """
@@ -86,7 +118,21 @@ def generate_sif(output_path, organism_name):
     sbml_path = os.path.join(metabolism_dir, f'{organism_name}.sbml')
     ubiquitous_file = os.path.join(metabolism_dir, f'{organism_name}_ubiquitous.txt')
 
+    sif_path = os.path.join(metabolism_dir, 'network.sif')
+    previous_sif = os.path.getmtime(sif_path) if os.path.exists(sif_path) else None
+
     programs.run_sbml_to_sif(sbml_path, ubiquitous_file, metabolism_dir)
+
+    # The message used to be printed even when generation had failed, and step 5
+    # then read whatever network.sif happened to be in the directory: a stale file
+    # from an earlier run produced centrality values for the current one.
+    if not files.file_check(sif_path):
+        raise FileNotFoundError(f'{sif_path} was not written by the SIF generation step.')
+    if previous_sif is not None and os.path.getmtime(sif_path) == previous_sif:
+        raise RuntimeError(
+            f'{sif_path} was not rewritten by the SIF generation step, so it is left '
+            f'over from an earlier run and does not describe the current SBML file.'
+        )
     print(f'Sif file generated in {metabolism_dir}.')
 
 def process_chokepoint_ptools(output_path, organism_name, chokepoint_file):
@@ -300,32 +346,37 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
 
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
 
-    print(f'---------- 1. Processing SBML file ----------')
-    process_sbml(output_path, organism_name, sbml_file)
-    print(f'---------- 1. Finished ----------')
+    # Generating the ubiquitous compounds file is the one step whose failure can be
+    # survived, and only because step 2 can fall back on a curated file. Without
+    # one there is nothing for step 2 to use, so the failure stands.
+    try:
+        with metabolism_step(1, 'Processing SBML file'):
+            process_sbml(output_path, organism_name, sbml_file)
+    except Exception as error:
+        if not curated_ubiquitous_file:
+            raise
+        print(
+            f'Continuing with the curated ubiquitous compounds file '
+            f'{curated_ubiquitous_file}, since generating one failed: {error}'
+        )
 
-    print(f'---------- 2. Processing Ubiquitous compounds file ----------')
-    ubiquitous_checker(output_path, organism_name, curated_ubiquitous_file)
-    print(f'---------- 2. Finished ----------')
+    with metabolism_step(2, 'Processing Ubiquitous compounds file'):
+        ubiquitous_checker(output_path, organism_name, curated_ubiquitous_file)
 
-    print(f'---------- 3. Generating network SIF file ----------')
-    generate_sif(output_path, organism_name)
-    print(f'---------- 3. Finished ----------')
+    with metabolism_step(3, 'Generating network SIF file'):
+        generate_sif(output_path, organism_name)
 
-    print(f'---------- 4. Map proteins and reactions ----------')
-    locus_reaction_dict = process_genes_smarttable(output_path, organism_name, smarttable_file)
-    print(f'---------- 4. Finished ----------')
+    with metabolism_step(4, 'Map proteins and reactions'):
+        locus_reaction_dict = process_genes_smarttable(output_path, organism_name, smarttable_file)
 
-    print(f'---------- 5. Calculate Centrality ----------')
-    graph, subgraph, reaction_centrality_dict, reaction_edges_dict = read_sif(output_path, organism_name)
-    bc_dict = mapping_metabolism(locus_reaction_dict, reaction_centrality_dict)
-    edge_dict = mapping_metabolism(locus_reaction_dict, reaction_edges_dict)
-    print(f'---------- 5. Finished ----------')
+    with metabolism_step(5, 'Calculate Centrality'):
+        graph, subgraph, reaction_centrality_dict, reaction_edges_dict = read_sif(output_path, organism_name)
+        bc_dict = mapping_metabolism(locus_reaction_dict, reaction_centrality_dict)
+        edge_dict = mapping_metabolism(locus_reaction_dict, reaction_edges_dict)
 
-    print(f'---------- 6. Obtaining Choke-points ----------')
-    producing_set, consuming_set, both_set = process_chokepoint_ptools(output_path, organism_name, chokepoint_file)
-    producing_chokepoint, consuming_chokepoint, both_chokepoint = mapping_chokepoints(locus_reaction_dict, producing_set, consuming_set, both_set)
-    print(f'---------- 6. Finished ----------')
+    with metabolism_step(6, 'Obtaining Choke-points'):
+        producing_set, consuming_set, both_set = process_chokepoint_ptools(output_path, organism_name, chokepoint_file)
+        producing_chokepoint, consuming_chokepoint, both_chokepoint = mapping_chokepoints(locus_reaction_dict, producing_set, consuming_set, both_set)
 
     print(f'---------- 7. Generating results files ----------')
     bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, bc_dict, "PTOOLS_betweenness_centrality", metabolism_dir, 0)
