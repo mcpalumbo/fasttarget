@@ -1,5 +1,5 @@
 from Bio import SeqIO
-from Bio.SeqFeature import SeqFeature, FeatureLocation, ExactPosition
+from Bio.SeqFeature import ExactPosition
 import os
 import shutil
 import tqdm
@@ -32,7 +32,7 @@ def gbk_to_gff3(gbk_file, gff_dir):
         Fix a GenBank file to be compatible with GFF3 format.
 
         This function fixes a GenBank file to be compatible with GFF3 format.
-        It removes invalid characters from the location and codon_start fields.
+        It rejects locations/reading frames that cannot be safely converted.
         It also changes the type of features in pseudogenes.
 
         :param input_file: Input GenBank file path.
@@ -49,19 +49,26 @@ def gbk_to_gff3(gbk_file, gff_dir):
                             feature.type = 'pseudogenic'
                         if feature.type == "CDS":
                             feature.type = 'pseudogene'
-                    if feature.location:
-                        # Clean the location by recreating the FeatureLocation object
-                        start_pos = ExactPosition(int(str(feature.location.start).replace("<","").replace(">","")))
-                        end_pos = ExactPosition(int(str(feature.location.end).replace("<","").replace(">","")))
-                        cleaned_location = FeatureLocation(start_pos, end_pos, feature.location.strand)
-                        feature.location = cleaned_location
+                    if feature.location is None:
+                        raise ValueError(
+                            f"Missing feature location in {gb_record.id}: {feature.type}"
+                        )
+                    location = feature.location
+                    if (len(location.parts) != 1
+                            or not isinstance(location.start, ExactPosition)
+                            or not isinstance(location.end, ExactPosition)
+                            or location.ref is not None
+                            or location.ref_db is not None):
+                        raise ValueError(
+                            f"Python GFF fallback cannot safely represent location "
+                            f"{location} in {gb_record.id}; use the BioPerl converter."
+                        )
                     if "codon_start" in feature.qualifiers:
-                        try:
-                            # Attempt to convert codon_start to an integer
-                            int(feature.qualifiers["codon_start"][0])
-                        except ValueError:
-                            # Replace invalid codon_start with default value (1)
-                            feature.qualifiers["codon_start"][0] = "1"
+                        values = feature.qualifiers["codon_start"]
+                        if len(values) != 1 or values[0] not in ('1', '2', '3'):
+                            raise ValueError(
+                                f"Invalid codon_start in {gb_record.id}: {values}"
+                            )
                 fixed_records.append(record)
 
             SeqIO.write(fixed_records, out_handle, "genbank")
@@ -119,36 +126,58 @@ def gbk_to_gff3(gbk_file, gff_dir):
     else:
         logging.error(f"Gff dir '{gff_dir}' not found.")
 
-def add_sequences_to_gff3(gff_file, gbk_file):
-    """
-    Add genome and protein sequences to a GFF3 file.
+def add_sequences_to_gff3(gff_file, gbk_file, output_file=None):
+    """Replace the FASTA section atomically, optionally into a separate GFF.
 
-    :param gff_file: GFF3 file path.
-    :param gbk_file: GenBank file path.    
+    Preserve the existing genome plus translated-protein (.p01) convention.
+    Supplying output_file leaves the downloaded source unchanged.
     """
+    destination = os.path.abspath(output_file or gff_file)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=os.path.dirname(destination),
+                                         prefix='.gff-', delete=False) as handle:
+            temporary = handle.name
+            with open(gff_file) as source:
+                last_line = ''
+                for line in source:
+                    if line.strip() == '##FASTA':
+                        break
+                    handle.write(line)
+                    last_line = line
+                if last_line and not last_line.endswith('\n'):
+                    handle.write('\n')
+            handle.write('##FASTA\n')
+            identifiers = set()
 
-    with open(gbk_file, "r") as gbk_handle, open(gff_file, "a") as output_handle:
-        # Parse the GenBank file
-        gb_records = SeqIO.parse(gbk_handle, "genbank")
-        
-        # Add the FASTA section header
-        output_handle.write("##FASTA\n")
-        
-        # Iterate over each record and append genome and protein sequences
-        for gb_record in gb_records:
-            # Append genome sequence
-            output_handle.write(f">{gb_record.id}\n")
-            output_handle.write(str(gb_record.seq) + "\n")
-            
-            # Append protein sequences from CDS features
-            for feature in gb_record.features:
-                if feature.type == "CDS" and 'translation' in feature.qualifiers:
-                    cds_id = feature.qualifiers.get("locus_tag", ["unknown"])[0]
-                    cds_seq = feature.qualifiers['translation'][0]
-                    output_handle.write(f">{cds_id}.p01\n")
-                    output_handle.write(str(cds_seq) + "\n")
-    
-    print(f"Genome and protein sequences added to {gff_file}")
+            def write_sequence(identifier, sequence):
+                if (not identifier or any(c.isspace() for c in identifier)
+                        or '>' in identifier or identifier in identifiers):
+                    raise ValueError(f'Invalid or duplicate GFF FASTA ID: {identifier!r}')
+                if not sequence or any(c.isspace() for c in sequence) or '>' in sequence:
+                    raise ValueError(f'Invalid GFF FASTA sequence for {identifier}')
+                identifiers.add(identifier)
+                handle.write(f'>{identifier}\n{sequence}\n')
+
+            with open(gbk_file) as source:
+                for record in SeqIO.parse(source, 'genbank'):
+                    write_sequence(record.id, str(record.seq))
+                    for feature in record.features:
+                        if feature.type != 'CDS' or 'translation' not in feature.qualifiers:
+                            continue
+                        loci = feature.qualifiers.get('locus_tag', [])
+                        translations = feature.qualifiers['translation']
+                        if len(loci) != 1 or not loci[0] or len(translations) != 1:
+                            raise ValueError(f'Invalid translated CDS in {record.id}')
+                        write_sequence(f'{loci[0]}.p01', translations[0])
+            if not identifiers:
+                raise ValueError(f'No GenBank sequences found in {gbk_file}')
+        os.replace(temporary, destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    logging.info('Wrote GFF with one FASTA section: %s', destination)
 
 def gbk_locus_strain_host(gbk_file):
     """
@@ -191,38 +220,74 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
     :param output_file_ffn: Output ffn file path or None to skip.
     """
 
+    # FAA and FFN describe the same universe: CDS with annotated translation.
+    # Validate before opening any requested destination.
+    if not any((output_file_fna, output_file_faa, output_file_ffn)):
+        return
+    records = list(SeqIO.parse(gbk_file, "genbank"))
+    if not records:
+        raise ValueError(f"No GenBank records found in {gbk_file}")
+    record_ids = set()
+    locus_ids = set()
     protein_records = []
     nucleotide_records = []
+    skipped = 0
 
-    def split_sequence(seq, chunk_size=60):
-        return [seq[i:i+chunk_size] for i in range(0, len(seq), chunk_size)]
+    def checked_id(values, label):
+        if (len(values) != 1 or not values[0]
+                or any(char.isspace() for char in values[0]) or '>' in values[0]):
+            raise ValueError(f"Invalid or missing {label}: {values}")
+        return values[0]
 
-    if output_file_fna:
-        with open(gbk_file) as gbk_handle, open(output_file_fna, "w") as fna_handle:
-            SeqIO.write(SeqIO.parse(gbk_handle, "genbank"), fna_handle, "fasta")
+    def fasta_entry(identifier, sequence):
+        return f">{identifier}\n" + "\n".join(
+            sequence[i:i + 60] for i in range(0, len(sequence), 60)) + "\n"
 
-    for record in SeqIO.parse(gbk_file, "genbank"):
+    for record in records:
+        record_id = checked_id([record.id], 'record ID')
+        if record_id in record_ids:
+            raise ValueError(f"Duplicate GenBank record ID: {record_id}")
+        record_ids.add(record_id)
+        if not (output_file_faa or output_file_ffn):
+            continue
         for feature in record.features:
-            if feature.type == "CDS":
-                if 'translation' in feature.qualifiers:
-                    locus_tag = feature.qualifiers['locus_tag'][0]
-                    header = f">{locus_tag}"
-
-                    # Protein
-                    protein_seq = feature.qualifiers['translation'][0]
-                    protein_records.append(f"{header}\n" + "\n".join(split_sequence(protein_seq)))
-
-                    # Nucleotide
-                    nucleotide_seq = str(feature.extract(record.seq))
-                    nucleotide_records.append(f"{header}\n" + "\n".join(split_sequence(nucleotide_seq)))
-
-    if output_file_faa:
-        with open(output_file_faa, 'w') as faa:
-            faa.write("\n".join(protein_records))
-
-    if output_file_ffn:
-        with open(output_file_ffn, 'w') as ffn:
-            ffn.write("\n".join(nucleotide_records))
+            if feature.type != 'CDS':
+                continue
+            if 'translation' not in feature.qualifiers:
+                skipped += 1
+                continue
+            locus = checked_id(feature.qualifiers.get('locus_tag', []),
+                               f'CDS locus_tag in {record.id}')
+            if locus in locus_ids:
+                raise ValueError(f"Duplicate translated CDS locus_tag: {locus}")
+            locus_ids.add(locus)
+            translations = feature.qualifiers['translation']
+            if (len(translations) != 1 or not translations[0]
+                    or any(char.isspace() for char in translations[0])
+                    or '>' in translations[0]):
+                raise ValueError(f"Invalid translation for CDS {locus}")
+            if output_file_faa:
+                protein_records.append(fasta_entry(locus, translations[0]))
+            if output_file_ffn:
+                if feature.location is None:
+                    raise ValueError(f"Missing location for CDS {locus}")
+                sequence = str(feature.extract(record.seq))
+                if not sequence:
+                    raise ValueError(f"Empty nucleotide sequence for CDS {locus}")
+                nucleotide_records.append(fasta_entry(locus, sequence))
+    if skipped:
+        logging.warning('%s: excluded %d CDS without annotated translation from FAA/FFN',
+                        gbk_file, skipped)
+    if (output_file_faa or output_file_ffn) and not locus_ids:
+        raise ValueError(f"No translated CDS available in {gbk_file}")
+    if output_file_fna:
+        with open(output_file_fna, 'w') as handle:
+            SeqIO.write(records, handle, 'fasta')
+    for destination, entries in ((output_file_faa, protein_records),
+                                 (output_file_ffn, nucleotide_records)):
+        if destination:
+            with open(destination, 'w') as handle:
+                handle.writelines(entries)
 
 def ref_genome_files(gbk_file, output_path, organism_name, container_engine='docker'):
     """Prepare a reference generation, or reuse only byte-verified artifacts.
@@ -236,7 +301,7 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
     names = {ext: f'{organism_name}.{ext}' for ext in ('gbk', 'fna', 'faa', 'ffn', 'gff')}
     manifest_path = os.path.join(output_path, f'{organism_name}.reference.json')
     source_hash = files.sha256_file(gbk_file)
-    expected = {'schema': 1, 'source_sha256': source_hash,
+    expected = {'schema': 3, 'source_sha256': source_hash,
                 'container_engine': container_engine}
     existing = any(os.path.lexists(os.path.join(output_path, name)) for name in names.values())
     if existing or os.path.lexists(manifest_path):
@@ -518,8 +583,7 @@ def core_files(output_path, organism_name, container_engine='docker', filter_by_
                         except Exception as e:
                             logging.exception(f"Error in run_genbank2gff3: {e}")
                             if len(gff_files) == 1:
-                                add_sequences_to_gff3(gff_files[0], new_gbk)
-                                shutil.copy(gff_files[0], new_gff)
+                                add_sequences_to_gff3(gff_files[0], new_gbk, output_file=new_gff)
                                 print(f"Processed {assembly_id}.gff")
                             else:
                                 logging.error(
