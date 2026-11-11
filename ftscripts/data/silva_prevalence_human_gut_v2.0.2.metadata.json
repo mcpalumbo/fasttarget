@@ -1,0 +1,29 @@
+{
+  "source_doi": "10.1016/j.chom.2026.01.013",
+  "source_table": "Table S5",
+  "source_file": "1-s2.0-S1931312826000387-mmc6.xlsx",
+  "source_sha256": "655d424d4c7e101470708df8f41edf5546cae94959da1711b384893ed80bb79b",
+  "catalogue": "human-gut",
+  "catalogue_version": "v2.0.2",
+  "catalogue_metadata_sha256": "9a16825eb11efbf1512a43ced9efbc70d77e42c7da0a4abd4b4b141a05dc25f0",
+  "mapping": "Table S5 Genome -> MGnify Genome_accession -> Species_rep",
+  "global_mean_definition": "Arithmetic mean of the six reported continent prevalences; not pooled sample prevalence or abundance",
+  "units": "percent (0-100)",
+  "threshold_rule": "global mean >= cutoff; missing values remain blank, not False or zero",
+  "representatives": 4744,
+  "with_prevalence": 3027,
+  "without_prevalence": 1717,
+  "global_threshold_counts": {
+    "10": 691,
+    "20": 375,
+    "30": 226,
+    "40": 158,
+    "50": 99,
+    "60": 50,
+    "70": 31,
+    "80": 7,
+    "90": 1,
+    "100": 0
+  },
+  "tsv_sha256": "ea583abef62b3b4370d9b03bf15fd7412bef2254e85b6b5206a73a87162b360b"
+}
