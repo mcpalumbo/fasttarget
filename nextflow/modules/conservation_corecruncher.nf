@@ -85,8 +85,9 @@ faa_files = glob.glob(os.path.join(staged_faa_dir, '*.faa'))
 if os.path.exists(faa_target_dir) and os.path.islink(faa_target_dir):
     os.unlink(faa_target_dir)
 elif os.path.exists(faa_target_dir):
-    
-    shutil_module.rmtree(faa_target_dir)
+    # Was shutil_module.rmtree, a name that does not exist: this branch raised
+    # NameError instead of clearing a real directory left by an earlier attempt.
+    shutil.rmtree(faa_target_dir)
 
 try:
     os.symlink(staged_faa_dir, faa_target_dir)
