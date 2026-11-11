@@ -29,35 +29,59 @@ def validate_file_path(filepath, name, required_extensions=None):
     return None  # Valid
 
 class Config:
+    """
+    Validated configuration, and the single source of default values.
+
+    Defaults live here and nowhere else. They used to be applied both here and
+    inside validate_config, which mutated the dictionary it was validating, so
+    the two copies could drift apart and the validated object depended on
+    validation having run first.
+
+    Optional sections and keys are read with .get() so that a config omitting
+    them produces a working object rather than a bare KeyError. 'cpus' and
+    'colabfold' in particular are not required keys, so reading them directly
+    crashed on a config that had passed validation.
+    """
+
+    # Defaults applied to a section when it is enabled but the key is absent.
+    SECTION_DEFAULTS = {
+        'structures': {'pocket_full_mode': False, 'uniparc_fallback': False},
+        'colabfold': {'amber': False, 'gpu': False, 'colabfold_run_all': False},
+    }
+
+    @staticmethod
+    def _section(config, name, defaults=None):
+        """
+        Return a copy of an enabled config section, or False when it is disabled.
+
+        :param config: Configuration dictionary.
+        :param name: Section name.
+        :param defaults: Optional mapping of default values for missing keys.
+        :return: Dict for an enabled section, False otherwise.
+        """
+        section = config.get(name) or {}
+        if not isinstance(section, dict) or not section.get('enabled', False):
+            return False
+
+        section = section.copy()
+        for key, value in (defaults or {}).items():
+            section.setdefault(key, value)
+        return section
+
     def __init__(self, config):
         self.organism = config['organism']
-        self.cpus = config['cpus']
+        self.cpus = config.get('cpus')
         self.container_engine = config.get('container_engine', 'docker')  # Default to docker if not specified
-        
-        # Structures with defaults
-        if config['structures']['enabled']:
-            self.structures = config['structures'].copy()
-            self.structures.setdefault('pocket_full_mode', False)
-            self.structures.setdefault('uniparc_fallback', False)
-        else:
-            self.structures = False
-        
-        # ColabFold with defaults
-        if config['colabfold']['enabled']:
-            self.colabfold = config['colabfold'].copy()
-            self.colabfold.setdefault('amber', False)
-            self.colabfold.setdefault('gpu', False)
-            self.colabfold.setdefault('colabfold_run_all', False)
-        else:
-            self.colabfold = False
-        
-        self.metabolism_pathwaytools = config['metabolism-PathwayTools'] if config['metabolism-PathwayTools']['enabled'] else False
-        self.metabolism_sbml = config['metabolism-SBML'] if config['metabolism-SBML']['enabled'] else False
-        self.core = config['core'] if config['core']['enabled'] else False
-        self.metadata = config['metadata'] if config['metadata']['enabled'] else False
-        self.offtarget = config['offtarget'] if config['offtarget']['enabled'] else False
-        self.deg = config['deg'] if config['deg']['enabled'] else False
-        self.psortb = config['psortb'] if config['psortb']['enabled'] else False
+
+        self.structures = self._section(config, 'structures', self.SECTION_DEFAULTS['structures'])
+        self.colabfold = self._section(config, 'colabfold', self.SECTION_DEFAULTS['colabfold'])
+        self.metabolism_pathwaytools = self._section(config, 'metabolism-PathwayTools')
+        self.metabolism_sbml = self._section(config, 'metabolism-SBML')
+        self.core = self._section(config, 'core')
+        self.metadata = self._section(config, 'metadata')
+        self.offtarget = self._section(config, 'offtarget')
+        self.deg = self._section(config, 'deg')
+        self.psortb = self._section(config, 'psortb')
         ligands_config = config.get('ligands', {})
         self.ligands = ligands_config.copy() if ligands_config.get('enabled', False) else False
         alphafill_config = self.ligands.get('alphafill', {}) if self.ligands else {}
@@ -181,17 +205,16 @@ def validate_config(config):
                 # Present or absent, it is accepted and ignored.
 
 
-                # Validate pocket_full_mode (set default if missing)
-                if 'pocket_full_mode' not in config['structures']:
-                    config['structures']['pocket_full_mode'] = False
-                elif not isinstance(config['structures']['pocket_full_mode'], bool):
-                    errors.append(f"structures.pocket_full_mode must be boolean (got {config['structures']['pocket_full_mode']})")
-
-                # Validate uniparc_fallback (set default if missing)
-                if 'uniparc_fallback' not in config['structures']:
-                    config['structures']['uniparc_fallback'] = False
-                elif not isinstance(config['structures']['uniparc_fallback'], bool):
-                    errors.append(f"structures.uniparc_fallback must be boolean (got {config['structures']['uniparc_fallback']})")
+                # Optional booleans: validate when present, never fill in defaults
+                # here. Config owns the defaults, so validation stays read-only.
+                for bool_field in ('pocket_full_mode', 'uniparc_fallback'):
+                    if bool_field in config['structures'] and not isinstance(
+                        config['structures'][bool_field], bool
+                    ):
+                        errors.append(
+                            f"structures.{bool_field} must be boolean "
+                            f"(got {config['structures'][bool_field]})"
+                        )
     
     #Validate colabfold section
     if 'colabfold' in config:
@@ -203,14 +226,12 @@ def validate_config(config):
             errors.append(f"colabfold.enabled must be boolean (got {config['colabfold']['enabled']})")
         else:
             if config['colabfold']['enabled']:
-                # Set defaults for optional colabfold fields
-                config['colabfold'].setdefault('amber', False)
-                config['colabfold'].setdefault('gpu', False)
-                config['colabfold'].setdefault('colabfold_run_all', False)
-                
-                # Validate types
-                for bool_field in ['amber', 'gpu', 'colabfold_run_all']:
-                    if not isinstance(config['colabfold'][bool_field], bool):
+                # Optional booleans: validate when present, never fill in defaults
+                # here. Config owns the defaults, so validation stays read-only.
+                for bool_field in ('amber', 'gpu', 'colabfold_run_all'):
+                    if bool_field in config['colabfold'] and not isinstance(
+                        config['colabfold'][bool_field], bool
+                    ):
                         errors.append(f"colabfold.{bool_field} must be boolean (got {config['colabfold'][bool_field]})")
 
     # Ligands is optional for older configurations and independent of pockets.
