@@ -167,14 +167,13 @@ def validate_config(config):
             errors.append(f"structures.enabled must be boolean (got {config['structures']['enabled']})")
         else:
             if config['structures']['enabled']:
-                # Validate proteome_uniprot
-                if 'proteome_uniprot' not in config['structures']:
-                    errors.append("structures missing required field: 'proteome_uniprot'")
-                else:
-                    proteome_id = config['structures']['proteome_uniprot']
-                    if not isinstance(proteome_id, str) or not proteome_id.strip():
-                        errors.append("structures.proteome_uniprot must be a non-empty string")
-                
+                # proteome_uniprot is accepted for backwards compatibility but no
+                # longer required: nothing in the pipeline reads it. The structures
+                # module queries UniProt by organism.tax_id and organism.strain_taxid.
+                # Requiring it only made users invent a value with no effect.
+                # Present or absent, it is accepted and ignored.
+
+
                 # Validate pocket_full_mode (set default if missing)
                 if 'pocket_full_mode' not in config['structures']:
                     config['structures']['pocket_full_mode'] = False
@@ -446,7 +445,6 @@ def print_config(config):
     print("\n---- Structures ----")
     if config.structures:
         print("Structures will be used in the analysis.")
-        print(f"Proteome UniProt ID: {config.structures['proteome_uniprot']}")
         print(f"Pocket Full Mode: {config.structures['pocket_full_mode']}")
         print(f"UniParc Fallback: {config.structures['uniparc_fallback']}")
     else:

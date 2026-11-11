@@ -336,8 +336,10 @@ The `config.yml` file is the **central configuration file** for this repository.
 
 4. **Structures:**
    - `structures.enabled`: Set to `True` if structural data is to be used; otherwise, set to `False`.
-   - `structures.proteome_uniprot`: Complete with the UniProt proteome ID for your organism. Example: `UP000002438` for *Pseudomonas aeruginosa* PAO1.
    - `structures.pocket_full_mode`: Set to `True` to find pockets in all structures for each protein (not only the best one). Note: This significantly increases runtime and resource usage.
+   - `structures.uniparc_fallback`: Set to `True` to resolve genes that BLAST could not map by looking them up in UniParc by sequence checksum, accepting an AlphaFold DB model only when its sequence is identical to your protein. Useful for under-studied organisms whose UniProt entries have been pruned as "not part of a reference proteome". Requires internet access.
+
+   > `structures.proteome_uniprot` is no longer used. Structure mapping is driven by `organism.tax_id` and `organism.strain_taxid`. The key is still accepted in existing config files and ignored.
 
    **Understanding Reference Structure:**
    
