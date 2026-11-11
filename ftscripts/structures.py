@@ -4429,6 +4429,57 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         print(f'Final structure summary table loaded from {final_table_file}')
         return final_df
     
+def _check_structure_pipeline_parameters(output_path, organism_name, structure_dir, final_table_path, parameters):
+    """
+    Refuse to reuse a structure summary built with different options.
+
+    The summary is the gate for the whole pipeline, which downloads structures and
+    runs FPocket, P2Rank and optionally ColabFold, so it is never rebuilt
+    automatically. The intermediate files are spread over the per-gene folders and
+    two caches outside this module, so the message lists them rather than removing
+    anything.
+
+    :param output_path: Path of the output directory.
+    :param organism_name: Name of the organism.
+    :param structure_dir: Path of the organism structures directory.
+    :param final_table_path: Path of the final structure summary table.
+    :param parameters: Mapping of option name to the value for this run.
+    :raises RuntimeError: If the recorded options differ from the current ones.
+    """
+
+    if not files.file_check(final_table_path):
+        return
+
+    if files.read_manifest(final_table_path) is None:
+        print(
+            f'Warning: {final_table_path} was produced before the structure options '
+            f'were recorded. Reusing it; see the README if you have changed '
+            f'structures.pocket_full_mode, structures.uniparc_fallback or the '
+            f'ColabFold options since it was built.'
+        )
+        logging.warning(f'Structure summary has no parameter manifest: {final_table_path}')
+        return
+
+    differences = files.manifest_differences(final_table_path, parameters)
+    if not differences:
+        return
+
+    stale = [
+        final_table_path,
+        os.path.join(structure_dir, f'{organism_name}_structure_data.json'),
+        os.path.join(structure_dir, '<locus_tag>', '<locus_tag>_structure_summary.tsv'),
+        os.path.join(output_path, organism_name, 'offtarget', 'human_foldseek_dict.json'),
+    ]
+    raise RuntimeError(
+        f'The structure summary in {structure_dir} was built with different options '
+        f'({"; ".join(differences)}). Remove these to rebuild it:\n'
+        + '\n'.join(f'  {path}' for path in stale)
+        + '\nThe downloaded PDB and AlphaFold files are reused, so a rebuild does '
+        'not download them again. Alternatively restore the previous options in '
+        'the config.'
+    )
+
+
 def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, cpus=multiprocessing.cpu_count(), resolution_cutoff = 3.5, coverage_cutoff=40.0, container_engine='docker', full_mode=False, amber_option=False, gpu_option=False, colabfold=False, colabfold_all_models=False, uniparc_fallback=False):
     """
     Complete pipeline to obtain and process structures for drug target identification.
@@ -4473,9 +4524,26 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
 
     structure_dir = os.path.join(output_path, organism_name, 'structures')
     final_table_path = os.path.join(structure_dir, f'{organism_name}_final_structure_summary.tsv')
-    
+
+    # Every option below changes what the summary contains, and the whole pipeline
+    # used to be gated on the summary existing. Enabling uniparc_fallback over an
+    # existing output directory therefore produced a table built without it, with
+    # nothing to say so: the intermediate files have to be cleared by hand, which
+    # is what the message below explains instead of leaving it to be discovered.
+    pipeline_parameters = {
+        'full_mode': bool(full_mode),
+        'uniparc_fallback': bool(uniparc_fallback),
+        'colabfold': bool(colabfold),
+        'colabfold_all_models': bool(colabfold_all_models),
+        'amber_option': bool(amber_option),
+        'gpu_option': bool(gpu_option),
+        'resolution_cutoff': resolution_cutoff,
+        'coverage_cutoff': coverage_cutoff,
+    }
+    _check_structure_pipeline_parameters(output_path, organism_name, structure_dir, final_table_path, pipeline_parameters)
+
     if not files.file_check(final_table_path):
-    
+
         try:
             print(f'\n[1.1] Downloading UniProt species data (TaxID: {specie_taxid})...')
             download_species_uniprot_data(output_path, organism_name, specie_taxid)
@@ -4592,6 +4660,8 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         print(f'Pipeline finished')
         print(f'{"="*80}')
         
+        files.write_manifest(final_table_path, pipeline_parameters, extra={'genes': len(final_df)})
+
         print(f'\nResults saved to: {final_table_path}')
         print(f'Structure data: {os.path.join(structure_dir, f"{organism_name}_structure_data.json")}')
     

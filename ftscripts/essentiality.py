@@ -59,18 +59,28 @@ def deg_parse (output_path, organism_name, identity_filter, coverage_filter):
     deg_blast_output = os.path.join(essentiality_path, 'deg_blast.tsv')
     deg_results = os.path.join(essentiality_path, 'hit_in_deg.tsv')
 
-    if not files.file_check(deg_results):
+    # Both filters are applied here, at parse time, so a cached table built with
+    # other values does not answer the question that was asked. Rebuilding it only
+    # re-filters deg_blast.tsv, which is already on disk: the BLAST search itself
+    # is not repeated.
+    filter_parameters = {
+        'deg_identity_filter': identity_filter,
+        'deg_coverage_filter': coverage_filter,
+    }
+
+    if not files.manifest_matches(deg_results, filter_parameters, label='hit_in_deg.tsv'):
         blast_output_df = files.read_blast_output(deg_blast_output)
 
         #Filter % identity and coverage
-        filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter) 
+        filtered_df = blast_output_df[(blast_output_df['pident'] > identity_filter)
                                     & (blast_output_df['qcovs'] > coverage_filter)]
 
         unique_values = filtered_df['qseqid'].unique()
         deg_hits = unique_values.tolist()
 
-        df_deg = metadata.metadata_table_bool(output_path, organism_name, deg_hits, 
+        df_deg = metadata.metadata_table_bool(output_path, organism_name, deg_hits,
                                             'hit_in_deg', essentiality_path)
+        files.write_manifest(deg_results, filter_parameters, extra={'genes_with_hit': len(deg_hits)})
     else:
         print('DEG analysis already done, output file found')
         print(deg_results)

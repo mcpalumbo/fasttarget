@@ -229,6 +229,23 @@ def read_manifest(output_path):
     return manifest if isinstance(manifest, dict) else None
 
 
+def _display_manifest_value(value):
+    """
+    Render a normalized value the way it was written in the config.
+
+    :param value: Normalized parameter value.
+    :return: String for a message: the tag of a boolean and the trailing '.0' of a
+        whole number are internal to the comparison and would only confuse.
+    """
+    if value == '<bool:true>':
+        return 'True'
+    if value == '<bool:false>':
+        return 'False'
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def manifest_differences(output_path, parameters):
     """
     Compare the parameters of an existing output against the current ones.
@@ -245,12 +262,11 @@ def manifest_differences(output_path, parameters):
 
     differences = []
     for name in sorted(expected):
-        if manifest is None:
-            differences.append(f'{name} unrecorded -> {expected[name]}')
-        elif name not in recorded:
-            differences.append(f'{name} unrecorded -> {expected[name]}')
+        current = _display_manifest_value(expected[name])
+        if manifest is None or name not in recorded:
+            differences.append(f'{name} unrecorded -> {current}')
         elif recorded[name] != expected[name]:
-            differences.append(f'{name} {recorded[name]} -> {expected[name]}')
+            differences.append(f'{name} {_display_manifest_value(recorded[name])} -> {current}')
     return differences
 
 

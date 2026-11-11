@@ -844,6 +844,44 @@ def corecruncher_output(output_path, organism_name, core_threshold=None):
 
     return corecruncher_table
 
+GRAM_TYPE_NAMES = {'n': 'Gram-negative', 'p': 'Gram-positive', 'a': 'archaea'}
+
+
+def _check_psortb_gram_type(psortb_file, organism_type):
+
+    """
+    Refuse to reuse a PSORTb result produced for a different organism type.
+
+    Unlike a threshold, the gram type is not a value to sweep: a Gram-negative
+    prediction reused for a Gram-positive organism is simply the wrong answer.
+    The file is not removed automatically, both because PSORTb takes a while and
+    because leaving two results behind would trip the "leave only one" check.
+
+    :param psortb_file: Path of the existing PSORTb output file.
+    :param organism_type: Gram type for this run ('n', 'p' or 'a').
+    :raises RuntimeError: If the file was produced for another gram type.
+    """
+
+    requested = GRAM_TYPE_NAMES.get(organism_type, organism_type)
+
+    if files.read_manifest(psortb_file) is None:
+        print(
+            f'Warning: {psortb_file} was produced before the gram type was recorded. '
+            f'Reusing it as a {requested} prediction; remove it to re-run PSORTb.'
+        )
+        logging.warning(f'PSORTb output has no gram type manifest: {psortb_file}')
+        return
+
+    differences = files.manifest_differences(psortb_file, {'gram_type': organism_type})
+    if differences:
+        recorded = (files.read_manifest(psortb_file) or {}).get('parameters', {}).get('gram_type')
+        raise RuntimeError(
+            f'{psortb_file} was produced for '
+            f'{GRAM_TYPE_NAMES.get(recorded, recorded)}, but psortb.gram_type is now '
+            f'{organism_type} ({requested}). Remove that file to re-run PSORTb, or '
+            f'restore the previous gram type in the config.'
+        )
+
 def localization_prediction(output_path, organism_name, organism_type, container_engine='docker'):
 
     """
@@ -870,25 +908,36 @@ def localization_prediction(output_path, organism_name, organism_type, container
     faa_path = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.faa')
     localization_dir = os.path.join(output_path, organism_name, 'localization')
 
+    # PSORTb names its own output after the gram type it was run with, for example
+    # 20261111021226_psortb_gramneg.txt. The gram type is in the file name but not
+    # in this pattern, so a result for the wrong organism type used to satisfy the
+    # gate: switching psortb.gram_type from 'n' to 'p' over an existing output
+    # directory reused the Gram-negative predictions without a word. The run is
+    # recorded in a manifest instead of being inferred from the name, which varies
+    # by PSORTb version.
     file_pattern = os.path.join(localization_dir, "*_psortb_*.txt")
-    all_files = glob.glob(file_pattern)
+    all_files = sorted(glob.glob(file_pattern))
 
     if not all_files:
         programs.run_psort(faa_path, organism_type, localization_dir, output_format='terse', container_engine=container_engine)
         # After running, find the newly created file
-        all_files = glob.glob(file_pattern)
+        all_files = sorted(glob.glob(file_pattern))
         if not all_files:
             raise FileNotFoundError(f"PSORTb ran but no output file found in {localization_dir}")
-    
+        files.write_manifest(all_files[0], {'gram_type': organism_type})
+    elif len(all_files) == 1:
+        _check_psortb_gram_type(all_files[0], organism_type)
+
     if len(all_files) > 1:
         raise FileNotFoundError(f"Multiple psort result files found in {localization_dir}. Leave only one.")
-    
+
     # Process PSORTb results
     print(f"Processing PSORTb results from {all_files[0]}")
-    
-    psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
 
-    if not files.file_check(psort_results):
+    psort_results = os.path.join(localization_dir, 'psortb_localization.tsv')
+    psort_parameters = {'gram_type': organism_type}
+
+    if not files.manifest_matches(psort_results, psort_parameters, label='psortb_localization.tsv'):
         # Parse the PSORTb output file
         file_path = all_files[0]
         df = pd.read_csv(file_path, sep=r'\s+', usecols=[0, 1])
@@ -896,6 +945,11 @@ def localization_prediction(output_path, organism_name, organism_type, container
         result_dict = df.set_index('SeqID')['Localization'].to_dict()
 
         psort_df = metadata.metadata_table_with_values(output_path, organism_name, result_dict,'psortb_localization',localization_dir, 'Unknown')
+        files.write_manifest(
+            psort_results,
+            psort_parameters,
+            extra={'source': os.path.basename(file_path), 'proteins': len(result_dict)},
+        )
 
         return psort_df
     else:
