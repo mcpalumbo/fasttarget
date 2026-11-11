@@ -248,26 +248,44 @@ def _display_manifest_value(value):
 
 def manifest_differences(output_path, parameters):
     """
-    Compare the parameters of an existing output against the current ones.
+    Parameters an existing output was demonstrably built with other values for.
+
+    Only recorded parameters are compared. A parameter the manifest does not
+    mention is unknown rather than different: manifests written by an earlier
+    version of FastTarget do not carry fields that were added later, and treating
+    those as changed would stop a run whose parameters are in fact untouched.
+    Use manifest_unrecorded to find them.
 
     :param output_path: Path of the output file the step produces.
     :param parameters: Mapping of parameter name to the value for this run.
-    :return: List of '<name> <recorded> -> <current>' strings. Empty when the
-        recorded parameters match. A missing manifest reports every parameter as
-        a difference, because nothing proves the output was built with them.
+    :return: List of '<name> <recorded> -> <current>' strings, empty when every
+        recorded parameter matches.
     """
     expected = _normalize_parameters(parameters)
-    manifest = read_manifest(output_path)
-    recorded = _normalize_parameters((manifest or {}).get('parameters'))
+    recorded = _normalize_parameters((read_manifest(output_path) or {}).get('parameters'))
 
     differences = []
     for name in sorted(expected):
-        current = _display_manifest_value(expected[name])
-        if manifest is None or name not in recorded:
-            differences.append(f'{name} unrecorded -> {current}')
-        elif recorded[name] != expected[name]:
-            differences.append(f'{name} {_display_manifest_value(recorded[name])} -> {current}')
+        if name in recorded and recorded[name] != expected[name]:
+            differences.append(
+                f'{name} {_display_manifest_value(recorded[name])} '
+                f'-> {_display_manifest_value(expected[name])}'
+            )
     return differences
+
+
+def manifest_unrecorded(output_path, parameters):
+    """
+    Parameters the manifest of an existing output says nothing about.
+
+    :param output_path: Path of the output file the step produces.
+    :param parameters: Mapping of parameter name to the value for this run.
+    :return: Sorted list of parameter names absent from the manifest. Every name
+        when there is no manifest at all.
+    """
+    expected = _normalize_parameters(parameters)
+    recorded = _normalize_parameters((read_manifest(output_path) or {}).get('parameters'))
+    return sorted(name for name in expected if name not in recorded)
 
 
 def manifest_matches(output_path, parameters, label=None):
@@ -283,13 +301,17 @@ def manifest_matches(output_path, parameters, label=None):
     if not file_check(output_path):
         return False
 
-    differences = manifest_differences(output_path, parameters)
-    if not differences:
+    # A cheap output is rebuilt for an unknown parameter as well as a changed one:
+    # recomputing costs little, and it replaces a result of unknown provenance with
+    # one that carries its parameters.
+    reasons = manifest_differences(output_path, parameters)
+    reasons += [f'{name} unrecorded' for name in manifest_unrecorded(output_path, parameters)]
+    if not reasons:
         return True
 
     name = label or os.path.basename(output_path)
-    print(f'Parameters changed for {name}: {"; ".join(differences)}')
-    logging.info(f'Parameters changed for {name}: {"; ".join(differences)}')
+    print(f'Rebuilding {name}: {"; ".join(reasons)}')
+    logging.info(f'Rebuilding {name}: {"; ".join(reasons)}')
     return False
 
 
@@ -377,6 +399,23 @@ def sha256_file(file_path):
         for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
+
+def fileset_fingerprint(paths):
+    """
+    Short digest identifying a set of input files.
+
+    Recording the file names themselves would make a manifest unreadable for a
+    few thousand genomes, and a mismatch message unusable. The digest is reported
+    alongside a count, which is what makes it meaningful to a reader.
+
+    :param paths: Iterable of file paths. Only the base names are used, so the set
+        survives being moved or staged into a work directory.
+    :return: First 12 hex characters of the SHA-256 of the sorted base names.
+    """
+    names = sorted(os.path.basename(path) for path in paths)
+    digest = hashlib.sha256('\n'.join(names).encode('utf-8')).hexdigest()
+    return digest[:12]
+
 
 def create_organism_subfolders(output_path, organism_name):
 

@@ -4439,6 +4439,10 @@ def _check_structure_pipeline_parameters(output_path, organism_name, structure_d
     two caches outside this module, so the message lists them rather than removing
     anything.
 
+    An option the manifest does not mention is unknown rather than wrong, as for a
+    summary built by an earlier version of FastTarget: those are reused with a
+    warning. Only a recorded option that differs stops the run.
+
     :param output_path: Path of the output directory.
     :param organism_name: Name of the organism.
     :param structure_dir: Path of the organism structures directory.
@@ -4450,15 +4454,14 @@ def _check_structure_pipeline_parameters(output_path, organism_name, structure_d
     if not files.file_check(final_table_path):
         return
 
-    if files.read_manifest(final_table_path) is None:
+    unrecorded = files.manifest_unrecorded(final_table_path, parameters)
+    if unrecorded:
         print(
-            f'Warning: {final_table_path} was produced before the structure options '
-            f'were recorded. Reusing it; see the README if you have changed '
-            f'structures.pocket_full_mode, structures.uniparc_fallback or the '
-            f'ColabFold options since it was built.'
+            f'Warning: {final_table_path} does not record how it was built '
+            f'({", ".join(unrecorded)} unknown). Reusing it; see the README if you '
+            f'have changed any of those since it was built.'
         )
-        logging.warning(f'Structure summary has no parameter manifest: {final_table_path}')
-        return
+        logging.warning(f'Structure summary has unrecorded options {unrecorded}: {final_table_path}')
 
     differences = files.manifest_differences(final_table_path, parameters)
     if not differences:
@@ -4470,6 +4473,10 @@ def _check_structure_pipeline_parameters(output_path, organism_name, structure_d
         os.path.join(structure_dir, '<locus_tag>', '<locus_tag>_structure_summary.tsv'),
         os.path.join(output_path, organism_name, 'offtarget', 'human_foldseek_dict.json'),
     ]
+    if any(difference.startswith(('specie_taxid', 'strain_taxid')) for difference in differences):
+        # A different organism means the downloaded proteome, its CD-HIT clusters and
+        # the BLAST databases built from them are all for the wrong taxon.
+        stale.append(os.path.join(structure_dir, 'uniprot_files'))
     raise RuntimeError(
         f'The structure summary in {structure_dir} was built with different options '
         f'({"; ".join(differences)}). Remove these to rebuild it:\n'
@@ -4531,6 +4538,10 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
     # nothing to say so: the intermediate files have to be cleared by hand, which
     # is what the message below explains instead of leaving it to be discovered.
     pipeline_parameters = {
+        # The taxids select the UniProt proteome and order the mapping tiers, so a
+        # corrected strain taxid has to invalidate the mapping built with the old one.
+        'specie_taxid': specie_taxid,
+        'strain_taxid': strain_taxid,
         'full_mode': bool(full_mode),
         'uniparc_fallback': bool(uniparc_fallback),
         'colabfold': bool(colabfold),

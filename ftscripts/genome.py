@@ -617,8 +617,9 @@ def _check_core_run_parameters(output_file, parameters, program, stale_dir):
     directory to remove, instead of either silently reusing the old clustering or
     deleting expensive results on its own.
 
-    An output with no manifest predates parameter recording. Its provenance is
-    unknown rather than wrong, so it is reused with a warning.
+    A parameter the manifest does not mention is unknown rather than wrong, which
+    is the case for an output built by an earlier version of FastTarget: those are
+    reused with a warning. Only a recorded value that differs stops the run.
 
     :param output_file: Path of the output file produced by the program.
     :param parameters: Mapping of parameter name to the value for this run.
@@ -627,21 +628,35 @@ def _check_core_run_parameters(output_file, parameters, program, stale_dir):
     :raises RuntimeError: If the recorded parameters differ from the current ones.
     """
 
-    if files.read_manifest(output_file) is None:
+    unrecorded = files.manifest_unrecorded(output_file, parameters)
+    if unrecorded:
+        known = 'nothing' if files.read_manifest(output_file) is None else 'only some parameters'
         print(
-            f'Warning: {output_file} was produced before parameters were recorded. '
-            f'Reusing it; remove {stale_dir} to rebuild it with core frequency '
-            f'{parameters["min_core_freq"]}% and identity {parameters["min_identity"]}%.'
+            f'Warning: {output_file} records {known} about how it was built '
+            f'({", ".join(unrecorded)} unknown). Reusing it; remove {stale_dir} to '
+            f'rebuild it with core frequency {parameters["min_core_freq"]}% and '
+            f'identity {parameters["min_identity"]}% over the current genomes.'
         )
-        logging.warning(f'{program} output has no parameter manifest: {output_file}')
-        return
+        logging.warning(f'{program} output has unrecorded parameters {unrecorded}: {output_file}')
 
     differences = files.manifest_differences(output_file, parameters)
     if differences:
+        # The genome set is not a config value to put back, so say what actually
+        # changed rather than offering a remedy that does not apply.
+        if any(difference.startswith('genome_') for difference in differences):
+            remedy = (
+                f'The set of genomes changed, so the old clustering no longer '
+                f'describes it. Remove {stale_dir} to re-run {program} over the '
+                f'current genomes, or restore the previous core.accession_file.'
+            )
+        else:
+            remedy = (
+                f'Remove {stale_dir} to re-run {program}, or restore the previous '
+                f'values in the config.'
+            )
         raise RuntimeError(
             f'{program} output in {stale_dir} was built with different parameters '
-            f'({"; ".join(differences)}). Remove that directory to re-run '
-            f'{program}, or restore the previous values in the config.'
+            f'({"; ".join(differences)}). {remedy}'
         )
 
 def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker'):
@@ -666,13 +681,29 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
 
-    core_parameters = {'min_core_freq': core_threshold, 'min_identity': identity}
+    def core_parameters_for(input_dir, pattern):
+        """
+        Parameters identifying one core genome run: the thresholds and the input set.
+
+        The genome set comes from core.accession_file or organism.tax_id, so it is
+        as much an input as the thresholds are: adding genomes to the list and
+        re-running used to reuse a clustering computed over the old set. The names
+        are reduced to a digest, since there can be thousands of them.
+        """
+        genomes = glob.glob(os.path.join(input_dir, pattern))
+        return {
+            'min_core_freq': core_threshold,
+            'min_identity': identity,
+            'genome_count': len(genomes),
+            'genome_set': files.fileset_fingerprint(genomes),
+        }
 
     if 'roary' in program_list:
         roary_out_dir = os.path.join(conservation_dir, 'roary_output')
         results_dir = os.path.join(roary_out_dir, 'results')
         genes_csv_file = os.path.join(results_dir, 'gene_presence_absence.csv')
         if os.path.exists(gff_dir):
+            core_parameters = core_parameters_for(gff_dir, '*.gff')
             if not files.file_check(genes_csv_file):
                 print('Running Roary')
                 # These used to be hardcoded to 99/95, so core.min_core_freq and
@@ -692,6 +723,7 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         cc_output_file = os.path.join(ccruncher_out_dir, 'families_core.txt')
 
         if os.path.exists(fasta_dir):
+            core_parameters = core_parameters_for(fasta_dir, '*.faa')
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
                 print('Running CoreCruncher')
@@ -864,10 +896,10 @@ def _check_psortb_gram_type(psortb_file, organism_type):
 
     requested = GRAM_TYPE_NAMES.get(organism_type, organism_type)
 
-    if files.read_manifest(psortb_file) is None:
+    if files.manifest_unrecorded(psortb_file, {'gram_type': organism_type}):
         print(
-            f'Warning: {psortb_file} was produced before the gram type was recorded. '
-            f'Reusing it as a {requested} prediction; remove it to re-run PSORTb.'
+            f'Warning: {psortb_file} does not record the gram type it was produced '
+            f'with. Reusing it as a {requested} prediction; remove it to re-run PSORTb.'
         )
         logging.warning(f'PSORTb output has no gram type manifest: {psortb_file}')
         return
