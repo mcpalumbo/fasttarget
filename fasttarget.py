@@ -491,6 +491,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
                             catalogue_name,
                             identity_filter,
                             coverage_filter,
+                            export_taxonomy_details=True,
                         )
                         module_tables.extend(result_tables)
                     logging.info('Microbiome offtarget analysis finished')

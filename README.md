@@ -581,6 +581,14 @@ The output columns vary depending on your configuration:
 
 ### Post-run microbiome hit plots
 
+Standalone FastTarget writes `hit_details_family.tsv` and `hit_details_genus.tsv`
+under `<output-path>/<organism-name>/offtarget/microbiomes/<catalogue>/`.
+Each TSV lists the taxa with hits for every locus with evidence. It reports
+both the percentage of the locus's hits in a taxon and the percentage of
+that taxon's representatives with hits. Unclassified hits contribute to the
+first percentage and have no value for the second. The final FastTarget
+table keeps its existing microbiome columns.
+
 After running FastTarget with `offtarget.microbiome: True`, use `ftscripts/microbiome_hit_plots.py` to visualize MGnify/offtarget hits for selected locus tags:
 
 ```bash
@@ -599,6 +607,10 @@ The script writes static PNG/SVG plots, reproducible TSV summaries, and an inter
 ```
 
 If a Newick tree is provided with `--tree`, it also writes SVG radial trees highlighting representatives with hits.
+
+Family and genus summaries group by the complete taxonomic path. Composition plots
+show unclassified hits separately; these hits do not count toward classified
+taxon counts or family penetrance.
 
 ## Running (Nextflow)
 

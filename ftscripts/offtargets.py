@@ -1344,6 +1344,54 @@ def human_offtarget_parse (output_path, organism_name):
 
     return df_human
 
+def _export_microbiome_taxon_details(connection, hits_source, taxonomy_source, output_dir):
+    """Export one row per hit locus and taxon without loading the detail into pandas."""
+    for rank in ("family", "genus"):
+        path = _microbiome_rank_path(rank)
+        classified = _microbiome_classified_path_filter(rank)
+        destination = os.path.join(output_dir, f"hit_details_{rank}.tsv")
+        partial = destination + ".part"
+        try:
+            connection.execute(
+                f"""
+                COPY (
+                    WITH taxonomy AS (
+                        SELECT representative_genome_id,
+                            CASE WHEN {classified} THEN {path} END AS taxonomy_group_id,
+                            CASE WHEN {classified} THEN "{rank}" END AS taxon
+                        FROM {taxonomy_source}
+                    ),
+                    totals AS (
+                        SELECT taxonomy_group_id, count(DISTINCT representative_genome_id)
+                            AS total_taxon_representatives
+                        FROM taxonomy WHERE taxonomy_group_id IS NOT NULL
+                        GROUP BY taxonomy_group_id
+                    ),
+                    grouped_hits AS (
+                        SELECT h.gene, t.taxonomy_group_id,
+                            coalesce(t.taxon, 'unclassified') AS "{rank}",
+                            count(DISTINCT h.representative_genome_id) AS hit_representatives
+                        FROM {hits_source} h
+                        LEFT JOIN taxonomy t USING (representative_genome_id)
+                        GROUP BY h.gene, t.taxonomy_group_id, t.taxon
+                    )
+                    SELECT gene, "{rank}", taxonomy_group_id, hit_representatives,
+                        total_taxon_representatives,
+                        100.0 * hit_representatives / total_taxon_representatives
+                            AS percent_taxon_representatives_hit,
+                        100.0 * hit_representatives / sum(hit_representatives) OVER (PARTITION BY gene)
+                            AS percent_of_gene_hits
+                    FROM grouped_hits LEFT JOIN totals USING (taxonomy_group_id)
+                    ORDER BY gene, hit_representatives DESC, "{rank}", taxonomy_group_id
+                ) TO '{_duckdb_path(partial)}' (FORMAT CSV, HEADER, DELIMITER '\t')
+                """
+            )
+            os.replace(partial, destination)
+        finally:
+            if os.path.exists(partial):
+                os.remove(partial)
+
+
 def microbiome_species_parse(
     databases_path,
     output_path,
@@ -1352,6 +1400,7 @@ def microbiome_species_parse(
     identity_filter,
     coverage_filter,
     genome_output_path=None,
+    export_taxonomy_details=False,
 ):
     """
     Parses consolidated microbiome hits at every supported taxonomy rank.
@@ -1367,6 +1416,7 @@ def microbiome_species_parse(
     :param identity_filter: Identity threshold associated with the consolidated hits.
     :param coverage_filter: Coverage threshold associated with the consolidated hits.
     :param genome_output_path: Optional root containing the staged organism genome.
+    :param export_taxonomy_details: Write separate family and genus TSVs for all hit loci.
     :return: Tuple containing normalized and count metadata tables for every rank,
         followed by the species normalization denominator table.
     """
@@ -1471,14 +1521,13 @@ def microbiome_species_parse(
                 for row in taxonomy_group_rows
             ]
             counts_by_rank[rank] = dict(rows)
+        denominators = _validate_microbiome_taxonomy_manifest(
+            taxonomy_manifest, current_group_ids, taxonomy_path,
+        )
+        if export_taxonomy_details:
+            _export_microbiome_taxon_details(connection, hits_source, taxonomy_source, offtarget_path)
     finally:
         connection.close()
-
-    denominators = _validate_microbiome_taxonomy_manifest(
-        taxonomy_manifest,
-        current_group_ids,
-        taxonomy_path,
-    )
 
     print(f"Parsing consolidated microbiome hits for {catalogue_name}...")
     column_prefix = catalogue_column_prefix(catalogue_name)
