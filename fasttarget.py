@@ -413,7 +413,12 @@ def conservation_module(config, databases_path, output_path, cpus):
             print('----- 1. Selecting genomes -----')
             # If accession_list was provided, don't filter by host; otherwise filter for human host
             filter_by_host = accession_list is None or len(accession_list) == 0
-            genome.core_check_files(output_path, organism_name, container_engine=config.container_engine, filter_by_host=filter_by_host)
+            from ftscripts import dereplication
+            if dereplication.options(config.core)[0]:
+                output_path = dereplication.prepare(output_path, organism_name, config.core, cpus,
+                                                    filter_by_host, config.container_engine)
+            else:
+                genome.core_check_files(output_path, organism_name, container_engine=config.container_engine, filter_by_host=filter_by_host)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 
@@ -773,6 +778,102 @@ def metadata_loading(config, output_path):
     
     return module_tables
 
+def _check_results_table(results, reference_genes):
+    """
+    Verify the contract of the merged table before it is written.
+
+    One row per annotated gene is what every consumer assumes, the per-column
+    Target Pathogen tables included. Checking it here turns a silent corruption
+    into a named failure, and costs one comparison.
+
+    :param results: Merged results table.
+    :param reference_genes: Gene list from the annotation, or empty when absent.
+    """
+    if not reference_genes:
+        return
+
+    duplicated = sorted(results.loc[results['gene'].duplicated(), 'gene'].unique())
+    if duplicated:
+        record_failure(
+            'results table integrity (duplicated genes)',
+            ValueError(f'{len(duplicated)} gene(s) appear more than once, e.g. {duplicated[:5]}'),
+        )
+
+    missing = [gene for gene in reference_genes if gene not in set(results['gene'])]
+    if missing:
+        record_failure(
+            'results table integrity (missing genes)',
+            ValueError(f'{len(missing)} annotated gene(s) are absent, e.g. {missing[:5]}'),
+        )
+
+    collided = [name for name in results.columns if name.endswith(('_x', '_y'))]
+    if collided:
+        record_failure(
+            'results table integrity (renamed columns)',
+            ValueError(f'{collided} were renamed by a join, so their meaning is unclear'),
+        )
+
+
+def _consistent_module_tables(tables):
+    """
+    Make module tables safe to left-join: one row per gene, no column reused.
+
+    Every join in the merge is a left join on 'gene', so a module table carrying
+    a gene twice multiplies that gene's rows and the output stops having one row
+    per gene. A column name already supplied by an earlier table is worse than a
+    conflict: pandas renames both to <name>_x and <name>_y, so neither matches
+    the name the module documented and no error is raised.
+
+    Both are module defects rather than user error, so they are reported as
+    failed steps, which makes the run exit non-zero, and the offending data is
+    dropped so the table keeps its contract.
+
+    :param tables: Module tables, without the reference anchor.
+    :return: The tables with duplicate genes and reused columns removed.
+    """
+    checked = []
+    claimed = {}
+
+    for position, table in enumerate(tables):
+        if table is None or 'gene' not in getattr(table, 'columns', []):
+            checked.append(table)
+            continue
+
+        table = table.copy()
+
+        duplicated = table['gene'].duplicated(keep=False)
+        if duplicated.any():
+            repeated = sorted(table.loc[duplicated, 'gene'].unique())
+            columns = [name for name in table.columns if name != 'gene']
+            record_failure(
+                f'results merge (module table {position + 1} with columns {columns} '
+                f'repeats {len(repeated)} gene(s))',
+                ValueError(
+                    f'{len(repeated)} gene(s) appear more than once, e.g. {repeated[:5]}; '
+                    f'keeping the first row of each'
+                ),
+            )
+            table = table.drop_duplicates(subset='gene', keep='first')
+
+        reused = [name for name in table.columns if name != 'gene' and name in claimed]
+        if reused:
+            record_failure(
+                f'results merge (column(s) {reused} supplied twice)',
+                ValueError(
+                    f'{reused} already came from an earlier module table; dropping the '
+                    f'later copy so the column keeps its documented meaning'
+                ),
+            )
+            table = table.drop(columns=reused)
+
+        for name in table.columns:
+            if name != 'gene':
+                claimed[name] = position
+        checked.append(table)
+
+    return checked
+
+
 def merge_final_tables(config, output_path, tables):
     """
     Merge final result tables and save to output.
@@ -811,6 +912,7 @@ def merge_final_tables(config, output_path, tables):
                     f'{sorted(unknown)[:5]}'
                 )
         tables = [pd.DataFrame({'gene': reference_genes}), *tables]
+        tables = [tables[0], *_consistent_module_tables(tables[1:])]
     else:
         logging.error(
             'No reference genes found in the annotation; falling back to merging on '
@@ -844,7 +946,9 @@ def merge_final_tables(config, output_path, tables):
         
         # Add gene_name and product information
         combined_df = metadata.add_gene_product_info(combined_df, output_path, organism_name)
-        
+
+        _check_results_table(combined_df, reference_genes)
+
         combined_df.to_csv(results_table_path, sep='\t', index=False)
         
         print(f'Final FastTarget results saved in {results_table_path}.')

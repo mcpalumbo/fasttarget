@@ -342,6 +342,11 @@ def validate_config(config):
     # Validate core genome section
     if 'core' in config and config['core'].get('enabled'):
         core = config['core']
+        from ftscripts.dereplication import options as dereplication_options
+        try:
+            dereplication_options(core)
+        except ValueError as error:
+            errors.append(str(error))
         
         # Check at least one core method is enabled
         if not core.get('roary') and not core.get('corecruncher'):

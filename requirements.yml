@@ -23,6 +23,9 @@ dependencies:
   - blast=2.17.0
   - diamond=2.1.18
   - pip=25.3
+  - drep=3.6.2
+  - fastani=1.34
+  - mash=2.3
   - cd-hit=4.8.1  
   - pip:
       - sndg-bio==0.1.73

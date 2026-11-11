@@ -285,6 +285,9 @@ workflow FASTTARGET {
     def corecruncher_enabled = config.core?.corecruncher ?: false
     
     if (core_enabled && (roary_enabled || corecruncher_enabled)) {
+        if (config.core?.dereplication?.enabled) {
+            error 'core.dereplication is currently supported by the Python entry point only; Nextflow integration is pending.'
+        }
         // 4.1: Download genomes
         def min_identity = config.core.min_identity ?: 95
         def min_core_freq = config.core.min_core_freq ?: 99
