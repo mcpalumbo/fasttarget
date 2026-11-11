@@ -191,19 +191,34 @@ def _normalize_parameters(parameters):
     return {str(key): _normalize_manifest_value(value) for key, value in (parameters or {}).items()}
 
 
-def write_manifest(output_path, parameters, extra=None):
+def write_manifest(output_path, parameters, extra=None, hash_output=True):
     """
     Record the parameters a step used to produce its output.
 
     :param output_path: Path of the output file the step produced.
     :param parameters: Mapping of parameter name to the value actually used.
     :param extra: Optional mapping of additional context to store alongside.
+    :param hash_output: Whether to record the output's SHA-256 and size, so a
+        later run can tell a complete output from a partially written one. Pass
+        False only for an output too large to be worth re-reading.
     """
     manifest = {
         'output': os.path.basename(output_path),
         'written': datetime.now().isoformat(),
         'parameters': _normalize_parameters(parameters),
     }
+
+    # The parameters say how the output was meant to be produced; this says what
+    # was actually written. Without it a write interrupted halfway left a
+    # truncated file with a valid manifest, which the next run reused: a table cut
+    # from twenty rows to two was a cache hit.
+    if hash_output:
+        try:
+            manifest['output_sha256'] = sha256_file(output_path)
+            manifest['output_bytes'] = os.path.getsize(output_path)
+        except OSError as error:
+            logging.warning(f'Could not checksum {output_path} for its manifest: {error}')
+
     if extra:
         manifest['extra'] = extra
     try:
@@ -274,6 +289,32 @@ def manifest_differences(output_path, parameters):
     return differences
 
 
+def manifest_output_changed(output_path):
+    """
+    Check whether an output differs from what its manifest recorded.
+
+    :param output_path: Path of the output file the step produces.
+    :return: True when the manifest holds a checksum that no longer matches, so
+        the file was truncated, overwritten or edited since. False when it
+        matches, and False when no checksum was recorded: an output from an
+        earlier version is unverifiable, not known to be wrong.
+    """
+    manifest = read_manifest(output_path) or {}
+    recorded = manifest.get('output_sha256')
+    if not recorded:
+        return False
+
+    size = manifest.get('output_bytes')
+    try:
+        # Comparing the size first avoids re-reading a large file in the common
+        # case where a truncated write also changed its length.
+        if size is not None and os.path.getsize(output_path) != size:
+            return True
+        return sha256_file(output_path) != recorded
+    except OSError:
+        return True
+
+
 def manifest_unrecorded(output_path, parameters):
     """
     Parameters the manifest of an existing output says nothing about.
@@ -306,6 +347,8 @@ def manifest_matches(output_path, parameters, label=None):
     # one that carries its parameters.
     reasons = manifest_differences(output_path, parameters)
     reasons += [f'{name} unrecorded' for name in manifest_unrecorded(output_path, parameters)]
+    if manifest_output_changed(output_path):
+        reasons.append('the output no longer matches its recorded checksum')
     if not reasons:
         return True
 

@@ -88,6 +88,88 @@ def test_no_module_tables_produces_no_results_rather_than_a_gene_list(organism):
     assert results is None
 
 
+def test_a_repeated_gene_does_not_multiply_rows(organism):
+    """
+    Every join is a left join on 'gene', so a module table carrying a gene twice
+    multiplied that gene's rows and the table stopped having one row per gene.
+    """
+    output_path, organism_name = organism
+    fasttarget.reset_failed_steps()
+    repeated = pd.DataFrame({
+        'gene': [GENES[0], GENES[0], GENES[1]],
+        'core_roary': [True, False, True],
+    })
+
+    results = fasttarget.merge_final_tables(StubConfig(organism_name), output_path, [repeated])
+
+    assert len(results) == len(GENES)
+    assert (results['gene'] == GENES[0]).sum() == 1
+    assert results.loc[results['gene'] == GENES[0], 'core_roary'].iloc[0] is True, 'the first row'
+
+
+def test_a_repeated_gene_is_reported_as_a_failure(organism):
+    """
+    The two rows disagreed, so one of them is wrong: dropping it quietly would
+    hide a module defect.
+    """
+    output_path, organism_name = organism
+    fasttarget.reset_failed_steps()
+    repeated = pd.DataFrame({'gene': [GENES[0], GENES[0]], 'core_roary': [True, False]})
+
+    fasttarget.merge_final_tables(StubConfig(organism_name), output_path, [repeated])
+
+    steps = fasttarget.failed_steps()
+    assert steps, 'a repeated gene must make the run exit non-zero'
+    assert 'core_roary' in steps[0], 'the offending table has to be identifiable'
+
+
+def test_a_column_supplied_twice_keeps_its_documented_name(organism):
+    """
+    pandas renames both copies to score_x and score_y without an error, so
+    neither matches the name the module documented.
+    """
+    output_path, organism_name = organism
+    fasttarget.reset_failed_steps()
+    first = _module_table(GENES, 'score', list(range(len(GENES))))
+    second = _module_table(GENES, 'score', [99] * len(GENES))
+
+    results = fasttarget.merge_final_tables(
+        StubConfig(organism_name), output_path, [first, second]
+    )
+
+    assert 'score' in results.columns
+    assert not [name for name in results.columns if name.endswith(('_x', '_y'))]
+    assert results['score'].tolist() == list(range(len(GENES))), 'the first module wins'
+    assert any('score' in step for step in fasttarget.failed_steps())
+
+
+def test_a_clean_merge_reports_nothing(organism):
+    output_path, organism_name = organism
+    fasttarget.reset_failed_steps()
+    clean = _module_table(GENES, 'core_roary', [True] * len(GENES))
+
+    results = fasttarget.merge_final_tables(StubConfig(organism_name), output_path, [clean])
+
+    assert len(results) == len(GENES)
+    assert fasttarget.failed_steps() == []
+
+
+def test_distinct_columns_from_several_modules_are_all_kept(organism):
+    output_path, organism_name = organism
+    fasttarget.reset_failed_steps()
+    tables = [
+        _module_table(GENES, 'core_roary', [True] * len(GENES)),
+        _module_table(GENES, 'hit_in_deg', [False] * len(GENES)),
+        _module_table(GENES, 'druggability_score', [0.5] * len(GENES)),
+    ]
+
+    results = fasttarget.merge_final_tables(StubConfig(organism_name), output_path, tables)
+
+    for column in ('core_roary', 'hit_in_deg', 'druggability_score'):
+        assert column in results.columns
+    assert fasttarget.failed_steps() == []
+
+
 def test_none_tables_are_ignored(organism):
     output_path, organism_name = organism
     fasttarget.reset_failed_steps()

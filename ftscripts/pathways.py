@@ -269,13 +269,36 @@ def read_sif(output_path, organism_name):
                 source, interaction, target = parts
                 G.add_edge(source, target, interaction=interaction)
                 
+    # A network with no edges has no components, and max() over nothing raised
+    # ValueError from here, which reached the caller as an unexplained failure of
+    # the whole metabolic module.
+    if G.number_of_edges() == 0:
+        raise ValueError(
+            f'{sif_path} contains no usable interactions, so there is no metabolic '
+            f'network to analyse. Check that the SIF generation step produced a '
+            f'network from the SBML file.'
+        )
+
     largest_component = max(nx.weakly_connected_components(G), key=len)
     subgraph = G.subgraph(largest_component).copy()
     write_sif(subgraph, os.path.join(metabolism_dir, f'{organism_name}_principal_component.sif'))
-    
+
     betweenness_centrality = nx.betweenness_centrality(subgraph)
-    max_value = max(value for value in betweenness_centrality.values())
-    normalized_betweenness_centrality = {key: (value / max_value) for key, value in betweenness_centrality.items()} 
+    # Every centrality is zero whenever no node lies on a shortest path between
+    # two others, which is the case for any component small enough: a two-node
+    # component, a self-loop, a star. That is a legitimate result, but dividing
+    # by it raised ZeroDivisionError and lost the whole module.
+    max_value = max(betweenness_centrality.values(), default=0)
+    if max_value > 0:
+        normalized_betweenness_centrality = {
+            key: value / max_value for key, value in betweenness_centrality.items()
+        }
+    else:
+        print(
+            f'No node of the principal component ({subgraph.number_of_nodes()} nodes) lies '
+            f'between two others, so every betweenness centrality is zero.'
+        )
+        normalized_betweenness_centrality = dict.fromkeys(betweenness_centrality, 0.0)
 
     node_degrees = dict(subgraph.degree())
     

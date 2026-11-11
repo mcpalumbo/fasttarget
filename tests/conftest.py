@@ -13,6 +13,7 @@ the logic, in seconds, on any machine.
 
 import os
 import sys
+import csv
 
 import pytest
 
@@ -21,6 +22,15 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 ORGANISM = 'synth'
+
+# The metadata columns Roary writes before the per-sample ones. The parser checks
+# this prefix to locate the cohort, so the fixture has to reproduce it exactly.
+ROARY_METADATA_COLUMNS = [
+    'Gene', 'Non-unique Gene name', 'Annotation', 'No. isolates',
+    'No. sequences', 'Avg sequences per isolate', 'Genome Fragment',
+    'Order within Fragment', 'Accessory Fragment', 'Accessory Order with Fragment',
+    'QC', 'Min group size nuc', 'Max group size nuc', 'Avg group size nuc',
+]
 
 # Five genes is enough for every case the suite needs: one that every module
 # resolves, one that no module resolves, and three to make counts meaningful.
@@ -134,22 +144,38 @@ def write_roary_inputs(output_path, organism_name, presence, genomes=10):
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(gff_dir, exist_ok=True)
 
-    with open(os.path.join(results_dir, 'gene_presence_absence.csv'), 'w') as handle:
-        handle.write(f'"No. isolates","{organism_name}"\n')
-        # One row per gene, plus a row carrying the isolate maximum so the parser
-        # computes the same denominator a real run would.
-        handle.write(f'{genomes},"{GENES[0]}"\n')
-        for gene, isolates in presence.items():
-            handle.write(f'{isolates},"{gene}"\n')
+    # The parser takes the cohort from the sample columns and checks it against
+    # the prepared GFFs, so the fixture has to agree with both: one column per
+    # genome, the reference among them exactly once, and 'No. isolates' equal to
+    # the number of non-empty cells in the row.
+    samples = [organism_name] + [f'genome_{index:02d}' for index in range(1, genomes)]
 
-    with open(os.path.join(gff_dir, f'{organism_name}.gff'), 'w') as handle:
-        handle.write('##gff-version 3\n')
-        for index, gene in enumerate(GENES, start=1):
-            start = index * 100
-            handle.write(
-                f'{organism_name}_chr\tsynthetic\tCDS\t{start}\t{start + 59}\t.\t+\t0\t'
-                f'ID={gene};locus_tag={gene}\n'
-            )
+    for sample in samples:
+        with open(os.path.join(gff_dir, f'{sample}.gff'), 'w') as handle:
+            handle.write('##gff-version 3\n')
+            if sample != organism_name:
+                continue
+            for index, gene in enumerate(GENES, start=1):
+                start = index * 100
+                handle.write(
+                    f'{organism_name}_chr\tsynthetic\tCDS\t{start}\t{start + 59}\t.\t+\t0\t'
+                    f'ID={gene};locus_tag={gene}\n'
+                )
+
+    with open(os.path.join(results_dir, 'gene_presence_absence.csv'), 'w', newline='') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(ROARY_METADATA_COLUMNS + samples)
+        for gene, isolates in presence.items():
+            # The reference is always one of the carriers, so the gene has an id
+            # in the reference column and can be translated to a locus tag.
+            carriers = samples[:isolates]
+            cells = [f'{sample}_{gene}' if sample in carriers else '' for sample in samples]
+            if carriers:
+                cells[0] = gene if samples[0] in carriers else cells[0]
+            writer.writerow([
+                gene, '', 'synthetic protein', isolates, isolates, 1.0,
+                1, 1, '', '', '', 180, 180, 180,
+            ] + cells)
 
 
 def write_corecruncher_inputs(output_path, organism_name, core_genes):

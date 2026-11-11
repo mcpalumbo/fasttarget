@@ -758,6 +758,13 @@ def _check_core_run_parameters(output_file, parameters, program, stale_dir):
             f'identity {parameters["min_identity"]}% over the current genomes.'
         )
 
+    if files.manifest_output_changed(output_file):
+        raise RuntimeError(
+            f'{output_file} no longer matches the checksum recorded when {program} '
+            f'produced it, so it was truncated or modified since. Remove {stale_dir} '
+            f'to re-run {program}.'
+        )
+
     differences = files.manifest_differences(output_file, parameters)
     if differences:
         # The genome set is not a config value to put back, so say what actually

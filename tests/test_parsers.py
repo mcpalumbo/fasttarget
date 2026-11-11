@@ -135,16 +135,65 @@ def test_roary_missing_results_raises_instead_of_returning_an_unbound_name(organ
         genome.roary_output(output_path, organism_name, core_threshold=0.99)
 
 
-def test_roary_missing_gff_raises_rather_than_failing_later(organism):
+def test_a_cohort_that_does_not_match_the_prepared_genomes_is_refused(organism):
+    """
+    The denominator comes from the sample columns, so they have to be the genomes
+    that were actually prepared: a GFF missing from the cohort would otherwise
+    change the core genome without changing the reported threshold.
+    """
     output_path, organism_name = organism
     write_roary_inputs(output_path, organism_name, {GENES[0]: 10}, genomes=10)
-    os.remove(os.path.join(
-        output_path, organism_name, 'conservation', 'roary_output', 'gff', f'{organism_name}.gff'
-    ))
+    gff_dir = os.path.join(output_path, organism_name, 'conservation', 'roary_output', 'gff')
 
-    with pytest.raises(FileNotFoundError) as error:
+    os.remove(os.path.join(gff_dir, 'genome_05.gff'))
+
+    with pytest.raises(ValueError, match='prepared GFF cohort'):
         genome.roary_output(output_path, organism_name, core_threshold=0.99)
-    assert '.gff' in str(error.value)
+
+
+def test_a_cohort_without_the_reference_is_refused(organism):
+    output_path, organism_name = organism
+    write_roary_inputs(output_path, organism_name, {GENES[0]: 10}, genomes=10)
+    gff_dir = os.path.join(output_path, organism_name, 'conservation', 'roary_output', 'gff')
+
+    os.remove(os.path.join(gff_dir, f'{organism_name}.gff'))
+
+    with pytest.raises(ValueError, match='prepared GFF cohort'):
+        genome.roary_output(output_path, organism_name, core_threshold=0.99)
+
+
+def test_an_unrecognised_presence_absence_schema_is_refused(organism):
+    """A changed Roary output format must stop the parse, not be guessed at."""
+    output_path, organism_name = organism
+    write_roary_inputs(output_path, organism_name, {GENES[0]: 10}, genomes=10)
+    csv_path = os.path.join(output_path, organism_name, 'conservation',
+                            'roary_output', 'results', 'gene_presence_absence.csv')
+    with open(csv_path, 'w') as handle:
+        handle.write(f'"No. isolates","{organism_name}"\n10,"{GENES[0]}"\n')
+
+    with pytest.raises(ValueError, match='schema'):
+        genome.roary_output(output_path, organism_name, core_threshold=0.99)
+
+
+def test_isolate_counts_must_agree_with_the_presence_cells(organism):
+    """
+    'No. isolates' is the number the threshold is applied to, so a value that
+    disagrees with the row's own cells cannot be trusted.
+    """
+    output_path, organism_name = organism
+    write_roary_inputs(output_path, organism_name, {GENES[0]: 3}, genomes=10)
+    csv_path = os.path.join(output_path, organism_name, 'conservation',
+                            'roary_output', 'results', 'gene_presence_absence.csv')
+
+    import csv as csv_module
+    with open(csv_path, newline='') as handle:
+        rows = list(csv_module.reader(handle))
+    rows[1][3] = '10'          # claim ten isolates while only three cells are filled
+    with open(csv_path, 'w', newline='') as handle:
+        csv_module.writer(handle).writerows(rows)
+
+    with pytest.raises(ValueError, match='disagree'):
+        genome.roary_output(output_path, organism_name, core_threshold=0.99)
 
 
 # ------------------------------------------------------------------ CoreCruncher
