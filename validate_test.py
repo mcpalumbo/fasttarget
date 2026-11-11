@@ -11,6 +11,7 @@ Usage:
 
 import os
 import sys
+import contextlib
 import argparse
 import pandas as pd
 import glob
@@ -60,12 +61,69 @@ def _read_df_any(path_tsv: str, path_csv: str):
             pass
     return None, None, None
 
-def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 20, min_microbiome_genomes: int = 4744):
+def reference_structure_breakdown(organism_dir: str):
+    """
+    Classify each protein by the reference structure Foldseek searched with.
+
+    Foldseek runs on one reference structure per gene, so the number of results to
+    expect is the number of genes that have one, not the number of genes in the
+    genome. Enabling colabfold is what models the remainder and brings the two
+    numbers together.
+
+    The selection is not reimplemented here: it depends on pocket_full_mode, on
+    which PDB chains were extracted and on a priority order, and a copy of it in
+    the validator would drift from the pipeline and report expectations the run
+    never had. The pipeline's own get_all_reference_structures is used instead, so
+    the expectation is by construction the set the run searched.
+
+    :param organism_dir: Path of the organism output directory.
+    :return: Dictionary of source name to the sorted locus tags using it, with the
+        genes that have no structure under 'none', or None when the pipeline's
+        function cannot be used.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from ftscripts import structures as ft_structures
+    except Exception:
+        return None
+
+    output_path = os.path.dirname(os.path.abspath(organism_dir))
+    organism_name = os.path.basename(os.path.abspath(organism_dir))
+
+    try:
+        # The function reports its search per gene, which is useful in a pipeline
+        # run and noise in a validation summary.
+        with open(os.devnull, 'w') as quiet, contextlib.redirect_stdout(quiet):
+            reference_structures = ft_structures.get_all_reference_structures(
+                output_path, organism_name, path_mode=True
+            )
+    except Exception:
+        return None
+
+    breakdown = {'pdb': [], 'alphafold': [], 'colabfold': [], 'none': []}
+    for locus_tag, path in sorted((reference_structures or {}).items()):
+        if not path:
+            breakdown['none'].append(locus_tag)
+            continue
+        name = os.path.basename(path if isinstance(path, str) else str(path))
+        if name.startswith('AF_'):
+            breakdown['alphafold'].append(locus_tag)
+        elif name.startswith('CB_'):
+            breakdown['colabfold'].append(locus_tag)
+        else:
+            breakdown['pdb'].append(locus_tag)
+
+    return breakdown
+
+
+def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 20, min_microbiome_genomes: int = 4744,
+                    organism_dir: str = None):
     """
     Checks 3 independent parts:
-      1) Foldseek structure + per-protein tsv + human_foldseek_dict.json (20 keys with values)
+      1) Foldseek: one result per gene that has a reference structure, and a
+         human_foldseek_dict.json with one key per searched gene
       2) Human offtarget files + table shape (2 cols, 20 rows) + blast nonempty
-      3) Human gut off-target: >=4744 completed MGYG result files and valid summaries
+      3) Human gut off-target: the consolidated hits and their manifest
     Only the part that fails appends errors to validation["failed"].
     """
 
@@ -87,28 +145,55 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
     foldseek_warnings = []
     foldseek_passed = []
 
+    # How many Foldseek results to expect, broken down by where the structure came
+    # from. A flat 'expect 20' failed every run in which one gene had no structure,
+    # which is a legitimate outcome unless ColabFold is enabled to model it.
+    breakdown = reference_structure_breakdown(organism_dir) if organism_dir else None
+    if breakdown is not None and sum(len(v) for v in breakdown.values()):
+        searchable = breakdown['pdb'] + breakdown['alphafold'] + breakdown['colabfold']
+        expected_foldseek = len(searchable)
+        foldseek_passed.append(
+            f"✅ Foldseek: reference structures by source - "
+            f"PDB {len(breakdown['pdb'])}, AlphaFold {len(breakdown['alphafold'])}, "
+            f"ColabFold {len(breakdown['colabfold'])}, none {len(breakdown['none'])}"
+        )
+        if breakdown['none']:
+            foldseek_warnings.append(
+                f"⚠️  Foldseek: {len(breakdown['none'])} of {expected_count} genes have no reference "
+                f"structure and are not searched ({', '.join(breakdown['none'][:5])}). "
+                f"Enable colabfold to model them and reach {expected_count}."
+            )
+    else:
+        # Without the structures directory the old genome-wide expectation is all
+        # there is to go on.
+        expected_foldseek = expected_count
+
     if not os.path.isdir(foldseek_dir):
         foldseek_errors.append("❌ Foldseek: foldseek_results directory not found")
     else:
-        # Expect subfolders (one per protein) and inside each a *_foldseek_results.tsv
+        # Expect subfolders (one per searched protein) and inside each a *_foldseek_results.tsv
         subdirs = [d for d in os.listdir(foldseek_dir) if os.path.isdir(os.path.join(foldseek_dir, d))]
-        # exclude nothing else; json is file, not dir
-        if len(subdirs) != expected_count:
-            foldseek_warnings.append(f"⚠️  Foldseek: Expected {expected_count} result folders, found {len(subdirs)}")
+        if len(subdirs) != expected_foldseek:
+            foldseek_warnings.append(
+                f"⚠️  Foldseek: Expected {expected_foldseek} result folders, found {len(subdirs)}"
+            )
 
         # Find all foldseek result TSVs recursively
         foldseek_tsvs = glob.glob(os.path.join(foldseek_dir, "**", "*_foldseek_results.tsv"), recursive=True)
         nonempty_foldseek_tsvs = [p for p in foldseek_tsvs if _is_nonempty_file(p)]
 
-        if len(nonempty_foldseek_tsvs) < expected_count:
-            # si hay menos, es fallo del módulo foldseek
+        if len(nonempty_foldseek_tsvs) < expected_foldseek:
             foldseek_errors.append(
-                f"❌ Foldseek: Expected at least {expected_count} non-empty *_foldseek_results.tsv, found {len(nonempty_foldseek_tsvs)}"
+                f"❌ Foldseek: Expected at least {expected_foldseek} non-empty *_foldseek_results.tsv "
+                f"(one per gene with a reference structure), found {len(nonempty_foldseek_tsvs)}"
             )
         else:
-            foldseek_passed.append(f"✅ Foldseek: Found {len(nonempty_foldseek_tsvs)} non-empty result TSVs")
+            foldseek_passed.append(
+                f"✅ Foldseek: Found {len(nonempty_foldseek_tsvs)} non-empty result TSVs "
+                f"for {expected_foldseek} searched genes"
+            )
 
-        # human_foldseek_dict.json
+        # human_foldseek_dict.json: one key per searched gene
         dict_path = os.path.join(foldseek_dir, "human_foldseek_dict.json")
         if not _is_nonempty_file(dict_path):
             foldseek_errors.append("❌ Foldseek: human_foldseek_dict.json not found or empty")
@@ -120,20 +205,48 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
                     foldseek_errors.append("❌ Foldseek: human_foldseek_dict.json is not a JSON dict")
                 else:
                     nkeys = len(d)
-                    # values "con contenido": no None / no vacío
-                    nonempty_vals = sum(1 for v in d.values() if v is not None and v != "" and v != [] and v != {})
-                    if nkeys != expected_count:
+                    # A gene whose search produced no hit is stored with None fields,
+                    # which is a result. An empty dict is not.
+                    with_hit = sum(
+                        1 for v in d.values()
+                        if isinstance(v, dict) and v.get('target_foldseek') is not None
+                    )
+                    if nkeys != expected_foldseek:
                         foldseek_errors.append(
-                            f"❌ Foldseek: human_foldseek_dict.json should have {expected_count} keys, found {nkeys}"
+                            f"❌ Foldseek: human_foldseek_dict.json should have {expected_foldseek} keys "
+                            f"(one per searched gene), found {nkeys}"
                         )
-                    elif nonempty_vals != expected_count:
+                    elif with_hit == 0 and expected_foldseek:
                         foldseek_errors.append(
-                            f"❌ Foldseek: human_foldseek_dict.json has {nonempty_vals}/{expected_count} keys with non-empty values"
+                            f"❌ Foldseek: human_foldseek_dict.json has {nkeys} keys but no gene has a hit"
                         )
                     else:
-                        foldseek_passed.append("✅ Foldseek: human_foldseek_dict.json has 20 keys with non-empty values")
+                        foldseek_passed.append(
+                            f"✅ Foldseek: human_foldseek_dict.json has {nkeys} keys, "
+                            f"{with_hit} with a human structural hit"
+                        )
             except Exception as e:
                 foldseek_errors.append(f"❌ Foldseek: Failed to parse human_foldseek_dict.json ({e})")
+
+        # ColabFold Foldseek outputs are a separate run with its own outputs; check
+        # them only when they exist, since colabfold is optional.
+        colabfold_dict = os.path.join(foldseek_dir, "human_foldseek_colabfold_dict.json")
+        if os.path.exists(colabfold_dict):
+            try:
+                with open(colabfold_dict, "r", encoding="utf-8") as fh:
+                    cb = json.load(fh)
+                if isinstance(cb, dict) and cb:
+                    foldseek_passed.append(
+                        f"✅ Foldseek (ColabFold): human_foldseek_colabfold_dict.json has {len(cb)} keys"
+                    )
+                else:
+                    foldseek_errors.append(
+                        "❌ Foldseek (ColabFold): human_foldseek_colabfold_dict.json is empty"
+                    )
+            except Exception as e:
+                foldseek_errors.append(
+                    f"❌ Foldseek (ColabFold): Failed to parse human_foldseek_colabfold_dict.json ({e})"
+                )
 
     # Commit foldseek results
     validation["passed"].extend(foldseek_passed)
@@ -223,12 +336,47 @@ def check_offtarget(offtarget_dir: str, validation: dict, expected_count: int = 
     if not os.path.isdir(species_dir):
         micro_errors.append("❌ Microbiome offtarget: species_blast_results directory not found")
     else:
-        # MGYG genome outputs
+        # Per-genome DIAMOND results are consolidated into a Parquet file and then
+        # deleted, which the manifest records as raw_tsv_cleanup. Counting the TSVs
+        # therefore reported zero on every completed run; the manifest is what says
+        # how many genomes were actually searched.
         genome_tsvs = glob.glob(os.path.join(species_dir, "MGYG*_offtarget_id*_cov*.tsv"))
+        manifest_paths = glob.glob(os.path.join(species_dir, "*_offtarget_manifest.json"))
 
-        if len(genome_tsvs) < min_microbiome_genomes:
+        if manifest_paths:
+            try:
+                with open(manifest_paths[0], "r", encoding="utf-8") as fh:
+                    micro_manifest = json.load(fh)
+                indexed = micro_manifest.get("indexed_representatives", 0)
+                with_hits = micro_manifest.get("representatives_with_hits", 0)
+                hit_rows = micro_manifest.get("hit_rows", 0)
+                genes_with_hits = micro_manifest.get("genes_with_hits", 0)
+                cleanup = micro_manifest.get("raw_tsv_cleanup", "not recorded")
+
+                if indexed < min_microbiome_genomes:
+                    micro_errors.append(
+                        f"❌ Microbiome offtarget: manifest reports {indexed} representatives searched, "
+                        f"expected ≥{min_microbiome_genomes}"
+                    )
+                else:
+                    micro_passed.append(
+                        f"✅ Microbiome offtarget: {indexed} representatives searched, "
+                        f"{with_hits} with hits, {hit_rows} hit rows, {genes_with_hits} genes with hits"
+                    )
+
+                if cleanup != "completed" and len(genome_tsvs) < min_microbiome_genomes:
+                    micro_warnings.append(
+                        f"⚠️  Microbiome offtarget: raw_tsv_cleanup is '{cleanup}' and only "
+                        f"{len(genome_tsvs)} per-genome TSVs remain"
+                    )
+            except Exception as e:
+                micro_errors.append(
+                    f"❌ Microbiome offtarget: Failed to parse {os.path.basename(manifest_paths[0])} ({e})"
+                )
+        elif len(genome_tsvs) < min_microbiome_genomes:
             micro_errors.append(
-                f"❌ Microbiome offtarget: Expected ≥{min_microbiome_genomes} completed MGYG result files, found {len(genome_tsvs)}"
+                f"❌ Microbiome offtarget: no consolidation manifest, and only {len(genome_tsvs)} "
+                f"per-genome result files found (expected ≥{min_microbiome_genomes})"
             )
         else:
             micro_passed.append(f"✅ Microbiome offtarget: Found {len(genome_tsvs)} completed MGYG genome TSVs")
@@ -565,7 +713,8 @@ def validate_module_outputs(organism_dir):
 
     # Check structures
     structures_dir = os.path.join(organism_dir, "structures")
-    expected_count_struct = len(EXPECTED_GENES) - 1  # One gene lacks structure in test 
+    # No fixed 'one gene lacks a structure' assumption: which genes have one is
+    # read from the run itself, below.
 
     if os.path.exists(structures_dir):
         final_structure = os.path.join(structures_dir, "test_final_structure_summary.tsv")
@@ -574,12 +723,21 @@ def validate_module_outputs(organism_dir):
         else:
             validation["warnings"].append("⚠️  Structure analysis incomplete")
 
+        # Every gene gets a directory, including one with no structure: the gene
+        # that lacks a structure still has its summary and pockets folder. The
+        # expectation used to be len(EXPECTED_GENES) - 1, which confused 'no
+        # structure' with 'no directory' and reported a warning on a correct run.
+        # A missing directory means the per-gene setup did not run, so it is an error.
         protein_dirs = [d for d in os.listdir(structures_dir)
                        if os.path.isdir(os.path.join(structures_dir, d)) and d.startswith('MPN_')]
-        if len(protein_dirs) == expected_count_struct:
+        if len(protein_dirs) == expected_count:
             validation["passed"].append(f"✅ Protein structure directories: {len(protein_dirs)} found")
         else:
-            validation["warnings"].append(f"⚠️  Protein directories: {len(protein_dirs)}/{expected_count} found")
+            missing_dirs = sorted(set(EXPECTED_GENES) - set(protein_dirs))
+            validation["failed"].append(
+                f"❌ Protein directories: {len(protein_dirs)}/{expected_count} found"
+                + (f", missing {missing_dirs[:5]}" if missing_dirs else "")
+            )
 
         missing_pdb = []
         missing_fpocket = []
@@ -594,20 +752,31 @@ def validate_module_outputs(organism_dir):
                 if not glob.glob(os.path.join(gene_dir, "pockets", "*_p2rank")):
                     missing_p2rank.append(gene)
 
-        if len(missing_pdb) < expected_count_struct:
-            validation["passed"].append("✅ Expected proteins have PDB structures")
-        else:
-            validation["warnings"].append(f"⚠️  {len(missing_pdb)} proteins missing PDB: {missing_pdb[:3]}")
+        # These used to pass whenever fewer than 19 genes were missing a result, so
+        # 18 of 20 genes could have no structure, no fpocket and no p2rank and all
+        # three still reported success. What is actually expected is that the genes
+        # missing a result are exactly the genes with no reference structure.
+        breakdown = reference_structure_breakdown(organism_dir)
+        without_structure = set(breakdown['none']) if breakdown else set()
 
-        if len(missing_fpocket) < expected_count_struct:
-            validation["passed"].append("✅ Expected proteins have fpocket results")
-        else:
-            validation["warnings"].append(f"⚠️  {len(missing_fpocket)} proteins missing fpocket: {missing_fpocket[:3]}")
-
-        if len(missing_p2rank) < expected_count_struct:
-            validation["passed"].append("✅ Expected proteins have p2rank results")
-        else:
-            validation["warnings"].append(f"⚠️  {len(missing_p2rank)} proteins missing p2rank: {missing_p2rank[:3]}")
+        for label, missing in (
+            ('PDB structures', missing_pdb),
+            ('fpocket results', missing_fpocket),
+            ('p2rank results', missing_p2rank),
+        ):
+            unexpected = sorted(set(missing) - without_structure)
+            if unexpected:
+                validation["failed"].append(
+                    f"❌ {len(unexpected)} protein(s) with a reference structure are missing "
+                    f"{label}: {unexpected[:5]}"
+                )
+            elif missing:
+                validation["passed"].append(
+                    f"✅ Expected proteins have {label} "
+                    f"({len(missing)} without, all lacking a reference structure)"
+                )
+            else:
+                validation["passed"].append(f"✅ All {expected_count} proteins have {label}")
 
     else:
         validation["failed"].append("❌ Structures directory not found")
@@ -642,7 +811,8 @@ def validate_module_outputs(organism_dir):
 
     # Check offtarget
     offtarget_dir = os.path.join(organism_dir, "offtarget")
-    check_offtarget(offtarget_dir, validation, expected_count=expected_count, min_microbiome_genomes=4744)
+    check_offtarget(offtarget_dir, validation, expected_count=expected_count, min_microbiome_genomes=4744,
+                    organism_dir=organism_dir)
 
 
     # Check essentiality
