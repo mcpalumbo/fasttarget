@@ -1237,7 +1237,12 @@ def run_ubiquitous(sbml_file, out_dir):
     if not os.path.exists(out_dir):
         raise FileNotFoundError(f"Directory '{out_dir}' not found.")
 
-    ubiquitous_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/']
+    # sys.executable, not 'python3': the latter resolves through PATH to whichever
+    # interpreter comes first, which is the base conda install rather than the
+    # environment FastTarget is running in. SNDG then imported that interpreter's
+    # networkx, and nx.read_gpickle was removed in networkx 3.0, so the step failed
+    # with an AttributeError even though the environment's own networkx supports it.
+    ubiquitous_command = [sys.executable, '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/']
     run_bash_command(ubiquitous_command)
     print(f'Ubiquitous compounds file generated.')
   
@@ -1261,7 +1266,8 @@ def run_sbml_to_sif(sbml_file, ubiquitous_file, out_dir):
     if not os.path.exists(out_dir):
         raise FileNotFoundError(f"Directory '{out_dir}' not found.")
 
-    sif_command = ['python3', '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/', '-f', ubiquitous_file]
+    # Same interpreter as the run, for the reason given in run_ubiquitous.
+    sif_command = [sys.executable, '-m', 'SNDG.Network.SBMLProcessor', '-i', sbml_file, '-o', f'{out_dir}/', '-f', ubiquitous_file]
     run_bash_command(sif_command)
     print(f'Sif file generated.')
 
