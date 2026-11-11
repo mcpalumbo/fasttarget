@@ -444,7 +444,7 @@ def conservation_module(config, databases_path, output_path, cpus):
                     genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'], container_engine=config.container_engine)
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
-                    df_cc = genome.corecruncher_output(output_path, organism_name)
+                    df_cc = genome.corecruncher_output(output_path, organism_name, core_threshold=min_core_freq)
                     module_tables.append(df_cc)
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')

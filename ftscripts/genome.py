@@ -636,7 +636,10 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         if os.path.exists(gff_dir):
             if not files.file_check(genes_csv_file):
                 print('Running Roary')
-                programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=99, identity=95, cpus=cpus, container_engine=container_engine)
+                # These used to be hardcoded to 99/95, so core.min_core_freq and
+                # core.min_identity from the config had no effect on the Roary run.
+                print(f'Roary parameters: core frequency {core_threshold}%, identity {identity}%')
+                programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=core_threshold, identity=identity, cpus=cpus, container_engine=container_engine)
                 print('Finished')
             else:
                 print(f'Roary output file already exists: {genes_csv_file}.')
@@ -651,7 +654,9 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
                 print('Running CoreCruncher')
-                programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=99, identity=95, container_engine=container_engine)
+                # Same here: the config values were received and then ignored.
+                print(f'CoreCruncher parameters: core frequency {core_threshold}%, identity {identity}%')
+                programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=core_threshold, identity=identity, container_engine=container_engine)
                 print('Finished')
             else:
                 print(f'CoreCruncher output file already exists: {cc_output_file}.')
@@ -725,7 +730,7 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
 
     return roary_table
 
-def corecruncher_output(output_path, organism_name):
+def corecruncher_output(output_path, organism_name, core_threshold=None):
     
     """
     Process the output from CoreCruncher for the given organism.
@@ -765,7 +770,11 @@ def corecruncher_output(output_path, organism_name):
                     if isinstance(value, str) and value.startswith(ref_genome):
                         core_locus_tag.append(value.split('&')[1])
 
-        print(f'CoreCruncher total core genes (> 90% strains): {core_total}')
+        # CoreCruncher already applied the frequency threshold when it ran, so this
+        # is only a label. It used to say 90% unconditionally, which did not match
+        # the value the run actually used.
+        threshold_label = f'{core_threshold}%' if core_threshold is not None else 'the configured frequency'
+        print(f'CoreCruncher total core genes (> {threshold_label} strains): {core_total}')
         print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')
 
         corecruncher_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_corecruncher',conservation_dir)

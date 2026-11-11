@@ -119,7 +119,8 @@ print('[2] Parsing CoreCruncher results...')
 print('')
 df_cc = genome.corecruncher_output(
     work_dir,
-    '${organism_name}'
+    '${organism_name}',
+    core_threshold=${min_core_freq}
 )
 
 print(f'CoreCruncher analysis completed')
