@@ -102,6 +102,34 @@ def load_config(config_path):
         config = yaml.safe_load(file)
     return config
 
+def as_integer(value):
+    """
+    Interpret a configuration value as an integer, or report that it is not one.
+
+    int() was used directly, which truncates: a tax_id of 1.5 became 1, the NCBI
+    root node, and the run queried that instead of failing. A value is accepted
+    only when nothing is lost, so 2104, '2104' and 2104.0 are the same number and
+    2104.5 is not a number of a taxon.
+
+    :param value: Value from the configuration.
+    :return: The integer, or None when the value is not an exact integer.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        return int(number) if number.is_integer() else None
+    return None
+
+
 def validate_config(config):
     """
     Validate the configuration dictionary with comprehensive checks.
@@ -146,12 +174,11 @@ def validate_config(config):
         # Validate tax IDs (must be positive integers)
         for tax_field in ['tax_id', 'strain_taxid']:
             if tax_field in org:
-                try:
-                    tax_val = int(org[tax_field])
-                    if tax_val <= 0:
-                        errors.append(f"Organism {tax_field} must be a positive integer (got {tax_val})")
-                except (ValueError, TypeError):
+                tax_val = as_integer(org[tax_field])
+                if tax_val is None:
                     errors.append(f"Organism {tax_field} must be an integer (got {org[tax_field]})")
+                elif tax_val <= 0:
+                    errors.append(f"Organism {tax_field} must be a positive integer (got {tax_val})")
         
         # Validate GBK file exists
         if 'gbk_file' in org:
@@ -165,8 +192,10 @@ def validate_config(config):
     
     # Validate CPUs
     if 'cpus' in config and config['cpus'] is not None:
-        try:
-            cpus = int(config['cpus'])
+        cpus = as_integer(config['cpus'])
+        if cpus is None:
+            errors.append(f"CPUs must be an integer or None (got {config['cpus']})")
+        else:
             available = os.cpu_count()
             if cpus < 1:
                 errors.append(f"CPUs must be at least 1 (got {cpus})")
@@ -178,9 +207,7 @@ def validate_config(config):
                     f"⚠️  Warning: cpus ({cpus}) exceeds the {available} CPUs detected. "
                     f"This may slow the run down rather than speed it up."
                 )
-        except (ValueError, TypeError):
-            errors.append(f"CPUs must be an integer or None (got {config['cpus']})")
-    
+
     #Validate container engine
     if 'container_engine' in config:
         engine = config['container_engine']
