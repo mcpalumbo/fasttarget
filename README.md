@@ -374,6 +374,9 @@ The `config.yml` file is the **central configuration file** for this repository.
    - `core.min_identity`: Minimum percentage identity for core genome analysis (0-100). Example: `95` for 95% identity.
    - `core.min_core_freq`: Minimum frequency for a gene to be considered core (0-100). Example: `99` means gene must be present in 99% of genomes.
 
+   Both values are recorded in a `.manifest.json` file next to each output; see
+   [Changing parameters on an existing output directory](#changing-parameters-on-an-existing-output-directory).
+
 7. **Metabolism:**
    
    **Option A: Using Pathway Tools files (metabolism-PathwayTools):**
@@ -502,6 +505,40 @@ limits. Global RMSD and identity do not filter transfers. `download_cif` accepts
 `refresh_cache: True` forces new API downloads. With `strict_errors: True`, execution
 errors stop the pipeline after available AlphaFill outputs are saved. Missing
 AlphaFill entries remain valid results. Nextflow integration is not yet implemented.
+
+### Changing parameters on an existing output directory
+
+FastTarget resumes by reusing outputs that are already on disk, which is what makes
+a re-run cheap. Steps whose results depend on a config value also record the values
+they used, in a `<output>.manifest.json` file next to the output, so a changed
+parameter is noticed instead of being quietly ignored.
+
+Cheap results are rebuilt for you, since they only re-read a file that is already
+there:
+
+| Output | Rebuilt when you change |
+|---|---|
+| `conservation/core_roary.tsv` | `core.min_core_freq` |
+| `essentiality/hit_in_deg.tsv` | `deg.deg_identity_filter`, `deg.deg_coverage_filter` |
+| `localization/psortb_localization.tsv` | `psortb.gram_type` |
+
+Expensive results are never rebuilt automatically. If the recorded parameters no
+longer match, the run stops and names what to remove, so that hours of computation
+are never discarded on your behalf:
+
+| Output | Stops when you change |
+|---|---|
+| `conservation/roary_output/results/` | `core.min_core_freq`, `core.min_identity` |
+| `conservation/corecruncher_output/` | `core.min_core_freq`, `core.min_identity` |
+| `localization/*_psortb_*.txt` | `psortb.gram_type` |
+| `structures/<name>_final_structure_summary.tsv` | `structures.pocket_full_mode`, `structures.uniparc_fallback`, the ColabFold options |
+
+Removing a structure summary does not discard the downloaded PDB and AlphaFold
+files, so rebuilding it does not download them again.
+
+Outputs produced by an earlier version of FastTarget have no manifest. Their
+parameters are unknown rather than wrong, so they are reused with a warning; delete
+them if you are unsure what they were built with.
 
 ## Running the FastTarget Pipeline
 
