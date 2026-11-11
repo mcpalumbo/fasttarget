@@ -249,70 +249,65 @@ def summarize_by_gene(species_hits, locus_tags):
     return pd.DataFrame(rows)
 
 
-def count_classified(data, rank):
-    """
-    Count classified taxa for a taxonomy rank.
+def taxonomy_keys(data, rank):
+    """Use the complete classified path, as in the main microbiome parser."""
+    columns = TAXONOMY_RANKS[:TAXONOMY_RANKS.index(rank) + 1]
+    paths = data[columns].fillna(UNCLASSIFIED)
+    classified = ~paths.apply(lambda col: col.str.lower().isin(['unclassified', ''])).any(axis=1)
+    keys = pd.Series(UNCLASSIFIED, index=data.index, dtype=str)
+    if classified.any():
+        keys.loc[classified] = paths.loc[classified].apply(';'.join, axis=1)
+    return keys
 
-    :param data: Hit table subset.
-    :param rank: Taxonomy rank column to count.
-    :return: Number of non-unclassified taxa.
-    """
-    if data.empty:
-        return 0
-    return data.loc[data[rank] != UNCLASSIFIED, rank].nunique()
+
+def count_classified(data, rank):
+    """Count distinct classified lineages at the given rank."""
+    keys = taxonomy_keys(data, rank)
+    return keys[keys.ne(UNCLASSIFIED)].nunique()
+
+
+def taxon_labels(keys):
+    """Show short names, qualifying ambiguous names with their parent path."""
+    paths = pd.Series(keys, dtype=str).drop_duplicates()
+    names = paths.str.rsplit(';', n=1).str[-1]
+    return dict(zip(paths, names.where(~names.duplicated(keep=False), paths)))
 
 
 def summarize_rank(species_hits, taxonomy, locus_tags, rank):
-    """
-    Summarize hits and penetrance for a taxonomy rank.
-
-    :param species_hits: Hit table enriched with taxonomy columns.
-    :param taxonomy: Representative taxonomy DataFrame.
-    :param locus_tags: Requested locus tags.
-    :param rank: Taxonomy rank to summarize.
-    :return: Summary DataFrame for the selected taxonomy rank.
-    """
-    # Use the displayed taxon name for readable plots and TSVs. The main pipeline
-    # uses hierarchical paths when strict taxonomy group identity is required.
+    """Summarize distinct representatives by locus and taxonomy path."""
     total_column = f"total_{rank}_representatives"
     percent_column = f"percent_{rank}_representatives_hit"
     columns = [
-        "gene",
-        rank,
-        "hit_representatives",
-        "percent_of_gene_hits",
-        total_column,
-        percent_column,
-        "mean_pident",
-        "sd_pident",
-        "mean_qcovhsp",
-        "sd_qcovhsp",
+        "gene", rank, "taxonomy_group_id", "taxon_label",
+        "hit_representatives", "percent_of_gene_hits", total_column,
+        percent_column, "mean_pident", "sd_pident", "mean_qcovhsp", "sd_qcovhsp",
     ]
-    totals = taxonomy.groupby(rank)["representative_genome_id"].nunique()
+    taxonomy = taxonomy.assign(taxonomy_group_id=taxonomy_keys(taxonomy, rank))
+    totals = taxonomy.groupby("taxonomy_group_id")["representative_genome_id"].nunique()
+    hits = species_hits.assign(taxonomy_group_id=taxonomy_keys(species_hits, rank))
+    labels = taxon_labels([*totals.index, *hits["taxonomy_group_id"].unique()])
     rows = []
-    for gene in locus_tags:
-        gene_hits = species_hits[species_hits["gene"] == gene]
-        gene_total = gene_hits["representative_genome_id"].nunique()
-        if gene_hits.empty:
+    for gene, gene_hits in hits.groupby("gene", sort=False):
+        if gene not in locus_tags:
             continue
-        grouped = gene_hits.groupby(rank, dropna=False)
-        for taxon, group in grouped:
-            hit_representatives = group["representative_genome_id"].nunique()
-            total_representatives = int(totals.get(taxon, 0))
-            rows.append(
-                {
-                    "gene": gene,
-                    rank: taxon,
-                    "hit_representatives": hit_representatives,
-                    "percent_of_gene_hits": percentage(hit_representatives, gene_total),
-                    total_column: total_representatives,
-                    percent_column: percentage(hit_representatives, total_representatives),
-                    "mean_pident": group["pident"].mean(),
-                    "sd_pident": group["pident"].std(),
-                    "mean_qcovhsp": group["qcovhsp"].mean(),
-                    "sd_qcovhsp": group["qcovhsp"].std(),
-                }
-            )
+        gene_total = gene_hits["representative_genome_id"].nunique()
+        for key, group in gene_hits.groupby("taxonomy_group_id"):
+            n_hits = group["representative_genome_id"].nunique()
+            total = totals.get(key, 0) if key != UNCLASSIFIED else None
+            rows.append({
+                "gene": gene,
+                rank: key.rsplit(';', 1)[-1],
+                "taxonomy_group_id": key,
+                "taxon_label": labels[key],
+                "hit_representatives": n_hits,
+                "percent_of_gene_hits": percentage(n_hits, gene_total),
+                total_column: total,
+                percent_column: percentage(n_hits, total) if total else None,
+                "mean_pident": group["pident"].mean(),
+                "sd_pident": group["pident"].std(),
+                "mean_qcovhsp": group["qcovhsp"].mean(),
+                "sd_qcovhsp": group["qcovhsp"].std(),
+            })
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -410,6 +405,7 @@ def plot_composition_stacked_bar(summary_rank_df, rank, locus_tags, threshold, o
         return
     plt = prepare_matplotlib(outdir)
     data = summary_rank_df.copy()
+    data[rank] = data["taxon_label"]
     keep_taxa = set(
         data.loc[data["percent_of_gene_hits"] >= threshold, rank].astype(str)
     )
@@ -442,7 +438,7 @@ def plot_composition_stacked_bar(summary_rank_df, rank, locus_tags, threshold, o
     x = np.arange(len(pivot))
     for taxon in ordered_columns:
         values = pivot[taxon].to_numpy()
-        ax.bar(x, values, bottom=bottom, label=taxon, color=colors[taxon], width=0.7)
+        ax.bar(x, values, bottom=bottom, label=f"No {rank} assigned" if taxon == UNCLASSIFIED else taxon, color=colors[taxon], width=0.7)
         bottom += values
     ax.set_xticks(x)
     ax.set_xticklabels(pivot.index, rotation=45, ha="right")
@@ -499,8 +495,10 @@ def plot_family_penetrance_heatmap(summary_family, locus_tags, min_hits, min_cov
     :param min_coverage: Minimum family coverage percentage for inclusion.
     :param outdir: Output directory.
     """
+    summary_family = summary_family.loc[summary_family["taxonomy_group_id"].ne(UNCLASSIFIED)].copy()
     if summary_family.empty:
         return
+    summary_family["family"] = summary_family["taxon_label"]
     plt = prepare_matplotlib(outdir)
     selected = summary_family[
         (summary_family["hit_representatives"] >= min_hits)
@@ -521,7 +519,7 @@ def plot_family_penetrance_heatmap(summary_family, locus_tags, min_hits, min_cov
         .index
     )
     matrix = (
-        selected.pivot_table(
+        summary_family.pivot_table(
             index="family",
             columns="gene",
             values="percent_family_representatives_hit",
@@ -778,16 +776,20 @@ def write_interactive_html(
             )
             plotly_loaded = True
 
-            family_count = gene_hits["family"].nunique()
+            family_keys = taxonomy_keys(gene_hits, "family")
+            family_labels = taxon_labels(family_keys)
+            family_labels[UNCLASSIFIED] = "No family assigned"
+            gene_hits = gene_hits.assign(family_label=family_keys.map(family_labels))
+            family_count = gene_hits["family_label"].nunique()
             if family_count <= 12:
                 fig_box = px.violin(
                     gene_hits,
-                    x="family",
+                    x="family_label",
                     y="pident",
-                    color="family",
+                    color="family_label",
                     box=True,
                     points="all",
-                    labels={"pident": "% identity", "family": "family"},
+                    labels={"pident": "% identity", "family_label": "family"},
                 )
             else:
                 fig_box = go.Figure()
