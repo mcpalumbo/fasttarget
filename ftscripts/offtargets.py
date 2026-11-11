@@ -2031,8 +2031,21 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
 
     foldseek_dict_file = os.path.join(foldseek_results_path, 'human_foldseek_dict.json')
 
-    if not files.file_check(foldseek_dict_file):
-        
+    # An empty mapping legitimately produces '{}', which file_check sees as content,
+    # so a run made before any structure existed left a 2-byte file that every later
+    # run reused: Foldseek produced 19 result files and all FS_ columns stayed empty.
+    # Recording which loci the parse covered makes the appearance of structures a
+    # cache miss.
+    parse_parameters = {
+        'loci': len(map_foldseek or {}),
+        'result_set': files.fileset_fingerprint(
+            [paths[0] for paths in (map_foldseek or {}).values() if paths]
+        ),
+    }
+
+    if not files.manifest_matches(foldseek_dict_file, parse_parameters,
+                                  label='human_foldseek_dict.json'):
+
         print('\nParsing Foldseek results...')
         results_foldseek_dict = {}
         
@@ -2041,6 +2054,7 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
             print('No Foldseek results to parse (empty mapping)')
             with open(foldseek_dict_file, 'w') as f:
                 json.dump({}, f)
+            files.write_manifest(foldseek_dict_file, parse_parameters)
             return {}
         
         # Parse results for each locus_tag
@@ -2151,6 +2165,7 @@ def foldseek_human_parser (output_path, organism_name, map_foldseek):
         
         # Save results
         files.dict_to_json(foldseek_results_path, 'human_foldseek_dict.json', results_foldseek_dict)
+        files.write_manifest(foldseek_dict_file, parse_parameters)
         print(f'\nFoldseek results saved to {foldseek_dict_file}')
         print(f'Total locus_tags with matches: {len([v for v in results_foldseek_dict.values() if v["target_foldseek"] is not None])}')
     else:
@@ -2320,10 +2335,24 @@ def merge_foldseek_data (output_path, organism_name):
     foldseek_res_file = os.path.join(foldseek_results_path, 'human_foldseek_dict.json')
     foldseek_mapped_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.json')
 
-    if not files.file_check(foldseek_mapped_file):
-        if files.file_check(foldseek_res_file):  
+    # Third cache in the Foldseek chain, and the same trap as the other two: a run
+    # made before any structure existed left '{}' here, which file_check accepts as
+    # content, so the reformat was skipped even once the parsed dict held 19 hits.
+    # Keyed on the dict it reformats, a changed source rebuilds it.
+    source_dict = files.json_to_dict(foldseek_res_file) if files.file_check(foldseek_res_file) else None
+    merge_parameters = {
+        'source_genes': len(source_dict or {}),
+        'source_hits': sum(
+            1 for value in (source_dict or {}).values()
+            if isinstance(value, dict) and value.get('target_foldseek') is not None
+        ),
+    }
 
-            results_foldseek_dict = files.json_to_dict(foldseek_res_file)
+    if not files.manifest_matches(foldseek_mapped_file, merge_parameters,
+                                  label=f'{organism_name}_final_foldseek_results.json'):
+        if source_dict is not None:
+
+            results_foldseek_dict = source_dict
 
             mapped_dict = {}
 
@@ -2348,6 +2377,7 @@ def merge_foldseek_data (output_path, organism_name):
                 }
 
             files.dict_to_json(offtargets_dir, f'{organism_name}_final_foldseek_results.json', mapped_dict)
+            files.write_manifest(foldseek_mapped_file, merge_parameters)
             print(f'\nFoldseek data merged and saved to {foldseek_mapped_file}')
             print(f'Total genes with foldseek results: {len([v for v in mapped_dict.values() if v["target"] is not None])}')
         else:
@@ -2432,7 +2462,19 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
     # Create a DataFrame with final results
     final_foldseek_file = os.path.join(offtargets_dir, f'{organism_name}_final_foldseek_results.tsv')
 
-    if not files.file_check(final_foldseek_file):
+    # Cached on existence alone, this table kept reporting 'No hit' for every gene
+    # once it had been built from an empty mapping. Keyed on the mapping it was
+    # built from, a mapping that has since gained hits rebuilds it.
+    table_parameters = {
+        'mapped_genes': len(mapped_dict or {}),
+        'genes_with_hit': sum(
+            1 for value in (mapped_dict or {}).values()
+            if isinstance(value, dict) and value.get('target') is not None
+        ),
+    }
+
+    if not files.manifest_matches(final_foldseek_file, table_parameters,
+                                  label=f'{organism_name}_final_foldseek_results.tsv'):
 
         rows = []
 
@@ -2460,9 +2502,12 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
         })
 
         final_foldseek_df.to_csv(final_foldseek_file, sep='\t', index=False)
-   
+        files.write_manifest(final_foldseek_file, table_parameters)
+
+        hits = table_parameters['genes_with_hit']
         print(f'Foldseek final results saved to {final_foldseek_file}.')
-    
+        print(f'Genes with a human structural hit: {hits} of {len(all_locus_tags)}')
+
     else:
         print(f'Foldseek final results in {final_foldseek_file}.')
         final_foldseek_df = pd.read_csv(final_foldseek_file, sep='\t')
