@@ -12,6 +12,8 @@ from BCBio import GFF
 import sys
 import subprocess
 import logging
+import json
+import tempfile
 
 
 def gbk_to_gff3(gbk_file, gff_dir):
@@ -222,64 +224,66 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
         with open(output_file_ffn, 'w') as ffn:
             ffn.write("\n".join(nucleotide_records))
 
-def ref_genome_files (gbk_file, output_path, organism_name, container_engine='docker'):
+def ref_genome_files(gbk_file, output_path, organism_name, container_engine='docker'):
+    """Prepare a reference generation, or reuse only byte-verified artifacts.
 
+    Incompatible/legacy generations require a new organism output directory:
+    rebuilding these files alone cannot invalidate all downstream caches.
     """
-    Generates the .fna, .faa, .ffn, and .gff3 files for a reference GenBank file.
+    if not os.path.isfile(gbk_file):
+        raise FileNotFoundError(f"Reference GenBank not found: {gbk_file}")
+    os.makedirs(output_path, exist_ok=True)
+    names = {ext: f'{organism_name}.{ext}' for ext in ('gbk', 'fna', 'faa', 'ffn', 'gff')}
+    manifest_path = os.path.join(output_path, f'{organism_name}.reference.json')
+    source_hash = files.sha256_file(gbk_file)
+    expected = {'schema': 1, 'source_sha256': source_hash,
+                'container_engine': container_engine}
+    existing = any(os.path.lexists(os.path.join(output_path, name)) for name in names.values())
+    if existing or os.path.lexists(manifest_path):
+        try:
+            with open(manifest_path) as handle:
+                manifest = json.load(handle)
+            valid = isinstance(manifest, dict) and all(manifest.get(k) == v for k, v in expected.items())
+            valid = valid and manifest.get('artifacts') == {
+                name: files.sha256_file(os.path.join(output_path, name))
+                for name in names.values()
+            }
+        except (OSError, ValueError):
+            valid = False
+        if not valid:
+            raise RuntimeError(
+                'Reference artifacts are unverified or incompatible with the current GenBank. '
+                'Use a new organism output directory to avoid reusing stale downstream results. '
+                f'Existing files were preserved: {output_path}'
+            )
+        logging.info('Reusing verified reference artifacts in %s', output_path)
+        return
 
-    :param gbk_file: GenBank file path.
-    :param output_path: Directory where files will be saved.
-    :param organism_name: Name of the organism.
-    :param container_engine: Container engine to use ('docker' or 'singularity').
+    # Publish the completion manifest last; interrupted publication cannot be reused.
+    with tempfile.TemporaryDirectory(prefix='.reference-', dir=output_path) as staging:
+        staged = {ext: os.path.join(staging, name) for ext, name in names.items()}
+        shutil.copyfile(gbk_file, staged['gbk'])
+        if files.sha256_file(staged['gbk']) != source_hash:
+            raise RuntimeError('Reference GenBank changed during preparation')
+        gbk_to_fasta(staged['gbk'], output_file_fna=staged['fna'],
+                     output_file_faa=staged['faa'], output_file_ffn=staged['ffn'])
+        try:
+            programs.run_genbank2gff3(staged['gbk'], staging, container_engine=container_engine)
+            if not files.file_check(staged['gff']):
+                raise RuntimeError('GenBank conversion produced no nonempty GFF')
+        except Exception as error:
+            logging.warning('Container conversion failed; trying Python fallback: %s', error)
+            if os.path.exists(staged['gff']):
+                os.remove(staged['gff'])
+            gbk_to_gff3(staged['gbk'], staging)
+        if not all(files.file_check(path) for path in staged.values()):
+            raise RuntimeError('Reference preparation produced missing or empty artifacts')
+        manifest = dict(expected)
+        manifest['artifacts'] = {names[ext]: files.sha256_file(path) for ext, path in staged.items()}
+        for ext, path in staged.items():
+            os.replace(path, os.path.join(output_path, names[ext]))
+        files.atomic_write_json(manifest, manifest_path)
 
-    """
-
-    ref_gbk = os.path.join(output_path, f'{organism_name}.gbk')
-
-    if os.path.exists(gbk_file):
-        shutil.copy(gbk_file, ref_gbk)
-        print(f'GenBank file saved to {output_path}')
-    else:
-        print('Gbk file not found.')
-
-    if os.path.exists(ref_gbk):
-        output_file_fna_path = os.path.join(output_path, f'{organism_name}.fna')
-        output_file_faa_path = os.path.join(output_path, f'{organism_name}.faa')
-        output_file_ffn_path = os.path.join(output_path, f'{organism_name}.ffn')
-        output_file_gff_path = os.path.join(output_path, f'{organism_name}.gff')
-
-        if not files.file_check(output_file_fna_path) or not files.file_check(output_file_faa_path) or not files.file_check(output_file_ffn_path):
-            gbk_to_fasta(ref_gbk, output_file_fna=output_file_fna_path, output_file_faa=output_file_faa_path, output_file_ffn=output_file_ffn_path)
-            print(f'fna, faa and ffn files saved to {output_path}')
-        else:
-            print(f'fna, faa and ffn files already exist in {output_path}')
-
-        if not files.file_check(output_file_gff_path):
-            try:
-                programs.run_genbank2gff3(ref_gbk, output_path, container_engine=container_engine)
-                if os.path.exists(output_file_gff_path):
-                    print(f'Gff3 file saved in {output_path}')
-                else:
-                    raise FileNotFoundError(f"Container succeeded but GFF file not found")
-                    
-            except Exception as e:
-                logging.warning(f"Container method failed, trying Python fallback: {e}")
-                try:
-                    gbk_to_gff3(ref_gbk, output_path)
-                    if os.path.exists(output_file_gff_path):
-                        print(f'Gff3 file saved using Python fallback in {output_path}')
-                    else:
-                        logging.error(f"GFF file was not created at {output_file_gff_path}")
-                        print(f'WARNING: GFF file could not be created. Some features may not work.')
-                except Exception as e2:
-                    logging.exception(f"Python fallback also failed: {e2}")
-                    print(f'WARNING: GFF file could not be created. Some features may not work.')
-        else:
-            print(f'Gff3 file already exists in {output_path}')  
-
-    else:
-        print('Reference Gbk file not found.')
-    
 def id_to_locustag_gff(file_path:str, ids, fix=False):
     """
 
