@@ -152,10 +152,13 @@ def process_chokepoint_ptools(output_path, organism_name, chokepoint_file):
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
     chokepoint_path = os.path.join(metabolism_dir, f'{organism_name}_chokepoints.txt')
 
-    if os.path.exists(chokepoint_file):
-        shutil.copy(chokepoint_file, chokepoint_path)
-    else:
-        logging.error(f"Chokepoint file '{chokepoint_file}' not found.")
+    # The error used to be logged and the copy from a previous run read instead,
+    # so a wrong path in the config produced the previous organism's chokepoints
+    # without a word.
+    if not os.path.exists(chokepoint_file):
+        raise FileNotFoundError(f"Chokepoint file '{chokepoint_file}' not found.")
+
+    shutil.copy(chokepoint_file, chokepoint_path)
 
     with open(chokepoint_path, 'r') as file:
         text = file.read()
@@ -172,14 +175,17 @@ def process_chokepoint_ptools(output_path, organism_name, chokepoint_file):
     consuming_match = re.search(consuming_pattern, text)
     consuming_reactions = consuming_match.group(1).strip().split('\n') if consuming_match else []
 
-    producing_list = []
-    for reaction in producing_reactions:
-        producing_list.append(reaction.split('  ', 1)[0])
-        
-    consuming_list = []
-    for reaction in consuming_reactions:
-        consuming_list.append(reaction.split('  ', 1)[0])
-    
+    # ''.split('\n') is [''], so an empty section used to yield one chokepoint
+    # named '', and the counts printed below reported it as a real one.
+    producing_list = [
+        reaction.split('  ', 1)[0] for reaction in producing_reactions
+        if reaction.strip()
+    ]
+    consuming_list = [
+        reaction.split('  ', 1)[0] for reaction in consuming_reactions
+        if reaction.strip()
+    ]
+
     producing_set = set(producing_list)
     consuming_set = set(consuming_list)
     
@@ -215,10 +221,12 @@ def process_genes_smarttable(output_path, organism_name, smarttable_file):
     metabolism_dir = os.path.join(output_path, organism_name, 'metabolism')
     smarttable_path = os.path.join(metabolism_dir, f'{organism_name}_smarttable.txt')
 
-    if os.path.exists(smarttable_file):
-        shutil.copy(smarttable_file, smarttable_path)
-    else:
-        logging.error(f"Smarttable file '{smarttable_file}' not found.")
+    # As for the chokepoint file: reading the previous run's copy is worse than
+    # stopping, because the gene-to-reaction mapping would be the wrong organism's.
+    if not os.path.exists(smarttable_file):
+        raise FileNotFoundError(f"Smarttable file '{smarttable_file}' not found.")
+
+    shutil.copy(smarttable_file, smarttable_path)
 
     df_genes = pd.read_csv(smarttable_path, delimiter='\t', usecols=['ID', 'Reactions'])
     df_genes = df_genes.dropna(subset=['Reactions'], how='all')
