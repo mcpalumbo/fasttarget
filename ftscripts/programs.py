@@ -575,6 +575,8 @@ def run_blastp(blastdb, query, output, evalue='1e-5', max_hsps='1', outfmt='6', 
             '-out', output
         ]
         run_bash_command(blastp_command)
+        # blastp exited 0, so an empty output means "no hits", not a crash.
+        files.mark_complete(output)
     else:
         logging.error(f"Query file '{query}' not found.")
 
@@ -680,6 +682,8 @@ def run_diamond_blastp(
         ])
         
         run_bash_command(diamond_blastp_command)
+        # DIAMOND exited 0, so an empty output means "no hits", not a crash.
+        files.mark_complete(output)
     else:
         logging.error(f"Query file '{query}' not found.")
 

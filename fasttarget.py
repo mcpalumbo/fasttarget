@@ -483,7 +483,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
 
                     human_blast_output = os.path.join(offtarget_path, 'human_offtarget_blast.tsv')
                     
-                    if not files.file_check(human_blast_output):
+                    if not files.step_completed(human_blast_output):
                         # Run blastp search
                         print('-----  Blastp search -----')
                         offtargets.human_offtarget_blast(databases_path, output_path, organism_name, cpus)
@@ -675,7 +675,7 @@ def essentiality_module(config, databases_path, output_path, cpus):
 
             deg_blast_output = os.path.join(essentiality_path, 'deg_blast.tsv')
             
-            if not files.file_check(deg_blast_output):
+            if not files.step_completed(deg_blast_output):
                 # Run blastp search
                 print('----- Blastp search -----')
                 essentiality.essential_deg_blast(databases_path, output_path, organism_name, cpus)

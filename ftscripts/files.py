@@ -6,6 +6,7 @@ import logging
 import math
 import tempfile
 import hashlib
+from datetime import datetime
 
 
 def file_to_list(file_path):
@@ -65,11 +66,60 @@ def file_check(file_path):
         else:
             # Check if the file is empty
             if os.path.getsize(file_path) > 0:
-                file_res = True   
+                file_res = True
             else:
                 file_res = False
-                
+
     return file_res
+
+# Completion markers
+#
+# file_check answers "is there usable content here?", which is the right question
+# for most resume gates. It cannot answer "did this step already run?", because an
+# empty output is ambiguous: a search that legitimately found no hits and a search
+# that crashed after creating the file both leave zero bytes.
+#
+# Steps whose empty output is a valid result write a marker once the tool exits
+# successfully. A resume can then skip them without having to guess, while an
+# empty output with no marker is still treated as work to redo.
+
+def completion_marker(output_path):
+    """
+    Path of the completion marker for an output file.
+
+    :param output_path: Path of the output file the step produces.
+    :return: Path of the marker file.
+    """
+    return f'{output_path}.complete'
+
+
+def mark_complete(output_path):
+    """
+    Record that the step producing output_path finished successfully.
+
+    :param output_path: Path of the output file the step produces.
+    """
+    marker = completion_marker(output_path)
+    try:
+        with open(marker, 'w') as handle:
+            handle.write(f'{datetime.now().isoformat()}\n')
+    except OSError as error:
+        # The marker is an optimization: failing to write it only costs a redo.
+        logging.warning(f'Could not write completion marker {marker}: {error}')
+
+
+def step_completed(output_path):
+    """
+    Check whether a step already ran to completion, even with empty output.
+
+    :param output_path: Path of the output file the step produces.
+    :return: True when the output has content, or when it exists alongside a
+        completion marker. False when the output is missing, or empty with no
+        marker (which may be the remains of a crashed run).
+    """
+    if file_check(output_path):
+        return True
+    return os.path.isfile(output_path) and os.path.isfile(completion_marker(output_path))
 
 def json_to_dict (file_path):
 

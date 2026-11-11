@@ -545,7 +545,7 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
     strain_faa_exists = strain_seq_count > 0
     
     #Index
-    if strain_faa_exists and not files.file_check(blast_output_strain_path):
+    if strain_faa_exists and not files.step_completed(blast_output_strain_path):
         print(f'Indexing uniprot strain-specific proteome for taxid {strain_taxid} ({strain_seq_count} sequences)')
     
         try:
@@ -570,7 +570,7 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
     blast_output_pdb_path= os.path.join(uniprot_dir, f'uniprot_PDB_structures_specie_taxid_{specie_taxid}_blast.tsv')
 
     #Index
-    if not files.file_check(blast_output_pdb_path):
+    if not files.step_completed(blast_output_pdb_path):
         print(f'Indexing uniprot PDB structure proteome for taxid {specie_taxid}')
     
         try:
@@ -593,7 +593,7 @@ def create_uniprot_blast_db (output_path, organism_name, specie_taxid, strain_ta
     blast_output_species_rest_path= os.path.join(uniprot_dir, f'uniprot_species_taxid_{specie_taxid}_rest_cdhit100_blast.tsv')
 
     #Index
-    if not files.file_check(blast_output_species_rest_path):
+    if not files.step_completed(blast_output_species_rest_path):
         print(f'Indexing uniprot species-level rest proteome for taxid {specie_taxid}')
 
         try:
@@ -639,7 +639,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
     strain_seq_count = count_fasta_sequences(uniprot_strain_faa)
     strain_faa_exists = strain_seq_count > 0
     
-    if strain_faa_exists and not files.file_check(blast_output_strain_path):
+    if strain_faa_exists and not files.step_completed(blast_output_strain_path):
         print(f'Running blastp for {organism_name} and uniprot strain-specific proteome taxid {strain_taxid} ({strain_seq_count} sequences)')
 
         try:
@@ -666,7 +666,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
     uniprot_pdb_index_path = os.path.join(uniprot_dir, f'uniprot_PDB_structures_specie_taxid_{specie_taxid}')
     blast_output_pdb_path= os.path.join(uniprot_dir, f'uniprot_PDB_structures_specie_taxid_{specie_taxid}_blast.tsv')
 
-    if not files.file_check(blast_output_pdb_path):
+    if not files.step_completed(blast_output_pdb_path):
         print(f'Runing blastp for {organism_name} and uniprot PDB structure proteome for taxid {specie_taxid}')
 
         try:
@@ -692,7 +692,7 @@ def uniprot_proteome_blast (output_path, organism_name, specie_taxid, strain_tax
     blast_output_species_rest_path= os.path.join(uniprot_dir, f'uniprot_species_taxid_{specie_taxid}_rest_cdhit100_blast.tsv')
 
 
-    if not files.file_check(blast_output_species_rest_path):
+    if not files.step_completed(blast_output_species_rest_path):
         print(f'Runing blastp for {organism_name} and uniprot Specie structure proteome for taxid {specie_taxid}')
 
         try:
@@ -789,6 +789,10 @@ def parse_best_result_blast (file, identity_cutoff=95, coverage_cutoff=90, subje
 UNIPARC_SEARCH_URL = 'https://rest.uniprot.org/uniparc/search'
 UNIPARC_ENTRY_URL = 'https://rest.uniprot.org/uniparc/{upi}.json'
 ALPHAFOLD_PREDICTION_URL = 'https://alphafold.ebi.ac.uk/api/prediction/{accession}'
+
+# Used only to build a download URL when the prediction API cannot be reached.
+# The API is authoritative; this just keeps behaviour no worse than before.
+ALPHAFOLD_FALLBACK_MODEL_VERSION = 6
 
 
 def normalize_protein_sequence(sequence):
@@ -935,6 +939,37 @@ def rank_uniparc_uniprot_xrefs(entry, specie_taxid, strain_taxid):
 
     ranked.sort(key=lambda c: (c['tier'], not c['active'], c['accession']))
     return ranked
+
+
+def alphafold_model_file_url(accession, file_format='pdb', timeout=30, retries=3):
+    """
+    Current download URL for an AlphaFold model file.
+
+    AlphaFold DB bumps the model version on every rebuild (v6 as of late 2025),
+    so the filename cannot be hardcoded. The prediction API reports the current
+    URL directly.
+
+    :param accession: UniProt accession.
+    :param file_format: Either 'pdb' or 'cif'.
+    :param timeout: Per-request timeout in seconds.
+    :param retries: Number of attempts per request.
+    :return: URL string, or None when the API has no model or cannot be reached.
+    """
+    model = alphafold_model_for_accession(accession, timeout=timeout, retries=retries)
+    if not model:
+        return None
+
+    url = model.get('cif_url' if file_format == 'cif' else 'pdb_url')
+    if url:
+        return url
+
+    version = model.get('version')
+    if version:
+        return (
+            f'https://alphafold.ebi.ac.uk/files/'
+            f'AF-{accession}-F1-model_v{version}.{file_format}'
+        )
+    return None
 
 
 def alphafold_model_for_accession(accession, timeout=30, retries=3):
@@ -2016,7 +2051,17 @@ def get_structure_alphafold(output_path, uniprot_id):
 
     if not files.file_check(file_path):
 
-        alphafold_url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v6.pdb"
+        # Resolve the current model URL instead of pinning a version. If the API
+        # is unreachable, fall back to the last known version so behaviour is no
+        # worse than the previous hardcoded URL; a genuine 404 is still handled
+        # by the loop below, so a transient API failure cannot be mistaken for
+        # "no prediction exists".
+        alphafold_url = alphafold_model_file_url(uniprot_id, file_format='pdb')
+        if not alphafold_url:
+            alphafold_url = (
+                f'https://alphafold.ebi.ac.uk/files/'
+                f'AF-{uniprot_id}-F1-model_v{ALPHAFOLD_FALLBACK_MODEL_VERSION}.pdb'
+            )
 
         for attempt in range(3):
             try: 
