@@ -380,13 +380,18 @@ def dict_to_json(output_path, file_name, my_dict):
         return obj
 
     full_path = os.path.join(output_path, file_name)
-    
-    if os.path.exists(output_path):
-        with open(full_path, 'w') as file:
-            json.dump(_sanitize_for_json(my_dict), file, allow_nan=False)
-        print(f"File '{full_path}' saved.")
-    else:
-        print(f"The directory '{output_path}' does not exist.")
+
+    # A missing directory used to print a line and return, so the data was
+    # dropped and the caller went on believing it had been written. Every caller
+    # writes into the organism output tree, which the pipeline owns, so creating
+    # the directory is what they all want and removes the silent-loss path.
+    if not os.path.isdir(output_path):
+        logging.info(f"Creating '{output_path}' to save '{file_name}'.")
+        os.makedirs(output_path, exist_ok=True)
+
+    with open(full_path, 'w') as file:
+        json.dump(_sanitize_for_json(my_dict), file, allow_nan=False)
+    logging.debug(f"File '{full_path}' saved.")
 
 def sha256_file(file_path):
     """

@@ -349,34 +349,57 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
             os.replace(path, os.path.join(output_path, names[ext]))
         files.atomic_write_json(manifest, manifest_path)
 
-def id_to_locustag_gff(file_path:str, ids, fix=False):
+def id_to_locustag_gff(file_path: str, ids, fix=False):
+    """Map tab-separated Roary members to unique loci using exact GFF IDs.
+
+    For original GFFs only, accept the existing BioPerl .p01 protein suffix
+    when no exact ID exists. Fixed Roary IDs are never normalized.
     """
+    index = {}
 
-    Parses a .gff file, from a list of IDs retrieves a dictionary with the locus_tag for each ID.
+    def visit(features, inherited_loci=()):
+        for feature in features:
+            loci = feature.qualifiers.get('locus_tag', inherited_loci)
+            feature_ids = feature.qualifiers.get('ID', [])
+            for feature_id in feature_ids:
+                # Preserve the historic ID fallback; the caller validates against
+                # the reference gene universe before producing boolean results.
+                candidates = loci or [feature_id]
+                index.setdefault(feature_id, set()).update(candidates)
+            visit(getattr(feature, 'sub_features', []), loci)
 
-    :param file_path: Path to the gff file.
-    :param ids: List of IDs.
-    :param fix: If True, work with IDs of roary index.
-
-    :return: Dictionary with the locus_tag for each ID.
-
-    """
-    locus_tags = {}
-    with open(file_path, 'r') as file:
-        for rec in GFF.parse(file):
-            for feature in rec.features:
-                if 'ID' in feature.qualifiers:
-                    feature_id = feature.qualifiers['ID'][0]
-                    for id in ids:
-                        if fix:
-                            if feature_id == id and feature_id not in locus_tags:
-                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', [feature_id])[0]
-                        else:
-                            if feature_id in id and feature_id not in locus_tags:
-                                locus_tags[feature_id] = feature.qualifiers.get('locus_tag', [feature_id])[0]
-    
-    list_locus = list(locus_tags.values())
-    return list_locus
+    with open(file_path) as handle:
+        for record in GFF.parse(handle):
+            visit(record.features)
+    mapped = []
+    seen = set()
+    problems = []
+    for cell in ids:
+        if not isinstance(cell, str):
+            raise ValueError(f'Non-string Roary member cell: {cell!r}')
+        for member in cell.split('\t'):
+            member = member.strip()
+            if not member:
+                raise ValueError('Empty member in a selected Roary family')
+            candidates = index.get(member)
+            if candidates is None and not fix and member.endswith('.p01'):
+                candidates = index.get(member[:-4])
+            if (not candidates or len(candidates) != 1
+                    or any(not locus or any(c.isspace() for c in locus)
+                           for locus in candidates)):
+                problems.append(member)
+                continue
+            locus = next(iter(candidates))
+            if locus not in seen:
+                seen.add(locus)
+                mapped.append(locus)
+    if problems:
+        raise ValueError(
+            f'Unmapped or ambiguous Roary members in {file_path}: '
+            + ', '.join(problems[:20])
+            + (f' (total: {len(problems)})' if len(problems) > 20 else '')
+        )
+    return mapped
 
 def core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=None):
     """
@@ -868,7 +891,34 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     # The threshold is applied here, at parse time, so a cached table built with a
     # different one does not describe the requested core genome. Rebuilding it only
     # costs a pandas filter, unlike the Roary run itself.
-    table_parameters = {'core_threshold': core_threshold}
+    if not 0 <= core_threshold <= 1:
+        raise ValueError('Roary core_threshold must be between 0 and 1')
+    metadata_columns = [
+        'Gene', 'Non-unique Gene name', 'Annotation', 'No. isolates',
+        'No. sequences', 'Avg sequences per isolate', 'Genome Fragment',
+        'Order within Fragment', 'Accessory Fragment', 'Accessory Order with Fragment',
+        'QC', 'Min group size nuc', 'Max group size nuc', 'Avg group size nuc',
+    ]
+    with open(genes_csv_file, newline='') as handle:
+        header = next(csv.reader(handle), [])
+    if header[:len(metadata_columns)] != metadata_columns:
+        raise ValueError('Unrecognized Roary presence/absence CSV schema; cannot determine cohort')
+    samples = header[len(metadata_columns):]
+    prepared = {os.path.splitext(os.path.basename(path))[0]
+                for path in glob.glob(os.path.join(gff_dir, '*.gff'))}
+    if (not samples or len(samples) != len(set(samples)) or any(not x for x in samples)
+            or organism_name not in samples or set(samples) != prepared):
+        raise ValueError('Roary sample columns must match the prepared GFF cohort and include the reference once')
+    total_genomes = len(samples)
+    mapping_file = os.path.join(fixed_input_dir, f'{organism_name}.gff')
+    if not os.path.isfile(mapping_file):
+        mapping_file = os.path.join(gff_dir, f'{organism_name}.gff')
+    reference_file = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
+    table_parameters = {'core_threshold': core_threshold, 'parser_schema': 3,
+                        'csv_sha256': files.sha256_file(genes_csv_file),
+                        'mapping_sha256': files.sha256_file(mapping_file),
+                        'reference_sha256': files.sha256_file(reference_file),
+                        'samples': samples}
 
     if files.manifest_matches(roary_results_table, table_parameters, label='core_roary.tsv'):
         print(f'Roary output file already exists: {roary_results_table}.')
@@ -879,13 +929,16 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
         report_core_table(cached_table, 'core_roary', 'Roary', core_threshold * 100, roary_results_table)
         return cached_table
 
-    dtypes = {'No. isolates': 'int', f'{organism_name}': 'str'}
-    df = pd.read_csv(genes_csv_file, usecols= ['No. isolates', f'{organism_name}'], dtype=dtypes)
-    max_isolates = df['No. isolates'].max()
-    print(f'Total genomes analyzed by Roary: {max_isolates}')
-    max_isolates_rows = df[df['No. isolates'] >= int(max_isolates)*core_threshold]
-    print(f'Roary total core genes (> {core_threshold*100}% strains): {len(max_isolates_rows)}')
-    gbk_ids = max_isolates_rows[f'{organism_name}'].dropna().tolist()
+    df = pd.read_csv(genes_csv_file, dtype=str, keep_default_na=False)
+    counts = pd.to_numeric(df['No. isolates'], errors='raise')
+    observed = df[samples].apply(lambda column: column.str.strip().ne('')).sum(axis=1)
+    if ((counts < 0) | (counts > total_genomes) | (counts % 1 != 0)
+            | (counts != observed)).any():
+        raise ValueError('Roary isolate counts disagree with sample presence/absence cells')
+    print(f'Total genomes analyzed by Roary: {total_genomes}')
+    core_rows = df[counts >= total_genomes * core_threshold]
+    print(f'Roary total core families (>= {core_threshold*100}% strains): {len(core_rows)}')
+    gbk_ids = [value for value in core_rows[organism_name] if value.strip()]
     print(f'Roary {organism_name} core genes: {len(gbk_ids)}')
 
     gff_file = os.path.join(gff_dir, f'{organism_name}.gff')
@@ -906,11 +959,22 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
             f'cannot map Roary gene IDs to locus tags.'
         )
 
+    reference_loci = set()
+    with open(reference_file) as handle:
+        for record in SeqIO.parse(handle, 'genbank'):
+            for feature in record.features:
+                if feature.type == 'CDS' and 'translation' in feature.qualifiers:
+                    reference_loci.update(feature.qualifiers.get('locus_tag', []))
+    unknown_loci = set(core_locus_tag) - reference_loci
+    if unknown_loci:
+        raise ValueError('Roary mapped loci absent from translated reference CDS: '
+                         + ', '.join(sorted(unknown_loci)[:20]))
+
     roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
     files.write_manifest(
         roary_results_table,
         table_parameters,
-        extra={'genomes_analyzed': int(max_isolates), 'core_genes': len(gbk_ids)},
+        extra={'genomes_analyzed': total_genomes, 'core_genes': len(gbk_ids)},
     )
 
     return roary_table
