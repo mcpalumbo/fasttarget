@@ -10,6 +10,49 @@ import sys
 from ftscripts.logger import logger 
 import shutil
 
+# Steps that failed during the current run.
+#
+# Sub-steps of a module are independent (off-target runs human, microbiome and
+# Foldseek searches separately), so a failure must not abort the siblings that
+# could still succeed. Instead each failure is recorded here, the run finishes
+# everything it can, and the process exits non-zero at the end. Without this the
+# pipeline wrote a partial table and exited 0, which is indistinguishable from
+# a clean run.
+_failed_steps = []
+
+
+def reset_failed_steps():
+    """
+    Clear the recorded failures. Called at the start of each run.
+    """
+    _failed_steps.clear()
+
+
+def failed_steps():
+    """
+    Names of the steps that failed during the current run.
+
+    :return: List of step names, in the order they failed.
+    """
+    return list(_failed_steps)
+
+
+def record_failure(step, error):
+    """
+    Record a failed step, log the traceback and warn on stdout.
+
+    :param step: Human-readable name of the step that failed.
+    :param error: The exception that was raised.
+    """
+    _failed_steps.append(step)
+    if sys.exc_info()[0] is not None:
+        logging.exception(f'Error in {step}: {error}')
+    else:
+        # Called outside an except block: there is no traceback to attach.
+        logging.error(f'Error in {step}: {error}')
+    print(f'ERROR: {step} failed - {error}')
+
+
 def print_stylized(title, width=80):
     """
     Print a stylized title to the console.
@@ -101,7 +144,7 @@ def metabolic_module(config, output_path):
             logging.info('Metabolic analysis finished')
 
         except Exception as e:
-            logging.exception(f'Error in metabolic analysis: {e}')        
+            record_failure('metabolic analysis (Pathway Tools)', e)
     else:
         logging.info('Metabolic analysis with Pathway Tools files not enabled')
     
@@ -137,7 +180,7 @@ def metabolic_module(config, output_path):
             logging.info('Metabolic analysis from SBML with MetaGraphTools finished')
 
         except Exception as e:
-            logging.exception(f'Error in metabolic analysis: {e}')
+            record_failure('metabolic analysis (SBML)', e)
     else:
         logging.info('Metabolic analysis with SBML file not enabled')
     
@@ -206,7 +249,7 @@ def structure_module(config, databases_path, output_path, cpus):
             module_tables.append(df_structures)
 
         except Exception as e:
-            logging.exception(f'Error in structures analysis: {e}')
+            record_failure('structures analysis', e)
     else:
         logging.info('Structures analysis not enabled')
     
@@ -276,7 +319,7 @@ def ligands_module(config, output_path, cpus, databases_path=None):
     except Exception:
         if getattr(config, 'alphafill', False) and config.alphafill.get('strict_errors', False):
             raise
-        logging.exception('AlphaFill failed; continuing independent ligand sources')
+        record_failure('AlphaFill ligand analysis', error)
         tables = []
     databases_path = Path(databases_path or Path(__file__).resolve().parent / 'databases')
     organism = config.organism['name']
@@ -306,7 +349,7 @@ def ligands_module(config, output_path, cpus, databases_path=None):
             (destination / 'pipeline_status.json').write_text(json.dumps({'status': 'completed'}) + '\n')
             tables.append(summary)
         except Exception as error:
-            logging.exception('%s ligand analysis failed', source)
+            record_failure(f'{source} ligand analysis', error)
             destination.mkdir(parents=True, exist_ok=True)
             (destination / 'pipeline_status.json').write_text(json.dumps({'status': 'failed', 'error': str(error)}) + '\n')
             genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism)))
@@ -389,7 +432,7 @@ def conservation_module(config, databases_path, output_path, cpus):
                     logging.info('Roary analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
-                    logging.exception(f'Error in Roary analysis: {e}')
+                    record_failure('Roary analysis', e)
             else:
                 logging.info('Roary not enabled')
 
@@ -406,11 +449,11 @@ def conservation_module(config, databases_path, output_path, cpus):
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
                 except Exception as e:
-                    logging.exception(f'Error in CoreCruncher analysis: {e}')
+                    record_failure('CoreCruncher analysis', e)
             else:
                 logging.info('CoreCruncher not enabled')
         except Exception as e:
-            logging.exception(f'Error in core analysis: {e}')
+            record_failure('core analysis', e)
     else:
         logging.info('Core analysis not enabled')
     
@@ -456,7 +499,7 @@ def offtarget_module(config, databases_path, output_path, cpus):
                     logging.info('Human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
-                    logging.exception(f'Error in human offtarget analysis: {e}')
+                    record_failure('human offtarget analysis', e)
             else:
                 logging.info('Human offtarget analysis not enabled')
 
@@ -506,24 +549,59 @@ def offtarget_module(config, databases_path, output_path, cpus):
                                     databases_path, output_path, organism_name,
                                 ))
                             except Exception as error:
-                                logging.exception("Silva core annotation failed: %s", error)
-                                print(f"Warning: Silva core annotation was not included: {error}")
+                                record_failure('Silva core annotation', error)
                             try:
                                 module_tables.append(offtargets.microbiome_silva_prevalence_parse(
                                     databases_path, output_path, organism_name,
                                 ))
                             except Exception as error:
-                                logging.exception("Silva prevalence annotation failed: %s", error)
-                                print(f"Warning: Silva prevalence annotation was not included: {error}")
+                                record_failure('Silva prevalence annotation', error)
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
                             
                 except Exception as e:
-                    logging.exception(f'Error in microbiome offtarget analysis: {e}')
+                    record_failure('microbiome offtarget analysis', e)
             else:
                 logging.info('Microbiome offtarget analysis not enabled')
             
+            available = {}
+
             if config.structures and config.offtarget['foldseek_human']:
+                # config.structures only says structures were requested, not that
+                # they were produced. Searching an empty or partial structure set
+                # yields output that looks successful while silently covering
+                # fewer genes, so require real reference structures first.
+                reference_structures = structures.get_all_reference_structures(
+                    output_path, organism_name, path_mode=True
+                )
+                available = {
+                    locus_tag: path for locus_tag, path in (reference_structures or {}).items() if path
+                }
+                total_loci = len(reference_structures or {})
+
+                if not available:
+                    skipped = (
+                        'Foldseek human offtarget skipped: the structures module left no '
+                        'reference structures to search.'
+                    )
+                    record_failure(
+                        'Foldseek human offtarget analysis (no reference structures)',
+                        RuntimeError(skipped),
+                    )
+                elif len(available) < total_loci:
+                    # Partial coverage is legitimate (a gene may have no structure at
+                    # all), but it must be visible rather than inferred from counts.
+                    logging.warning(
+                        f'Foldseek will cover {len(available)} of {total_loci} genes; '
+                        f'{total_loci - len(available)} have no reference structure.'
+                    )
+                    print(
+                        f'WARNING: Foldseek will cover {len(available)} of {total_loci} genes; '
+                        f'{total_loci - len(available)} have no reference structure.'
+                    )
+
+            if (config.structures and config.offtarget['foldseek_human']
+                    and available):
                 try:
                     print_stylized('FOLDSEEK HUMAN OFFTARGET')
                    
@@ -565,12 +643,12 @@ def offtarget_module(config, databases_path, output_path, cpus):
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
                 except Exception as e:
-                    logging.exception(f'Error in foldseek human offtarget analysis: {e}')
+                    record_failure('Foldseek human offtarget analysis', e)
             else:
                 logging.info('Foldseek human offtarget analysis not enabled')           
 
         except Exception as e:
-            logging.exception(f'Error in offtarget analysis: {e}')
+            record_failure('offtarget analysis', e)
     else:
         logging.info('Offtarget analysis not enabled')
     
@@ -618,7 +696,7 @@ def essentiality_module(config, databases_path, output_path, cpus):
             print('----- Finished -----')
 
         except Exception as e:
-            logging.exception(f'Error in essentiality analysis: {e}')
+            record_failure('essentiality analysis', e)
     else:
         logging.info('Essentiality analysis not enabled')
     
@@ -649,7 +727,7 @@ def localization_module(config, output_path):
             logging.info('Psortb analysis finished')
             print('----- Finished -----')
         except Exception as e:
-            logging.exception(f'Error in localization analysis: {e}')
+            record_failure('localization analysis', e)
     else:
         logging.info('Localization analysis not enabled')
     
@@ -689,7 +767,7 @@ def metadata_loading(config, output_path):
                 logging.info(f'Metadata table {table} loaded')
                 print('----- Finished -----')
         except Exception as e:
-            logging.exception(f'Error in metadata analysis: {e}')
+            record_failure('metadata analysis', e)
     else:
         logging.info('Metadata analysis not enabled')
     
@@ -785,7 +863,7 @@ def main(config, databases_path, output_path):
 
     tables = []
 
-    error_modules = []
+    reset_failed_steps()
 
     # Run metabolic module
     try:
@@ -797,9 +875,7 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Metabolic module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in metabolic module: {e}')
-        error_modules.append('metabolic')
-        print(f'Warning: Metabolic module failed - {e}')
+        record_failure('metabolic module', e)
 
     # Run structure module
     try:
@@ -811,21 +887,17 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Structure module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in structure module: {e}')
-        error_modules.append('structure')
-        print(f'Warning: Structure module failed - {e}')
+        record_failure('structure module', e)
 
     # Ligands can run on its own, or reuse the mapping made by structures.
     try:
         ligand_tables = ligands_module(config, output_path, cpus, databases_path=databases_path)
         tables.extend(ligand_tables)
     except Exception as e:
-        logging.exception(f'Error in ligands module: {e}')
-        error_modules.append('ligands')
         if any(getattr(config, source, False) and getattr(config, source).get('strict_errors', False)
                for source in ('alphafill', 'chembl', 'bindingdb')):
             raise
-        print(f'Warning: Ligands module failed - {e}')
+        record_failure('ligands module', e)
 
     # Run conservation module
     try:
@@ -837,9 +909,7 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Conservation module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in conservation module: {e}')
-        error_modules.append('conservation')
-        print(f'Warning: Conservation module failed - {e}')
+        record_failure('conservation module', e)
 
     # Run offtarget module
     try:
@@ -851,9 +921,7 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Offtarget module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in offtarget module: {e}')
-        error_modules.append('offtarget')
-        print(f'Warning: Offtarget module failed - {e}')
+        record_failure('offtarget module', e)
 
     # Run essentiality module
     try:
@@ -865,9 +933,7 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Essentiality module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in essentiality module: {e}')
-        error_modules.append('essentiality')
-        print(f'Warning: Essentiality module failed - {e}')
+        record_failure('essentiality module', e)
 
     # Run localization module
     try:
@@ -879,9 +945,7 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Localization module completed - no tables generated')
     except Exception as e:
-        logging.exception(f'Fatal error in localization module: {e}')
-        error_modules.append('localization')
-        print(f'Warning: Localization module failed - {e}')
+        record_failure('localization module', e)
 
     # Load metadata
     try:
@@ -893,21 +957,27 @@ def main(config, databases_path, output_path):
         else:
             logging.info('Metadata loading completed - no tables loaded')
     except Exception as e:
-        logging.exception(f'Fatal error in metadata loading: {e}')
-        error_modules.append('metadata')
-        print(f'Warning: Metadata loading failed - {e}')
+        record_failure('metadata loading', e)
 
     # Merge final tables
     logging.info(f'Total tables collected: {len(tables)}')
-    if error_modules:
-        logging.info(f'Modules with errors: {", ".join(error_modules)}')
 
     results = merge_final_tables(config, output_path, tables)
-    
 
-    print('------------------------------------- FINISHED ----------------------------------------')
-    
-    return results 
+
+    errors = failed_steps()
+    if errors:
+        # The tables above are still written, but the run is not a success: say so
+        # loudly here and let the caller exit non-zero.
+        logging.error(f'Steps with errors ({len(errors)}): {", ".join(errors)}')
+        print('------------------------------------- FINISHED WITH ERRORS ----------------------')
+        for step in errors:
+            print(f'  FAILED: {step}')
+        print(f'Results are incomplete: {len(errors)} step(s) failed. See the log for tracebacks.')
+    else:
+        print('------------------------------------- FINISHED ----------------------------------------')
+
+    return results
 
 if __name__ == "__main__":
     
@@ -924,6 +994,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = configuration.get_config(args.config_file)
-    
+
 
     main(config, args.databases_path, args.output_path)
+
+    # Exit non-zero when any step failed, so wrappers and CI can tell a partial
+    # run from a clean one. Outputs produced by the steps that did succeed are
+    # already written at this point.
+    if failed_steps():
+        sys.exit(1)
