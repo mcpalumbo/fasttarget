@@ -22,14 +22,19 @@ def file_to_list(file_path):
     
     my_list = []
     
+    # Returning None on failure pushed the error downstream, where it surfaced as
+    # an AttributeError or TypeError on None far from the missing file. Raise here
+    # so the message names the file.
     try:
         with open(file_path, 'r') as file:
             my_list = [line.strip() for line in file]
         return my_list
     except FileNotFoundError:
-        print(f"Error: The file {file_path} was not found.")
+        logging.error(f'File not found: {file_path}')
+        raise
     except Exception as e:
         logging.exception(f"An unexpected error occurred while reading the file: {e}")
+        raise
 
 def list_to_file(file_path, my_list):
 
@@ -265,9 +270,11 @@ def read_blast_output(file_path, len=False):
         blast_output_df.columns = blast_columns
 
         return blast_output_df
-    
+
     else:
-        print(f'File {file_path} not found.')
+        # Previously returned None, so callers failed later on None.iterrows()
+        # instead of being told which file was missing.
+        raise FileNotFoundError(f'BLAST output file not found: {file_path}')
 
 
 def atomic_write_dataframe_parquet(dataframe, output_path):

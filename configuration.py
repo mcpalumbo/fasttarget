@@ -143,10 +143,17 @@ def validate_config(config):
     if 'cpus' in config and config['cpus'] is not None:
         try:
             cpus = int(config['cpus'])
+            available = os.cpu_count()
             if cpus < 1:
                 errors.append(f"CPUs must be at least 1 (got {cpus})")
-            elif cpus > os.cpu_count():
-                errors.append(f"CPUs ({cpus}) exceeds available CPUs ({os.cpu_count()}). This may cause performance issues.")
+            elif available and cpus > available:
+                # Oversubscription is suboptimal, not invalid: it is a legitimate
+                # choice on a shared or hyperthreaded machine, so warn rather than
+                # refuse to run.
+                print(
+                    f"⚠️  Warning: cpus ({cpus}) exceeds the {available} CPUs detected. "
+                    f"This may slow the run down rather than speed it up."
+                )
         except (ValueError, TypeError):
             errors.append(f"CPUs must be an integer or None (got {config['cpus']})")
     

@@ -556,8 +556,8 @@ def core_check_files(output_path, organism_name, container_engine='docker', filt
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
 
-    def pending_files(genomes_list):
-        
+    def find_pending_files(genomes_list):
+
         pending_files = []
 
         for genome in tqdm.tqdm(genomes_list, initial=1):
@@ -580,22 +580,32 @@ def core_check_files(output_path, organism_name, container_engine='docker', filt
         
         return pending_files
 
-    if files.file_check(genomes_file):
-        genomes_list = files.file_to_list(genomes_file)
-        pending_files = pending_files(genomes_list)
-        if len(pending_files) > 0:
-            core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
-    else:
+    # Previously this returned the inner function itself on the failure path,
+    # because the function name was rebound by the assignment below. Worse, the
+    # core programs then ran against missing inputs. Without a genome list there
+    # is nothing to check, so fail with a message that says that.
+    if not files.file_check(genomes_file):
         core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
-        if files.file_check(genomes_file):
-            genomes_list = files.file_to_list(genomes_file)
-            pending_files = pending_files(genomes_list)
-            if len(pending_files) > 0:
-                core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
-        else:
-            print(f'No core genomes file found or empty: {genomes_file}.')
 
-    return pending_files
+        if not files.file_check(genomes_file):
+            raise FileNotFoundError(
+                f'No core genomes file found or empty: {genomes_file}. '
+                f'Cannot verify the core genome input files.'
+            )
+
+    genomes_list = files.file_to_list(genomes_file)
+    pending = find_pending_files(genomes_list)
+
+    if pending:
+        core_files(output_path, organism_name, container_engine=container_engine, filter_by_host=filter_by_host)
+        pending = find_pending_files(genomes_list)
+        if pending:
+            logging.warning(
+                f'{len(pending)} core input file(s) are still missing after retrying, '
+                f'e.g. {pending[:3]}'
+            )
+
+    return pending
 
 def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker'):
 
@@ -665,41 +675,52 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     results_dir = os.path.join(roary_out_dir, 'results')
     roary_results_table = os.path.join(conservation_dir, 'core_roary.tsv')
 
-    if os.path.exists(results_dir):
-        fixed_input_dir = os.path.join(results_dir, 'fixed_input_files')
-        genes_csv_file = os.path.join(results_dir, 'gene_presence_absence.csv')
+    # Each missing input used to fall through to `return roary_table` with the
+    # variable never assigned, surfacing as UnboundLocalError instead of naming
+    # the file that was absent.
+    if not os.path.exists(results_dir):
+        raise FileNotFoundError(f'No Roary output found in {roary_out_dir}.')
 
-        if os.path.exists(genes_csv_file):
+    fixed_input_dir = os.path.join(results_dir, 'fixed_input_files')
+    genes_csv_file = os.path.join(results_dir, 'gene_presence_absence.csv')
 
-            if not files.file_check(roary_results_table):
-                dtypes = {'No. isolates': 'int', f'{organism_name}': 'str'}
-                df = pd.read_csv(genes_csv_file, usecols= ['No. isolates', f'{organism_name}'], dtype=dtypes)
-                max_isolates = df['No. isolates'].max()
-                print(f'Total genomes analyzed by Roary: {max_isolates}')
-                max_isolates_rows = df[df['No. isolates'] >= int(max_isolates)*core_threshold]
-                print(f'Roary total core genes (> {core_threshold*100}% strains): {len(max_isolates_rows)}')
-                gbk_ids = max_isolates_rows[f'{organism_name}'].dropna().tolist()
-                print(f'Roary {organism_name} core genes: {len(gbk_ids)}')
+    if not os.path.exists(genes_csv_file):
+        raise FileNotFoundError(
+            f'Roary did not produce "gene_presence_absence.csv" in {results_dir}.'
+        )
 
-                gff_file = os.path.join(gff_dir, f'{organism_name}.gff')
-                gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gff')
-                if os.path.exists(gff_file_fixed):
-                    print(f'Reading {gff_file_fixed}')
-                    core_locus_tag = id_to_locustag_gff(gff_file_fixed, gbk_ids, fix=True)
-                elif os.path.exists(gff_file):
-                    print(f'Reading {gff_file}')
-                    core_locus_tag = id_to_locustag_gff(gff_file, gbk_ids)
-                else:
-                    logging.error(f'{organism_name}.gff not found.')
+    if files.file_check(roary_results_table):
+        print(f'Roary output file already exists: {roary_results_table}.')
+        return pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
 
-                roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
-            else:
-                print(f'Roary output file already exists: {roary_results_table}.')
-                roary_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
-        else:
-            logging.error('No roary "gene_presence_absence.csv" file found.')
+    dtypes = {'No. isolates': 'int', f'{organism_name}': 'str'}
+    df = pd.read_csv(genes_csv_file, usecols= ['No. isolates', f'{organism_name}'], dtype=dtypes)
+    max_isolates = df['No. isolates'].max()
+    print(f'Total genomes analyzed by Roary: {max_isolates}')
+    max_isolates_rows = df[df['No. isolates'] >= int(max_isolates)*core_threshold]
+    print(f'Roary total core genes (> {core_threshold*100}% strains): {len(max_isolates_rows)}')
+    gbk_ids = max_isolates_rows[f'{organism_name}'].dropna().tolist()
+    print(f'Roary {organism_name} core genes: {len(gbk_ids)}')
+
+    gff_file = os.path.join(gff_dir, f'{organism_name}.gff')
+    gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gff')
+
+    if os.path.exists(gff_file_fixed):
+        print(f'Reading {gff_file_fixed}')
+        core_locus_tag = id_to_locustag_gff(gff_file_fixed, gbk_ids, fix=True)
+    elif os.path.exists(gff_file):
+        print(f'Reading {gff_file}')
+        core_locus_tag = id_to_locustag_gff(gff_file, gbk_ids)
     else:
-        logging.error(f'No roary output found in {roary_out_dir}.')
+        # Without the GFF the Roary IDs cannot be translated to locus tags, so
+        # there is no way to build the table. This used to leave core_locus_tag
+        # unassigned and fail on the next line with no indication of the cause.
+        raise FileNotFoundError(
+            f'{organism_name}.gff not found in {fixed_input_dir} or {gff_dir}; '
+            f'cannot map Roary gene IDs to locus tags.'
+        )
+
+    roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
 
 
     return roary_table
@@ -727,16 +748,22 @@ def corecruncher_output(output_path, organism_name):
     core_total = 0
 
     if not files.file_check(cc_results_table):
-        if os.path.exists(cc_output_file):
-            with open(cc_output_file, 'r') as tsvfile:
-                reader = csv.reader(tsvfile, delimiter='\t')
-                for row in reader:
-                    core_total += 1
-                    for value in row:
-                        if isinstance(value, str) and value.startswith(ref_genome):
-                            core_locus_tag.append(value.split('&')[1])
-        else:
-            logging.error(f"Corecruncher output file '{cc_output_file}' not found.")
+        # A missing output file used to be logged and then ignored, leaving
+        # core_locus_tag empty and producing a table that declares no gene core.
+        # That is wrong data rather than a failure, so refuse instead.
+        if not os.path.exists(cc_output_file):
+            raise FileNotFoundError(
+                f"CoreCruncher output file '{cc_output_file}' not found; "
+                f'cannot determine the core genome.'
+            )
+
+        with open(cc_output_file, 'r') as tsvfile:
+            reader = csv.reader(tsvfile, delimiter='\t')
+            for row in reader:
+                core_total += 1
+                for value in row:
+                    if isinstance(value, str) and value.startswith(ref_genome):
+                        core_locus_tag.append(value.split('&')[1])
 
         print(f'CoreCruncher total core genes (> 90% strains): {core_total}')
         print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')
