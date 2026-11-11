@@ -126,6 +126,157 @@ def step_completed(output_path):
         return True
     return os.path.isfile(output_path) and os.path.isfile(completion_marker(output_path))
 
+# Parameter manifests
+#
+# Resume gates ask only whether an output file exists. That is correct when the
+# output depends on nothing but its inputs, but most steps are tuned by config
+# values: raising core.min_identity and re-running reuses a table built at the
+# old identity, with nothing in the output saying so.
+#
+# A step that depends on parameters writes a manifest next to its output
+# recording the values actually used. The gate then checks the manifest as well
+# as the file, so a changed parameter is a cache miss instead of a silent reuse.
+
+MANIFEST_SUFFIX = '.manifest.json'
+
+
+def manifest_path(output_path):
+    """
+    Path of the parameter manifest for an output file.
+
+    :param output_path: Path of the output file the step produces.
+    :return: Path of the manifest file.
+    """
+    return f'{output_path}{MANIFEST_SUFFIX}'
+
+
+def _normalize_manifest_value(value):
+    """
+    Reduce a parameter to a form that compares equal across runs.
+
+    Values travel through YAML, Nextflow string interpolation and JSON, so the
+    same setting can arrive as 95, 95.0 or '95'. Comparing the raw values would
+    report a mismatch for a parameter that did not change.
+
+    :param value: Parameter value.
+    :return: Normalized value.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        # Tagged, because numbers become floats below and True == 1.0 in Python:
+        # a flag turned on would compare equal to a threshold of 1.
+        return f'<bool:{str(value).lower()}>'
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return value.strip()
+    if isinstance(value, (list, tuple)):
+        return [_normalize_manifest_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _normalize_manifest_value(item) for key, item in sorted(value.items())}
+    return str(value)
+
+
+def _normalize_parameters(parameters):
+    """
+    Normalize every value of a parameter mapping.
+
+    :param parameters: Mapping of parameter name to value.
+    :return: Mapping with normalized values.
+    """
+    return {str(key): _normalize_manifest_value(value) for key, value in (parameters or {}).items()}
+
+
+def write_manifest(output_path, parameters, extra=None):
+    """
+    Record the parameters a step used to produce its output.
+
+    :param output_path: Path of the output file the step produced.
+    :param parameters: Mapping of parameter name to the value actually used.
+    :param extra: Optional mapping of additional context to store alongside.
+    """
+    manifest = {
+        'output': os.path.basename(output_path),
+        'written': datetime.now().isoformat(),
+        'parameters': _normalize_parameters(parameters),
+    }
+    if extra:
+        manifest['extra'] = extra
+    try:
+        atomic_write_json(manifest, manifest_path(output_path))
+    except OSError as error:
+        # Like the completion marker, the manifest is an optimization: failing to
+        # write it costs a recompute, it does not invalidate the output.
+        logging.warning(f'Could not write manifest for {output_path}: {error}')
+
+
+def read_manifest(output_path):
+    """
+    Read the parameter manifest of an output file.
+
+    :param output_path: Path of the output file the step produces.
+    :return: Manifest dictionary, or None when missing or unreadable.
+    """
+    try:
+        with open(manifest_path(output_path), 'r', encoding='utf-8') as handle:
+            manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def manifest_differences(output_path, parameters):
+    """
+    Compare the parameters of an existing output against the current ones.
+
+    :param output_path: Path of the output file the step produces.
+    :param parameters: Mapping of parameter name to the value for this run.
+    :return: List of '<name> <recorded> -> <current>' strings. Empty when the
+        recorded parameters match. A missing manifest reports every parameter as
+        a difference, because nothing proves the output was built with them.
+    """
+    expected = _normalize_parameters(parameters)
+    manifest = read_manifest(output_path)
+    recorded = _normalize_parameters((manifest or {}).get('parameters'))
+
+    differences = []
+    for name in sorted(expected):
+        if manifest is None:
+            differences.append(f'{name} unrecorded -> {expected[name]}')
+        elif name not in recorded:
+            differences.append(f'{name} unrecorded -> {expected[name]}')
+        elif recorded[name] != expected[name]:
+            differences.append(f'{name} {recorded[name]} -> {expected[name]}')
+    return differences
+
+
+def manifest_matches(output_path, parameters, label=None):
+    """
+    Check whether an existing output was built with the given parameters.
+
+    :param output_path: Path of the output file the step produces.
+    :param parameters: Mapping of parameter name to the value for this run.
+    :param label: Optional name used in the log line, defaults to the file name.
+    :return: True when the output exists and its manifest matches. False when the
+        output is missing, has no manifest, or was built with other values.
+    """
+    if not file_check(output_path):
+        return False
+
+    differences = manifest_differences(output_path, parameters)
+    if not differences:
+        return True
+
+    name = label or os.path.basename(output_path)
+    print(f'Parameters changed for {name}: {"; ".join(differences)}')
+    logging.info(f'Parameters changed for {name}: {"; ".join(differences)}')
+    return False
+
+
 def json_to_dict (file_path):
 
     """

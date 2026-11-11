@@ -607,6 +607,43 @@ def core_check_files(output_path, organism_name, container_engine='docker', filt
 
     return pending
 
+def _check_core_run_parameters(output_file, parameters, program, stale_dir):
+
+    """
+    Refuse to reuse a core genome run that used different parameters.
+
+    Roary and CoreCruncher take hours to days, so their outputs are never
+    recomputed automatically: a changed parameter stops the run and names the
+    directory to remove, instead of either silently reusing the old clustering or
+    deleting expensive results on its own.
+
+    An output with no manifest predates parameter recording. Its provenance is
+    unknown rather than wrong, so it is reused with a warning.
+
+    :param output_file: Path of the output file produced by the program.
+    :param parameters: Mapping of parameter name to the value for this run.
+    :param program: Name of the program, used in the messages.
+    :param stale_dir: Directory to remove in order to force a re-run.
+    :raises RuntimeError: If the recorded parameters differ from the current ones.
+    """
+
+    if files.read_manifest(output_file) is None:
+        print(
+            f'Warning: {output_file} was produced before parameters were recorded. '
+            f'Reusing it; remove {stale_dir} to rebuild it with core frequency '
+            f'{parameters["min_core_freq"]}% and identity {parameters["min_identity"]}%.'
+        )
+        logging.warning(f'{program} output has no parameter manifest: {output_file}')
+        return
+
+    differences = files.manifest_differences(output_file, parameters)
+    if differences:
+        raise RuntimeError(
+            f'{program} output in {stale_dir} was built with different parameters '
+            f'({"; ".join(differences)}). Remove that directory to re-run '
+            f'{program}, or restore the previous values in the config.'
+        )
+
 def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker'):
 
     """
@@ -629,6 +666,8 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
     gff_dir = os.path.join(conservation_dir, 'roary_output','gff')
     fasta_dir = os.path.join(conservation_dir, 'corecruncher_output','faa')
 
+    core_parameters = {'min_core_freq': core_threshold, 'min_identity': identity}
+
     if 'roary' in program_list:
         roary_out_dir = os.path.join(conservation_dir, 'roary_output')
         results_dir = os.path.join(roary_out_dir, 'results')
@@ -640,8 +679,10 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
                 # core.min_identity from the config had no effect on the Roary run.
                 print(f'Roary parameters: core frequency {core_threshold}%, identity {identity}%')
                 programs.run_roary(roary_out_dir, gff_dir, results_dir, core_threshold=core_threshold, identity=identity, cpus=cpus, container_engine=container_engine)
+                files.write_manifest(genes_csv_file, core_parameters, extra={'program': 'roary'})
                 print('Finished')
             else:
+                _check_core_run_parameters(genes_csv_file, core_parameters, 'Roary', results_dir)
                 print(f'Roary output file already exists: {genes_csv_file}.')
         else:
             print(f'{gff_dir} not found.')
@@ -649,7 +690,7 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
     if 'corecruncher' in program_list:
         ccruncher_out_dir = os.path.join(conservation_dir, 'corecruncher_output')
         cc_output_file = os.path.join(ccruncher_out_dir, 'families_core.txt')
-        
+
         if os.path.exists(fasta_dir):
             if not files.file_check(cc_output_file):
                 reference_file = f'{organism_name}.faa'
@@ -657,8 +698,10 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
                 # Same here: the config values were received and then ignored.
                 print(f'CoreCruncher parameters: core frequency {core_threshold}%, identity {identity}%')
                 programs.run_core_cruncher(ccruncher_out_dir, reference_file, core_threshold=core_threshold, identity=identity, container_engine=container_engine)
+                files.write_manifest(cc_output_file, core_parameters, extra={'program': 'corecruncher'})
                 print('Finished')
             else:
+                _check_core_run_parameters(cc_output_file, core_parameters, 'CoreCruncher', ccruncher_out_dir)
                 print(f'CoreCruncher output file already exists: {cc_output_file}.')
         else:
             print(f'{fasta_dir} not found.')
@@ -694,7 +737,12 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
             f'Roary did not produce "gene_presence_absence.csv" in {results_dir}.'
         )
 
-    if files.file_check(roary_results_table):
+    # The threshold is applied here, at parse time, so a cached table built with a
+    # different one does not describe the requested core genome. Rebuilding it only
+    # costs a pandas filter, unlike the Roary run itself.
+    table_parameters = {'core_threshold': core_threshold}
+
+    if files.manifest_matches(roary_results_table, table_parameters, label='core_roary.tsv'):
         print(f'Roary output file already exists: {roary_results_table}.')
         return pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
 
@@ -726,7 +774,11 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
         )
 
     roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
-
+    files.write_manifest(
+        roary_results_table,
+        table_parameters,
+        extra={'genomes_analyzed': int(max_isolates), 'core_genes': len(gbk_ids)},
+    )
 
     return roary_table
 
@@ -778,6 +830,14 @@ def corecruncher_output(output_path, organism_name, core_threshold=None):
         print(f'CoreCruncher {organism_name} core genes: {len(core_locus_tag)}')
 
         corecruncher_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_corecruncher',conservation_dir)
+        # Unlike core_roary.tsv, this parse applies no threshold of its own: the
+        # frequency was applied by CoreCruncher when it ran, and a changed value is
+        # refused at that gate. The manifest is provenance, not a cache key.
+        files.write_manifest(
+            cc_results_table,
+            {'core_threshold': core_threshold},
+            extra={'core_families': core_total, 'core_genes': len(core_locus_tag)},
+        )
     else:
         print(f'CoreCruncher output file already exists: {cc_results_table}.')
         corecruncher_table = pd.read_csv(cc_results_table, sep='\t', index_col=0, header=0)
