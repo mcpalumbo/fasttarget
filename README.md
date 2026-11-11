@@ -589,6 +589,27 @@ that taxon's representatives with hits. Unclassified hits contribute to the
 first percentage and have no value for the second. The final FastTarget
 table keeps its existing microbiome columns.
 
+For standalone `human-gut`, FastTarget also summarizes hits to the 31 core
+species from [Silva et al., Table S5](https://doi.org/10.1016/j.chom.2026.01.013).
+The versioned panel in `ftscripts/data/silva_core_human_gut_v2.0.2.tsv` maps
+UHGG v1 IDs via `Genome_accession` to the `Species_rep` of UHGG v2.0.2.
+The final table reports counts, `n/total`, and names of core species,
+genera and families with hits (denominators: 31, 17 and 4). The number
+of core species hit **within** each genus or family is reported separately
+in `silva_core/core_species_by_genus.tsv` and
+`silva_core/core_species_by_family.tsv` in the human-gut results directory.
+The panel must be checked and updated when the catalogue version changes.
+
+Standalone `human-gut` also adds `human_gut_prevalence_ge_<cutoff>_n` and
+`human_gut_prevalence_ge_<cutoff>_n_norm` for cutoffs 30, 40, 50, 60 and 70.
+Thresholds are inclusive and use the mean of Silva's six continent
+prevalences, not abundance. Each count is divided by the number of species
+in the corresponding evaluated subset (226, 158, 99, 50 and 31 for v2.0.2).
+These nested subsets are not additive. The 1,717 representatives without
+prevalence data are excluded. The same summary and the denominators are
+written to `species_blast_results/silva_prevalence/`.
+No family or genus prevalence is inferred from species prevalences.
+
 After running FastTarget with `offtarget.microbiome: True`, use `ftscripts/microbiome_hit_plots.py` to visualize MGnify/offtarget hits for selected locus tags:
 
 ```bash
@@ -607,6 +628,9 @@ The script writes static PNG/SVG plots, reproducible TSV summaries, and an inter
 ```
 
 If a Newick tree is provided with `--tree`, it also writes SVG radial trees highlighting representatives with hits.
+For `human-gut` runs with Silva core results, the interactive report adds a
+separate panel with the counts by rank and a family chart showing which core
+species had hits.
 
 Family and genus summaries group by the complete taxonomic path. Composition plots
 show unclassified hits separately; these hits do not count toward classified

@@ -6,6 +6,7 @@ from ftscripts.microbiome_catalogues import (
     get_catalogue,
 )
 import os
+from pathlib import Path
 import json
 import csv
 import pandas as pd
@@ -1576,6 +1577,201 @@ def microbiome_species_parse(
     )
     result_tables.append(df_total_genomes)
     return tuple(result_tables)
+
+
+# Reference panels are pinned to the same human-gut catalogue version.
+SILVA_CATALOGUE_VERSION = "v2.0.2"
+SILVA_CORE_PANEL_PATH = Path(__file__).with_name("data") / "silva_core_human_gut_v2.0.2.tsv"
+SILVA_PREVALENCE_PANEL_PATH = Path(__file__).with_name("data") / "silva_prevalence_human_gut_v2.0.2.tsv"
+SILVA_PREVALENCE_CUTOFFS = (30, 40, 50, 60, 70)
+
+
+def _write_silva_tsv(frame, path):
+    partial = path.with_suffix(".tsv.part")
+    try:
+        frame.to_csv(partial, sep="\t", index=False)
+        partial.replace(path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def _summarize_silva_core(connection, hits_source, taxonomy_source, manifest, locus_tags, output_dir):
+    """Return one compact row per locus and export the breakdown by core taxon."""
+    panel = pd.read_csv(SILVA_CORE_PANEL_PATH, sep="\t", keep_default_na=False)
+    ids = set(panel["representative_genome_id"])
+    searched = manifest.get("rows_by_representative", {})
+    expected_url = f"https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/{SILVA_CATALOGUE_VERSION}"
+    if manifest.get("catalogue_url", "").rstrip("/") != expected_url:
+        raise ValueError(f"Silva core mapping requires MGnify human-gut {SILVA_CATALOGUE_VERSION}")
+    if len(panel) != 31 or len(ids) != 31 or panel["silva_genome_id"].nunique() != 31:
+        raise ValueError("Silva core mapping must have 31 distinct source IDs and representatives")
+    if set(panel["catalogue_version"]) != {SILVA_CATALOGUE_VERSION}:
+        raise ValueError("Unexpected version in the Silva core mapping")
+    if not ids.issubset(searched):
+        raise ValueError("The microbiome search manifest does not cover all 31 Silva representatives")
+
+    panel["species_name"] = panel["silva_species"].where(
+        panel["silva_species"].ne(""), panel["silva_genome_id"]
+    )
+    connection.register("silva_panel", panel)
+    try:
+        catalogue = connection.execute(f"""
+            SELECT p.representative_genome_id, p.genus, p.family, t.genus, t.family
+            FROM silva_panel p LEFT JOIN {taxonomy_source} t USING (representative_genome_id)
+        """).fetchall()
+        if len(catalogue) != len(panel) or any(pg != tg or pf != tf for _, pg, pf, tg, tf in catalogue):
+            raise ValueError("Silva core mapping does not match the prepared MGnify taxonomy")
+        hits = connection.execute(f"""
+            SELECT DISTINCT h.gene, h.representative_genome_id
+            FROM {hits_source} h JOIN silva_panel USING (representative_genome_id)
+        """).fetchdf()
+    finally:
+        connection.unregister("silva_panel")
+
+    genes = pd.Index(dict.fromkeys(locus_tags), name="gene")
+    observed = hits.merge(panel, on="representative_genome_id", validate="many_to_one")
+    summary = pd.DataFrame(index=genes)
+    details = {}
+    for rank, column in (("species", "species_name"), ("genus", "genus"), ("family", "family")):
+        total = len(panel) if rank == "species" else panel[column].nunique()
+        names = observed.groupby("gene")[column].agg(lambda values: sorted(set(values)))
+        counts = observed.groupby("gene")[
+            "representative_genome_id" if rank == "species" else column
+        ].nunique().reindex(genes, fill_value=0)
+        prefix = f"silva_core_{rank}_hit"
+        summary[f"{prefix}_count"] = counts
+        summary[f"{prefix}_n_over_total"] = counts.astype(str) + f"/{total}"
+        summary[f"{prefix}_names"] = names.map(";".join).reindex(genes, fill_value="")
+        if rank == "species":
+            continue
+        totals = panel.groupby(column)["representative_genome_id"].size().rename("total_core_species")
+        evidence = observed.groupby(["gene", column]).agg(
+            core_species_hit_count=("representative_genome_id", "nunique"),
+            core_species_hit_names=("species_name", lambda values: ";".join(sorted(set(values)))),
+        )
+        index = pd.MultiIndex.from_product([genes, totals.index], names=["gene", column])
+        detail = evidence.reindex(index).join(totals, on=column)
+        detail["core_species_hit_count"] = detail["core_species_hit_count"].fillna(0).astype(int)
+        detail["core_species_hit_names"] = detail["core_species_hit_names"].fillna("")
+        detail["core_species_hit_n_over_total"] = (
+            detail["core_species_hit_count"].astype(str) + "/" + detail["total_core_species"].astype(str)
+        )
+        details[rank] = detail.reset_index()
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_silva_tsv(summary.reset_index(), output_dir / "summary_by_locus.tsv")
+    _write_silva_tsv(panel, output_dir / "panel_mapping.tsv")
+    for rank, detail in details.items():
+        _write_silva_tsv(detail, output_dir / f"core_species_by_{rank}.tsv")
+    return summary.reset_index()
+
+
+def _summarize_silva_prevalence(connection, hits_source, taxonomy_source, manifest, locus_tags, output_dir):
+    """Count distinct species at inclusive global prevalence cutoffs, preserving zero-hit loci."""
+    panel = pd.read_csv(SILVA_PREVALENCE_PANEL_PATH, sep="\t")
+    expected_url = f"https://ftp.ebi.ac.uk/pub/databases/metagenomics/mgnify_genomes/human-gut/{SILVA_CATALOGUE_VERSION}"
+    if manifest.get("catalogue_url", "").rstrip("/") != expected_url:
+        raise ValueError(f"Silva prevalence requires MGnify human-gut {SILVA_CATALOGUE_VERSION}")
+    if panel["representative_genome_id"].duplicated().any():
+        raise ValueError("Duplicate representatives in the Silva prevalence reference")
+    if set(panel["catalogue_version"]) != {SILVA_CATALOGUE_VERSION}:
+        raise ValueError("Unexpected version in the Silva prevalence reference")
+    available = panel["prevalence_global_mean_percent"].notna()
+    if (panel["prevalence_status"].eq("available") != available).any():
+        raise ValueError("Inconsistent missing prevalence annotations")
+    if not panel.loc[available, "prevalence_global_mean_percent"].between(0, 100).all():
+        raise ValueError("Prevalence must be between 0 and 100 percent")
+
+    connection.register("silva_prevalence_panel", panel)
+    try:
+        taxonomy_ids = connection.execute(
+            f"SELECT representative_genome_id FROM {taxonomy_source}"
+        ).fetchdf()["representative_genome_id"]
+        if taxonomy_ids.duplicated().any() or set(taxonomy_ids) != set(panel["representative_genome_id"]):
+            raise ValueError("Silva prevalence reference does not match the prepared catalogue")
+        selected = panel.loc[panel["prevalence_global_mean_percent"].ge(min(SILVA_PREVALENCE_CUTOFFS))]
+        if not set(selected["representative_genome_id"]).issubset(manifest.get("rows_by_representative", {})):
+            raise ValueError("Search manifest does not cover the prevalence subsets")
+        hits = connection.execute(f"""
+            SELECT DISTINCT h.gene, h.representative_genome_id, p.prevalence_global_mean_percent
+            FROM {hits_source} h JOIN silva_prevalence_panel p USING (representative_genome_id)
+            WHERE p.prevalence_global_mean_percent >= {min(SILVA_PREVALENCE_CUTOFFS)}
+        """).fetchdf()
+    finally:
+        connection.unregister("silva_prevalence_panel")
+
+    genes = pd.Index(dict.fromkeys(locus_tags), name="gene")
+    summary = pd.DataFrame(index=genes)
+    denominators = {}
+    for cutoff in SILVA_PREVALENCE_CUTOFFS:
+        total = int(panel["prevalence_global_mean_percent"].ge(cutoff).sum())
+        counts = hits.loc[hits["prevalence_global_mean_percent"].ge(cutoff)].groupby(
+            "gene"
+        )["representative_genome_id"].nunique().reindex(genes, fill_value=0)
+        prefix = f"human_gut_prevalence_ge_{cutoff}"
+        summary[f"{prefix}_n"] = counts
+        summary[f"{prefix}_n_norm"] = counts / total if total else float("nan")
+        denominators[str(cutoff)] = total
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result = summary.reset_index()
+    _write_silva_tsv(result, output_dir / "summary_by_locus.tsv")
+    metadata = {
+        "source_doi": "10.1016/j.chom.2026.01.013",
+        "catalogue_version": SILVA_CATALOGUE_VERSION,
+        "threshold_rule": "global mean prevalence >= cutoff (percent)",
+        "normalization": "distinct species with hit / all evaluated species passing the same cutoff",
+        "denominators": denominators,
+        "with_prevalence": int(available.sum()),
+        "without_prevalence": int((~available).sum()),
+        "missing_prevalence_policy": "excluded, never interpreted as zero",
+    }
+    partial = output_dir / "run_metadata.json.part"
+    partial.write_text(json.dumps(metadata, indent=2) + "\n")
+    partial.replace(output_dir / "run_metadata.json")
+    return result
+
+
+def microbiome_silva_prevalence_parse(databases_path, output_path, organism_name):
+    """Summarize species hits in the fixed global prevalence subsets."""
+    results_dir, hits_path, manifest_path = _microbiome_consolidated_paths(
+        output_path, organism_name, "human-gut",
+    )
+    taxonomy_path = os.path.join(
+        catalogue_species_path(databases_path, "human-gut"), "representative_taxonomy.parquet",
+    )
+    manifest = _read_microbiome_manifest(manifest_path)
+    if not isinstance(manifest, dict):
+        raise ValueError("No valid human-gut search manifest for Silva prevalence")
+    with duckdb.connect() as connection:
+        return _summarize_silva_prevalence(
+            connection, f"read_parquet('{_duckdb_path(hits_path)}')",
+            f"read_parquet('{_duckdb_path(taxonomy_path)}')", manifest,
+            metadata.ref_gbk_locus(output_path, organism_name),
+            os.path.join(results_dir, "silva_prevalence"),
+        )
+
+
+def microbiome_silva_core_parse(databases_path, output_path, organism_name):
+    """Add the fixed Silva core summary using the consolidated human-gut search."""
+    catalogue = "human-gut"
+    results_dir, hits_path, manifest_path = _microbiome_consolidated_paths(
+        output_path, organism_name, catalogue,
+    )
+    taxonomy_path = os.path.join(
+        catalogue_species_path(databases_path, catalogue), "representative_taxonomy.parquet",
+    )
+    manifest = _read_microbiome_manifest(manifest_path)
+    if not isinstance(manifest, dict):
+        raise ValueError("No valid human-gut search manifest for the Silva core")
+    with duckdb.connect() as connection:
+        return _summarize_silva_core(
+            connection, f"read_parquet('{_duckdb_path(hits_path)}')",
+            f"read_parquet('{_duckdb_path(taxonomy_path)}')", manifest,
+            metadata.ref_gbk_locus(output_path, organism_name), os.path.join(results_dir, "silva_core"),
+        )
 
 
 def microbiome_protein_clusters_parse (output_path, organism_name, identity_filter, coverage_filter):

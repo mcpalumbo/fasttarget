@@ -707,6 +707,75 @@ def write_tsvs(outdir, species_hits, summary_gene, summary_family, summary_genus
     )
 
 
+def load_silva_plot_data(args, warnings):
+    """Load the optional Silva results from the same human-gut run."""
+    if args.catalogue != "human-gut":
+        return None
+    directory = os.path.join(os.path.dirname(hits_path(args)), "silva_core")
+    summary_path = os.path.join(directory, "summary_by_locus.tsv")
+    family_path = os.path.join(directory, "core_species_by_family.tsv")
+    if not os.path.isdir(directory):
+        return None
+    try:
+        summary = pd.read_csv(summary_path, sep="\t", dtype={"gene": str}, keep_default_na=False)
+        families = pd.read_csv(family_path, sep="\t", dtype={"gene": str}, keep_default_na=False)
+        required_summary = {"gene", *(f"silva_core_{rank}_hit_n_over_total" for rank in ("species", "genus", "family"))}
+        required_family = {"gene", "family", "core_species_hit_count", "total_core_species",
+                           "core_species_hit_n_over_total", "core_species_hit_names"}
+        if not required_summary.issubset(summary) or not required_family.issubset(families):
+            raise ValueError("missing columns")
+        for column in ("core_species_hit_count", "total_core_species"):
+            families[column] = pd.to_numeric(families[column], errors="raise")
+        if summary["gene"].duplicated().any() or families.duplicated(["gene", "family"]).any():
+            raise ValueError("duplicate locus or family")
+        return summary.set_index("gene"), families
+    except (OSError, ValueError) as error:
+        warn(warnings, f"Cannot plot the Silva core results: {error}")
+        return None
+
+
+def render_silva_panel(silva_data, gene, include_plotlyjs):
+    """Show the global core coverage and family breakdown for a selected locus."""
+    if silva_data is None or gene not in silva_data[0].index:
+        return ""
+    import plotly.graph_objects as go
+    from plotly.io import to_html
+
+    summary, families = silva_data
+    rows = families.loc[families["gene"].eq(gene)].sort_values("family")
+    if rows.empty:
+        return ""
+    cards = "".join(
+        f'<div class="card"><div class="label">Core {label} with hits</div>'
+        f'<div class="value">{html.escape(str(summary.at[gene, f"silva_core_{rank}_hit_n_over_total"]))}</div></div>'
+        for rank, label in (("species", "species"), ("genus", "genera"), ("family", "families"))
+    )
+    count = rows["core_species_hit_count"]
+    total = rows["total_core_species"]
+    hover_names = [
+        "<br>".join(html.escape(name) for name in names.split(";") if name) or "No core species with hits"
+        for names in rows["core_species_hit_names"]
+    ]
+    ratios = rows["core_species_hit_n_over_total"]
+    fig = go.Figure()
+    fig.add_bar(
+        y=rows["family"], x=count, orientation="h", name="With hit",
+        marker_color="#377a80", customdata=list(zip(ratios, hover_names)),
+        hovertemplate="%{y}: %{customdata[0]}<br>%{customdata[1]}<extra></extra>",
+    )
+    fig.add_bar(
+        y=rows["family"], x=total - count, orientation="h", name="Without hit",
+        marker_color="#e4e9ed", text=ratios, textposition="outside",
+        customdata=list(zip(ratios, hover_names)),
+        hovertemplate="%{y}: %{customdata[0]}<br>%{customdata[1]}<extra></extra>",
+        cliponaxis=False,
+    )
+    fig.update_layout(barmode="stack", xaxis_title="Core species", height=300,
+                      margin=dict(t=15, l=15, r=55, b=45), legend=dict(orientation="h"))
+    chart = to_html(fig, include_plotlyjs=include_plotlyjs, full_html=False)
+    return f'<div class="panel"><h3>Silva core microbiome</h3><div class="cards">{cards}</div>{chart}</div>'
+
+
 def write_interactive_html(
     outdir,
     species_hits,
@@ -714,6 +783,7 @@ def write_interactive_html(
     summary_family,
     locus_tags,
     warnings,
+    silva_data=None,
 ):
     """
     Write the interactive Plotly HTML microbiome hit report.
@@ -810,6 +880,8 @@ def write_interactive_html(
             )
             box_html = to_html(fig_box, include_plotlyjs=False, full_html=False)
 
+        silva_html = render_silva_panel(silva_data, gene, not plotly_loaded)
+        plotly_loaded = plotly_loaded or bool(silva_html)
         sections.append(
             f"""
             <section class="gene-section" id="section-{html.escape(gene)}"
@@ -819,6 +891,7 @@ def write_interactive_html(
                 <div class="panel"><h3>Taxonomic treemap</h3>{treemap_html}</div>
                 <div class="panel"><h3>Top families</h3>{table_html}</div>
                 <div class="panel"><h3>Identity distribution</h3>{box_html}</div>
+                {silva_html}
             </section>
             """
         )
@@ -1028,6 +1101,7 @@ def main():
     )
     plot_identity_boxplot(species_hits, locus_tags, outdir)
     plot_radial_tree(args.tree, species_hits, locus_tags, outdir, warnings)
+    silva_data = load_silva_plot_data(args, warnings)
     if warnings:
         pd.DataFrame({"warning": warnings}).to_csv(
             os.path.join(outdir, "warnings.tsv"),
@@ -1041,6 +1115,7 @@ def main():
         summary_family,
         locus_tags,
         warnings,
+        silva_data=silva_data,
     )
     print(f"Microbiome hit plots written to: {outdir}")
 

@@ -494,6 +494,21 @@ def offtarget_module(config, databases_path, output_path, cpus):
                             export_taxonomy_details=True,
                         )
                         module_tables.extend(result_tables)
+                        if catalogue_name == "human-gut":
+                            try:
+                                module_tables.append(offtargets.microbiome_silva_core_parse(
+                                    databases_path, output_path, organism_name,
+                                ))
+                            except Exception as error:
+                                logging.exception("Silva core annotation failed: %s", error)
+                                print(f"Warning: Silva core annotation was not included: {error}")
+                            try:
+                                module_tables.append(offtargets.microbiome_silva_prevalence_parse(
+                                    databases_path, output_path, organism_name,
+                                ))
+                            except Exception as error:
+                                logging.exception("Silva prevalence annotation failed: %s", error)
+                                print(f"Warning: Silva prevalence annotation was not included: {error}")
                     logging.info('Microbiome offtarget analysis finished')
                     print('----- Finished -----')
                             
