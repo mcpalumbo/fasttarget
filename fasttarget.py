@@ -783,9 +783,39 @@ def merge_final_tables(config, output_path, tables):
     """
 
     organism_name = config.organism['name']
-    if any(getattr(config, source, False) for source in ('alphafill', 'chembl', 'bindingdb')) and tables:
-        reference_genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism_name)))
+
+    tables = [table for table in tables if table is not None]
+
+    # Anchor every merge on the reference gene list from the annotation.
+    #
+    # This used to happen only when a ligand source was configured. Without the
+    # anchor the gene set of the output is whichever module's table happens to be
+    # first in the list, and because every join below is a left join, any gene
+    # that module dropped disappears from every other module's columns too. That
+    # made the row set of the results table depend on unrelated config and on
+    # module ordering. The annotated CDS set is the only correct anchor: it is the
+    # user's own gene list, so the output always has exactly one row per gene.
+    reference_genes = list(dict.fromkeys(metadata.ref_gbk_locus(output_path, organism_name)))
+
+    if reference_genes:
+        for table in tables:
+            if 'gene' not in getattr(table, 'columns', []):
+                continue
+            unknown = set(table['gene']) - set(reference_genes)
+            if unknown:
+                # Not fatal, but it means a module emitted genes the annotation
+                # does not contain; those rows are dropped by the join below.
+                logging.warning(
+                    f'{len(unknown)} gene(s) in a module table are absent from the '
+                    f'reference annotation and will be dropped, e.g. '
+                    f'{sorted(unknown)[:5]}'
+                )
         tables = [pd.DataFrame({'gene': reference_genes}), *tables]
+    else:
+        logging.error(
+            'No reference genes found in the annotation; falling back to merging on '
+            'the first module table, whose gene set may be incomplete.'
+        )
 
     # Merge dfs
     print_stylized('RESULTS')
@@ -798,7 +828,15 @@ def merge_final_tables(config, output_path, tables):
         logging.info(f'Results directory created in {results_path}')
     
 
-    if len(tables) > 1:
+    # The anchor is not a result: a run where every module failed must not look
+    # like a successful run that produced a gene list.
+    module_table_count = len(tables) - (1 if reference_genes else 0)
+
+    if module_table_count == 0:
+        logging.error('----- Error: No module produced a results table. -----')
+        print('ERROR: no module produced a results table; nothing to merge.')
+        results = None
+    elif len(tables) > 1:
         combined_df = tables[0]
         for df in tables[1:]:
             if df is not None:
