@@ -327,32 +327,44 @@ def download_with_progress(url, filepath, max_retries=3, backoff_factor=2):
                 print("All retry attempts failed.")
                 return False
 
-def download_with_wget(url, filepath, max_retries=5):
+def download_with_wget(url, filepath, max_retries=5, quiet=False):
     """
-    Download a file using wget with progress, resume capability, and retry logic.
-    
+    Download a file using wget with resume capability and retry logic.
+
+    The download goes to '<filepath>.part' and is renamed to filepath only after wget
+    finishes, so an interrupted download never leaves a truncated file that looks
+    complete (callers test existence with files.file_check). A later call resumes the
+    .part file with 'wget -c'.
+
     :param url: The URL to download from.
     :param filepath: The local path where the file should be saved.
     :param max_retries: Number of retry attempts if download fails.
+    :param quiet: Print one line per file instead of wget's progress dots.
+    :return: True if the file was downloaded, False after max_retries failures.
     """
-    attempt = 0
-    success = False
-    
-    while attempt < max_retries and not success:
+    partial = f'{filepath}.part'
+    progress = ['-nv'] if quiet else ['--progress=dot:mega']
+    for attempt in range(1, max_retries + 1):
         try:
-            # Use wget with resume and progress reporting
-            wget_command = ['wget', '-c', '--progress=dot:mega', '-O', filepath, url]
-            programs.run_bash_command(wget_command)
-            print('Download complete.')
-            success = True  # Mark success if wget completes
+            programs.run_bash_command(['wget', '-c', *progress, '-O', partial, url])
+            os.replace(partial, filepath)
+            if not quiet:
+                print('Download complete.')
+            return True
         except Exception as e:
-            attempt += 1
             print(f'Error downloading {url}: {e}')
             if attempt < max_retries:
                 print(f'Retrying... ({attempt}/{max_retries})')
-                time.sleep(2)  # Optional: wait before retrying
-            else:
-                print('Max retries reached. Download failed.')
+                time.sleep(2)
+    print(f'Max retries reached. Download failed: {url}')
+    return False
+
+
+def _format_duration(seconds):
+    seconds = int(max(0, seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f'{hours}h {minutes:02d}m' if hours else f'{minutes}m {secs:02d}s'
 
 
 def simple_concat_faa(input_dir: str, output_path: str):
@@ -644,7 +656,7 @@ def extract_microbiome_species_ids(database_path, catalogue_name="human-gut"):
         raise FileNotFoundError(f"Metadata file not found: {meta_path}")
 
 
-def download_microbiome_species_catalogue(database_path, catalogue_name="human-gut"):
+def download_microbiome_species_catalogue(database_path, catalogue_name="human-gut", download_workers=4):
 
     """
     Downloads a supported MGnify microbiome species catalogue.
@@ -701,10 +713,6 @@ def download_microbiome_species_catalogue(database_path, catalogue_name="human-g
     else:
 
         species_url = f"{base_url}species_catalogue/"
-
-        r = requests.get(species_url)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
         representative_ids = set(
             extract_microbiome_species_ids(database_path, catalogue_name)
         )
@@ -715,54 +723,47 @@ def download_microbiome_species_catalogue(database_path, catalogue_name="human-g
                 f"species representatives; {expected_species} were expected."
             )
 
-        species_links = [
-            a["href"] for a in soup.find_all("a")
-            if a.get("href", "").endswith("/")
-            and not a["href"].startswith(("../", "/"))
-        ]
+        # MGnify layout: species_catalogue/<first 11 chars of the ID>/<ID>/genome/<ID>.faa
+        # (e.g. MGYG0004735/MGYG000473556). URLs are built directly instead of crawling
+        # two HTML listings per species folder.
         expected_files = []
-        located_representatives = set()
+        pending = []
+        for genome_id in sorted(representative_ids):
+            faa_name = f"{genome_id}.faa"
+            expected_files.append(faa_name)
+            faa_out = os.path.join(species_path, genome_id, faa_name)
+            if not files.file_check(faa_out):
+                faa_url = f"{species_url}{genome_id[:11]}/{genome_id}/genome/{faa_name}"
+                pending.append((faa_url, faa_out))
 
-        for sp in species_links:
-            sp_url = species_url + sp
-            r2 = requests.get(sp_url)
-            r2.raise_for_status()
-            soup2 = BeautifulSoup(r2.text, "html.parser")
+        total = len(expected_files)
+        already = total - len(pending)
+        print(f"{catalogue_name}: {total} species, {already} already downloaded, "
+              f"{len(pending)} to download with {download_workers} parallel downloads.", flush=True)
 
-            genome_links = [
-                a["href"] for a in soup2.find_all("a")
-                if a.get("href", "").endswith("/")
-                and not a["href"].startswith(("../", "/"))
-            ]
+        def fetch(job):
+            url, out = job
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            return os.path.basename(out), download_with_wget(url, out, quiet=True)
 
-            for genome in genome_links:
-                genome_id = genome.rstrip("/")
-                if genome_id not in representative_ids:
-                    continue
-                located_representatives.add(genome_id)
-
-                faa_url = f"{sp_url}{genome}genome/{genome_id}.faa"
-
-                genome_path = os.path.join(species_path, genome_id)
-                os.makedirs(genome_path, exist_ok=True)
-
-                faa_name = os.path.basename(faa_url)
-                faa_out = os.path.join(genome_path, faa_name)
-                expected_files.append(faa_name)
-
-                if not files.file_check(faa_out):
-                    print(f"Downloading {faa_name}...")
-                    download_with_wget(faa_url, faa_out)
-                else:
-                    print(f"{faa_name} already exists.")
-
-        missing_representatives = representative_ids - located_representatives
-        if missing_representatives:
-            raise RuntimeError(
-                f"Could not locate {len(missing_representatives)} "
-                f"{catalogue_name} species representatives on the MGnify FTP site."
-            )
-        
+        failed = []
+        started = time.time()
+        if pending:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=max(1, download_workers)) as executor:
+                futures = [executor.submit(fetch, job) for job in pending]
+                for done, future in enumerate(as_completed(futures), start=1):
+                    name, ok = future.result()
+                    if not ok:
+                        failed.append(name)
+                    elapsed = time.time() - started
+                    rate = done / elapsed if elapsed else 0.0
+                    eta = (len(pending) - done) / rate if rate else 0.0
+                    print(f"[{catalogue_name} {already + done}/{total}, {100 * (already + done) / total:.1f}%] "
+                          f"{name} {'ok' if ok else 'FAILED'} | {rate:.1f} files/s | "
+                          f"remaining ~{_format_duration(eta)} | failed {len(failed)}", flush=True)
+        if failed:
+            print(f"{len(failed)} {catalogue_name} files failed; run the download again to retry them.")
         # Check for missing files
         downloaded_files = [os.path.basename(f) for f in glob.glob(os.path.join(species_path, "**", "*.faa"), recursive=True)]
         missing_files = sorted(set(expected_files) - set(downloaded_files))
@@ -777,6 +778,12 @@ def download_microbiome_species_catalogue(database_path, catalogue_name="human-g
                     f.write(mf + "\n")
             else:
                 f.write("All files downloaded successfully!\n")
+        if missing_files:
+            raise RuntimeError(
+                f"{len(missing_files)} {catalogue_name} species files are missing "
+                f"(listed in {check_file}). Run the download again to retry them; "
+                "the catalogue is not indexed while incomplete."
+            )
 
 def check_microbiome_species_catalogue_download(
     database_path,
@@ -1605,7 +1612,7 @@ def download_and_index_human_structures(database_path, cpus=None, container_engi
 
     print('----- 1. Finished -----')
 
-def download_and_index_microbiome(database_path, catalogue_names=None):
+def download_and_index_microbiome(database_path, catalogue_names=None, download_workers=4):
     """
     Downloads and indexes Microbiome database.
 
@@ -1625,13 +1632,13 @@ def download_and_index_microbiome(database_path, catalogue_names=None):
         check_file = os.path.join(species_path, 'download_check.txt')
 
         if not files.file_check(check_file):
-            download_microbiome_species_catalogue(database_path, catalogue_name)
+            download_microbiome_species_catalogue(database_path, catalogue_name, download_workers=download_workers)
         else:
             with open(check_file) as check_handle:
                 content = check_handle.read()
             if "List of missing files:" in content:
                 print(f"Some files are missing from {catalogue_name}; retrying.")
-                download_microbiome_species_catalogue(database_path, catalogue_name)
+                download_microbiome_species_catalogue(database_path, catalogue_name, download_workers=download_workers)
 
         index_db_blast_microbiome_species_catalogue(
             database_path,
@@ -1960,6 +1967,7 @@ def main_download(
     cpus=None,
     container_engine='docker',
     microbiome_catalogues=None,
+    download_workers=4,
 ):
     """Main download function"""
 
@@ -1989,6 +1997,7 @@ def main_download(
                 download_and_index_microbiome(
                     database_path,
                     microbiome_catalogues,
+                    download_workers=download_workers,
                 )
                 success_count += 1
                     
@@ -2072,6 +2081,8 @@ if __name__ == '__main__':
         default=['human-gut'],
         help="MGnify catalogues to download with --download microbiome (default: human-gut)",
     )
+    parser.add_argument('--download-workers', type=int, default=4,
+                        help="Parallel file downloads for MGnify species catalogues (default: 4)")
 
     args = parser.parse_args()
     
@@ -2087,4 +2098,5 @@ if __name__ == '__main__':
             cpus=args.cpus,
             container_engine=args.container_engine,
             microbiome_catalogues=args.microbiome_catalogues,
+            download_workers=args.download_workers,
         )
