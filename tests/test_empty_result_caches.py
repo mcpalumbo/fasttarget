@@ -133,3 +133,75 @@ def test_a_gene_without_results_is_recorded_rather_than_dropped(foldseek_results
 
     assert GENES[4] in parsed, 'a gene whose search produced nothing must still have an entry'
     assert parsed[GENES[4]]['target_foldseek'] is None
+
+
+# ------------------------------- why there is no hit
+
+def test_the_three_reasons_for_no_hit_are_distinguishable(foldseek_results):
+    """
+    'No human homolog' is a finding about the protein and a good sign for a drug
+    target; 'the search never ran' is a failure of the run. They used to produce
+    the same record with thirteen None fields.
+    """
+    output_path, organism_name, results_dir, mapping = foldseek_results
+
+    # One gene searched with hits, one never searched, one with an unreadable file.
+    unreadable = os.path.join(results_dir, 'AF_X_output_foldseek', 'AF_X_foldseek_results.tsv')
+    os.makedirs(os.path.dirname(unreadable), exist_ok=True)
+    open(unreadable, 'w').close()
+
+    mapping = dict(mapping)
+    mapping[GENES[4]] = []
+    mapping['GENE_UNREADABLE'] = [unreadable]
+
+    parsed = offtargets.foldseek_human_parser(output_path, organism_name, mapping)
+
+    assert parsed[GENES[0]]['foldseek_status'] == 'hit'
+    assert parsed[GENES[4]]['foldseek_status'] == 'not_searched'
+    assert parsed['GENE_UNREADABLE']['foldseek_status'] == 'result_unreadable'
+
+
+def test_a_search_with_no_hits_is_recorded_as_such(organism):
+    output_path, organism_name = organism
+    results_dir = os.path.join(output_path, organism_name, 'offtarget', 'foldseek_results')
+    gene_dir = os.path.join(results_dir, 'AF_empty_output_foldseek')
+    os.makedirs(gene_dir, exist_ok=True)
+    path = os.path.join(gene_dir, 'AF_empty_foldseek_results.tsv')
+    with open(path, 'w') as handle:
+        # A header with no rows: Foldseek ran and found nothing.
+        handle.write('query\ttarget\talnlen\tqcov\ttcov\tlddt\tqtmscore\tttmscore\t'
+                     'alntmscore\trmsd\tprob\tpident\tevalue\n')
+
+    parsed = offtargets.foldseek_human_parser(output_path, organism_name, {GENES[0]: [path]})
+
+    assert parsed[GENES[0]]['foldseek_status'] == 'no_hits'
+    assert parsed[GENES[0]]['target_foldseek'] is None
+
+
+def test_the_reason_reaches_the_results_table(foldseek_results):
+    output_path, organism_name, results_dir, mapping = foldseek_results
+
+    offtargets.foldseek_human_parser(output_path, organism_name, mapping)
+    merged = offtargets.merge_foldseek_data(output_path, organism_name)
+    table = offtargets.final_foldseek_structure_table(output_path, organism_name, merged)
+
+    assert 'FS_status' in table.columns
+    statuses = dict(zip(table['gene'], table['FS_status']))
+    assert statuses[GENES[0]] == 'hit'
+    assert statuses[GENES[4]] == 'not_searched'
+
+
+def test_a_gene_with_no_reference_structure_is_labelled_as_such(foldseek_results):
+    """
+    A gene the structures module never resolved is a third situation again: it
+    was not searched because there was nothing to search with.
+    """
+    output_path, organism_name, results_dir, mapping = foldseek_results
+    searched = {gene: paths for gene, paths in mapping.items() if paths}
+
+    offtargets.foldseek_human_parser(output_path, organism_name, searched)
+    merged = offtargets.merge_foldseek_data(output_path, organism_name)
+    table = offtargets.final_foldseek_structure_table(output_path, organism_name, merged)
+
+    statuses = dict(zip(table['gene'], table['FS_status']))
+    assert statuses[GENES[4]] == 'no_reference_structure'

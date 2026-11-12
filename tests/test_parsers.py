@@ -121,12 +121,13 @@ def test_roary_table_is_rebuilt_when_the_threshold_changes(organism):
     assert _true_genes(relaxed, 'core_roary') == [GENES[0], GENES[1]]
 
 
-def test_roary_single_genome_makes_every_present_gene_core(organism):
+def test_roary_single_genome_makes_every_gene_core(organism):
+    """With one genome every reference gene is in 100% of the cohort."""
     output_path, organism_name = organism
-    write_roary_inputs(output_path, organism_name, {GENES[0]: 1, GENES[1]: 1}, genomes=1)
+    write_roary_inputs(output_path, organism_name, {}, genomes=1)
 
     table = genome.roary_output(output_path, organism_name, core_threshold=0.99)
-    assert _true_genes(table, 'core_roary') == [GENES[0], GENES[1]]
+    assert _true_genes(table, 'core_roary') == sorted(GENES)
 
 
 def test_roary_missing_results_raises_instead_of_returning_an_unbound_name(organism):
@@ -228,7 +229,7 @@ def test_corecruncher_empty_core_is_a_valid_result(organism):
         output_path, organism_name, 'conservation', 'corecruncher_output', 'families_core.txt'
     )
     with open(families, 'w') as handle:
-        handle.write('other.faa&X\tother2.faa&Y\n')
+        handle.write('genome_01.faa&genome_01_x\tgenome_02.faa&genome_02_x\n')
 
     table = genome.corecruncher_output(output_path, organism_name, core_threshold=99)
     assert _true_genes(table, 'core_corecruncher') == []

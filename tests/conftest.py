@@ -165,31 +165,48 @@ def write_roary_inputs(output_path, organism_name, presence, genomes=10):
     with open(os.path.join(results_dir, 'gene_presence_absence.csv'), 'w', newline='') as handle:
         writer = csv.writer(handle)
         writer.writerow(ROARY_METADATA_COLUMNS + samples)
-        for gene, isolates in presence.items():
+        # Every translated reference locus must appear, because its occupancy is
+        # what the threshold is applied to: a gene absent from the table has no
+        # occupancy at all, which is not the same as an occupancy of one. Genes the
+        # caller did not mention are present in the reference only.
+        for gene in GENES:
+            isolates = max(1, presence.get(gene, 1))
             # The reference is always one of the carriers, so the gene has an id
             # in the reference column and can be translated to a locus tag.
             carriers = samples[:isolates]
             cells = [f'{sample}_{gene}' if sample in carriers else '' for sample in samples]
-            if carriers:
-                cells[0] = gene if samples[0] in carriers else cells[0]
+            cells[0] = gene
             writer.writerow([
                 gene, '', 'synthetic protein', isolates, isolates, 1.0,
                 1, 1, '', '', '', 180, 180, 180,
             ] + cells)
 
 
-def write_corecruncher_inputs(output_path, organism_name, core_genes):
+def write_corecruncher_inputs(output_path, organism_name, core_genes, genomes=10):
     """
     Write the families_core.txt the CoreCruncher parser reads.
 
     :param output_path: Output directory.
     :param organism_name: Organism name.
     :param core_genes: Genes that belong to a core family.
+    :param genomes: Number of genomes in the cohort, the reference included.
     """
     ccruncher = os.path.join(output_path, organism_name, 'conservation', 'corecruncher_output')
-    os.makedirs(os.path.join(ccruncher, 'faa'), exist_ok=True)
+    faa_dir = os.path.join(ccruncher, 'faa')
+    os.makedirs(faa_dir, exist_ok=True)
+
+    # The parser checks that the cohort it ran over includes the reference, so the
+    # faa directory has to hold it: a core genome computed without the reference
+    # genome in the cohort would describe other organisms.
+    for sample in [organism_name] + [f'genome_{index:02d}' for index in range(1, genomes)]:
+        with open(os.path.join(faa_dir, f'{sample}.faa'), 'w') as handle:
+            for gene in GENES:
+                handle.write(f'>{sample}_{gene}\n{SEQUENCES[gene]}\n')
 
     with open(os.path.join(ccruncher, 'families_core.txt'), 'w') as handle:
         for gene in core_genes:
-            # The parser keys on '<reference>.faa&<locus_tag>'.
-            handle.write(f'{organism_name}.faa&{gene}\tother.faa&X_{gene}\n')
+            # Members are '<genome>.faa&<locus_tag>', and every genome named has
+            # to belong to the cohort the run used.
+            handle.write(
+                f'{organism_name}.faa&{gene}\tgenome_01.faa&genome_01_{gene}\n'
+            )
