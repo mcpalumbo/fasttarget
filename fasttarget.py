@@ -135,7 +135,7 @@ def metabolic_module(config, output_path):
                 logging.info('Curated ubiquitous file: Not provided (will use auto-generated)')
 
             # Parse metabolic files, make network and calculate centrality
-            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file)
+            df_centrality, df_edges, producing_df, consuming_df, both_df = pathways.run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_file, smarttable_file, curated_ubiquitous_file, network_settings=config.metabolism_pathwaytools.get('network_metrics'))
             module_tables.append(df_centrality)
             module_tables.append(df_edges)
             module_tables.append(producing_df)
@@ -171,7 +171,7 @@ def metabolic_module(config, output_path):
                 logging.info('Filter file: Not provided (will use default frequency filter)')
 
             # Parse metabolic files, make network and calculate centrality
-            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine=config.container_engine)
+            mgt_bc_df, mgt_degree_df, mgt_consumption_df, mgt_production_df = pathways.run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine=config.container_engine, network_settings=config.metabolism_sbml.get('network_metrics'))
 
             module_tables.append(mgt_bc_df)
             module_tables.append(mgt_degree_df)
@@ -408,17 +408,17 @@ def conservation_module(config, databases_path, output_path, cpus):
             genome.core_download_genomes_ncbi(output_path, organism_name, tax_id, accession_list=accession_list)
             genome.core_download_missing_accessions(output_path, organism_name, tax_id, accession_list=accession_list)
             logging.info('Genomes downloaded')
+            genome.conservation_annotation_report(
+                os.path.join(output_path, organism_name, 'conservation', f'{organism_name}_dataset', 'ncbi_dataset', 'data'),
+                os.path.join(output_path, organism_name, 'conservation', 'annotation_provenance.tsv'))
 
             # Keep genomes with human as host. Check presence of .gff and .faa files for each strain
             print('----- 1. Selecting genomes -----')
             # If accession_list was provided, don't filter by host; otherwise filter for human host
             filter_by_host = accession_list is None or len(accession_list) == 0
             from ftscripts import dereplication
-            if dereplication.options(config.core)[0]:
-                output_path = dereplication.prepare(output_path, organism_name, config.core, cpus,
-                                                    filter_by_host, config.container_engine)
-            else:
-                genome.core_check_files(output_path, organism_name, container_engine=config.container_engine, filter_by_host=filter_by_host)
+            output_path = dereplication.prepare(output_path, organism_name, config.core, cpus,
+                                                filter_by_host, config.container_engine)
             logging.info('Genomes filtered')
             print('----- 1. Finished -----')
 

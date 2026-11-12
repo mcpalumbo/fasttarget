@@ -339,6 +339,20 @@ def validate_config(config):
             if not os.path.exists(filter_path):
                 errors.append(f"metabolism-SBML filter_file not found: {filter_path}")
     
+    for section in ('metabolism-PathwayTools', 'metabolism-SBML'):
+        settings = config.get(section, {}).get('network_metrics', {})
+        if not isinstance(settings, dict):
+            errors.append(f'{section}.network_metrics must be a mapping')
+            continue
+        repetitions, seed = settings.get('random_networks', 100), settings.get('seed', 42)
+        alpha = settings.get('pagerank_alpha', 0.85)
+        if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
+            errors.append(f'{section}.random_networks must be a positive integer')
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            errors.append(f'{section}.seed must be an integer')
+        if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not 0 < alpha < 1:
+            errors.append(f'{section}.pagerank_alpha must be in (0,1)')
+
     # Validate core genome section
     if 'core' in config and config['core'].get('enabled'):
         core = config['core']
