@@ -110,7 +110,10 @@ def select(dataset, destination, min_genomes=300, cpus=4, reference=None, human_
         listing = destination / 'genomes.txt'
         listing.write_text(''.join(str(inputs / name) + '\n' for name in sorted(candidates)))
         command = ['dRep', 'dereplicate', str(destination / 'drep'), '-g', str(listing),
-                   '-p', str(cpus), '--S_algorithm', 'fastANI', '-sa', '0.999', '-nc', '0.90',
+                   # -pa 0.998: MASH primary clusters at 2x the secondary ANI distance, so
+                   # fastANI only compares near-identical genomes instead of all-vs-all
+                   # (a single-species cohort otherwise collapses into one primary cluster).
+                   '-p', str(cpus), '--S_algorithm', 'fastANI', '-pa', '0.998', '-sa', '0.999', '-nc', '0.90',
                    '-cm', 'larger', '--clusterAlg', 'average', '--ignoreGenomeQuality', '-l', '0',
                    '-comW', '0', '-conW', '0', '-strW', '0', '-N50W', '0', '-sizeW', '0', '-centW', '1']
         with (destination / 'drep.log').open('w') as log:
