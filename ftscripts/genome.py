@@ -289,6 +289,80 @@ def gbk_to_fasta(gbk_file, output_file_fna=None, output_file_faa=None, output_fi
             with open(destination, 'w') as handle:
                 handle.writelines(entries)
 
+def _gff_seqids(gff_file):
+    """Sequence IDs used by the feature lines, and the IDs of the ##FASTA records."""
+    feature_ids, fasta_ids, in_fasta = set(), [], False
+    with open(gff_file) as handle:
+        for line in handle:
+            if in_fasta:
+                if line.startswith('>'):
+                    fasta_ids.append(line[1:].split()[0] if line[1:].strip() else '')
+            elif line.strip() == '##FASTA':
+                in_fasta = True
+            elif line.strip() and not line.startswith('#'):
+                feature_ids.add(line.split('\t', 1)[0])
+    return feature_ids, fasta_ids
+
+
+def reconcile_gff_seqids(gff_file):
+    """Make every feature seqid of a GFF have a sequence in its ##FASTA section.
+
+    Roary extracts each CDS from the FASTA record named in column 1 of the GFF. When
+    that name is not among the FASTA headers it extracts nothing and drops the
+    genome with only a warning, so the whole run finishes with the genome missing.
+    bp_genbank2gff3 produces exactly that for a GenBank whose LOCUS name differs
+    from its ACCESSION (the Pseudomonas Genome DB writes LOCUS NC_008463.1 with
+    ACCESSION NC_008463): the gene/CDS lines take the LOCUS name, while the region
+    line, ##sequence-region and the FASTA take the accession. A feature seqid that
+    differs from exactly one FASTA record only by the version suffix is rewritten
+    to that record's name; any other mismatch is an error.
+
+    :return: dict of rewritten feature seqids {old: new}; empty when consistent.
+    """
+    feature_ids, fasta_ids = _gff_seqids(gff_file)
+    present = set(fasta_ids)
+    missing = sorted(feature_ids - present)
+    if not missing:
+        return {}
+
+    def unversioned(identifier):
+        return identifier.rsplit('.', 1)[0]
+
+    renames = {}
+    for seqid in missing:
+        candidates = sorted(f for f in present if unversioned(f) == unversioned(seqid))
+        if len(candidates) != 1:
+            raise ValueError(
+                f'{gff_file}: feature seqid {seqid!r} has no sequence in the ##FASTA section '
+                f'(candidates: {candidates}); Roary would extract no proteins from it'
+            )
+        renames[seqid] = candidates[0]
+
+    directory = os.path.dirname(os.path.abspath(gff_file))
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile('w', dir=directory, prefix='.gff-', delete=False) as out, \
+                open(gff_file) as source:
+            temporary = out.name
+            in_fasta = False
+            for line in source:
+                if not in_fasta:
+                    if line.strip() == '##FASTA':
+                        in_fasta = True
+                    elif line.strip() and not line.startswith('#'):
+                        seqid, sep, rest = line.partition('\t')
+                        if seqid in renames:
+                            line = renames[seqid] + sep + rest
+                out.write(line)
+        os.replace(temporary, gff_file)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
+    logging.warning('Rewrote GFF feature seqids to match the ##FASTA records in %s: %s', gff_file, renames)
+    return renames
+
+
 def ref_genome_files(gbk_file, output_path, organism_name, container_engine='docker'):
     """Prepare a reference generation, or reuse only byte-verified artifacts.
 
@@ -321,6 +395,17 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
                 'Use a new organism output directory to avoid reusing stale downstream results. '
                 f'Existing files were preserved: {output_path}'
             )
+        feature_ids, fasta_ids = _gff_seqids(os.path.join(output_path, names['gff']))
+        if feature_ids - set(fasta_ids):
+            # Byte-verified, but built before reconcile_gff_seqids existed: Roary
+            # would silently drop this genome after hours of clustering.
+            raise RuntimeError(
+                f"{names['gff']} in {output_path} has feature seqids "
+                f"{sorted(feature_ids - set(fasta_ids))} without a ##FASTA sequence, so Roary "
+                f"would extract no proteins from it. Rebuild it with "
+                f"genome.reconcile_gff_seqids and update {os.path.basename(manifest_path)}, "
+                f"or use a new organism output directory."
+            )
         logging.info('Reusing verified reference artifacts in %s', output_path)
         return
 
@@ -341,6 +426,7 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
             if os.path.exists(staged['gff']):
                 os.remove(staged['gff'])
             gbk_to_gff3(staged['gbk'], staging)
+        reconcile_gff_seqids(staged['gff'])
         if not all(files.file_check(path) for path in staged.values()):
             raise RuntimeError('Reference preparation produced missing or empty artifacts')
         manifest = dict(expected)
@@ -835,6 +921,11 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         if os.path.exists(gff_dir):
             core_parameters = core_parameters_for(gff_dir, '*.gff')
             if not files.file_check(genes_csv_file):
+                if os.path.exists(results_dir):
+                    # An interrupted run leaves results/ without the CSV, and Roary
+                    # refuses to write into an existing output directory.
+                    print(f'Removing incomplete Roary output: {results_dir}')
+                    shutil.rmtree(results_dir)
                 print('Running Roary')
                 # These used to be hardcoded to 99/95, so core.min_core_freq and
                 # core.min_identity from the config had no effect on the Roary run.
@@ -951,6 +1042,17 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     if ((counts < 0) | (counts > total_genomes) | (counts % 1 != 0)
             | (counts != observed)).any():
         raise ValueError('Roary isolate counts disagree with sample presence/absence cells')
+    empty = [sample for sample in samples if not df[sample].str.strip().ne('').any()]
+    if empty:
+        # Roary drops a genome whose proteins it cannot extract with only a log line
+        # ("Could not extract any protein sequences") but keeps its column, so the
+        # reference came out as reference_not_reported everywhere, and an empty
+        # comparator would silently lower every conservation percentage.
+        raise RuntimeError(
+            f'Roary reported no genes for {len(empty)} genome(s): {empty[:10]}; they were '
+            f'dropped from the analysis. Check the Roary log for "Could not extract any '
+            f'protein sequences" and that their GFF feature seqids match the ##FASTA headers.'
+        )
     print(f'Total genomes analyzed by Roary: {total_genomes}')
     core_rows = df[counts >= total_genomes * core_threshold]
     print(f'Roary total core families (>= {core_threshold*100}% strains): {len(core_rows)}')
@@ -1263,15 +1365,22 @@ def conservation_annotation_report(dataset, destination):
     return table
 
 
-def conservation_protein_qc(genomes, destination, reference=None, warn_ratio=0.8, exclude_ratio=0.5):
-    """Count annotated translated CDS; median is over eligible comparators only."""
+def conservation_protein_qc(genomes, destination, reference=None, warn_ratio=0.8, exclude_ratio=0.5, counts=None):
+    """Count annotated translated CDS; median is over eligible comparators only.
+
+    :param counts: Optional {accession: translated-CDS count} already computed (e.g. from
+        the genome cache); those genomes are not parsed again.
+    """
     import statistics
     if not 0 <= exclude_ratio <= warn_ratio <= 1:
         raise ValueError('Protein QC requires 0 <= exclude_ratio <= warn_ratio <= 1')
+    counts = counts or {}
     rows = []
     for accession, path in sorted(genomes.items()):
-        count = sum(feature.type == 'CDS' and bool(feature.qualifiers.get('translation', [''])[0])
-                    for record in SeqIO.parse(path, 'genbank') for feature in record.features)
+        count = counts.get(accession)
+        if count is None:
+            count = sum(feature.type == 'CDS' and bool(feature.qualifiers.get('translation', [''])[0])
+                        for record in SeqIO.parse(path, 'genbank') for feature in record.features)
         rows.append({'accession': accession, 'role': 'comparator', 'protein_count': count})
     median = statistics.median(row['protein_count'] for row in rows) if rows else None
     if reference:
