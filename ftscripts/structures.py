@@ -2119,7 +2119,7 @@ def download_single_structure(structure_dir, locus_tag):
     if files.file_check(summary_table_path):
         # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
-        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
 
         uniprot_ids = summary_df['uniprot_id'].unique()
 
@@ -2401,7 +2401,7 @@ def get_chain_all_pdbs_for_locus(locus_tag, locus_dir):
 
     # Keep "NA" as string (valid chain name) instead of treating it as NaN
     summary_df = pd.read_csv(
-        summary_table_path, sep='\t', dtype={'structure_id': str},
+        summary_table_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str},
         keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
     )
 
@@ -2545,7 +2545,7 @@ def get_chain_reference_structure_for_locus (locus_tag, locus_dir):
     if files.file_check(summary_table_path):
         # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
-        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+        summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
 
         ref_rows = summary_df[summary_df['is_reference'] == True]
 
@@ -2593,18 +2593,7 @@ def get_chain_reference_structure_for_locus (locus_tag, locus_dir):
             pdb_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.pdb")
             cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
             
-            # Create filename with chain notation
-            # Limit filename length for many chains
-            if len(chain_ids) > 1:
-                if len(chain_ids) <= 5:  # Reasonable limit
-                    chains_suffix = '_'.join(chain_ids)
-                else:
-                    # For structures with many chains, use compact notation
-                    chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
-            else:
-                chains_suffix = chain_ids[0]
-                
-            output_chain_file = os.path.join(uniprot_dir, f"PDB_{struct_id}_{chains_suffix}_ref.pdb")
+            output_chain_file = os.path.join(uniprot_dir, reference_chain_filename(struct_id, chain_ids))
             
             # Try PDB format first, then CIF format
             # Verify files exist AND have content (not empty/corrupt)
@@ -2681,6 +2670,94 @@ def get_chain_reference_structure(output_path, organism_name):
             get_chain_reference_structure_for_locus(locus_tag, locus_dir)
         except Exception as e:
             logging.error(f"Error extracting reference structure for {locus_tag}: {e}")
+
+def parse_chain_field(chain_field):
+    """
+    Turn a summary-table chain field ("A", "A;B", "0") into a list of chain IDs.
+    Returns ['A'] when the field is empty. Chain IDs are kept as strings: "0" is a
+    valid chain (e.g. cryo-EM complexes), not a missing value.
+    """
+    if chain_field is None or (not isinstance(chain_field, str) and pd.isna(chain_field)):
+        return ['A']
+    chain_field = str(chain_field).strip()
+    if chain_field == '':
+        return ['A']
+    return [c.strip() for c in chain_field.split(';') if c.strip()]
+
+def reference_chain_filename(struct_id, chain_ids):
+    """
+    File name of the extracted reference chain(s) for a PDB entry, e.g.
+    PDB_6U5B_0_ref.pdb. Long chain lists use compact notation to limit the name length.
+    Multi-character chains are saved as .cif by extract_chain_from_cif, with the same stem.
+    """
+    if len(chain_ids) > 5:
+        chains_suffix = f"{chain_ids[0]}_to_{chain_ids[-1]}_multi"
+    else:
+        chains_suffix = '_'.join(chain_ids)
+    return f"PDB_{struct_id}_{chains_suffix}_ref.pdb"
+
+def find_reference_structure_from_summary(locus_dir, colabfold=False):
+    """
+    Resolve the reference structure of a locus from its *_structure_summary.tsv
+    (the row with is_reference=True), building the exact expected file name instead
+    of globbing for any '*_ref.pdb'. Stale or extra files in the locus directory are
+    therefore never picked up.
+
+    Falls back to find_structures_for_locus() only when the locus has no summary table
+    or the table has no reference row (legacy layouts).
+
+    :param locus_dir: Path to the locus_tag directory.
+    :param colabfold: Whether a ColabFold reference may be returned.
+    :return: List with the reference structure path, or None.
+    """
+    locus_tag = os.path.basename(os.path.normpath(locus_dir))
+    summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
+
+    if not files.file_check(summary_table_path):
+        return find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+
+    summary_df = pd.read_csv(
+        summary_table_path, sep='\t',
+        dtype={'structure_id': str, 'uniprot_id': str, 'chain': str},
+        keep_default_na=False,
+        na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
+    )
+    if 'is_reference' not in summary_df.columns:
+        return find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+
+    ref_rows = summary_df[summary_df['is_reference'].astype(str).str.strip().str.lower().isin(['true', '1', 'yes'])]
+    if ref_rows.empty:
+        return find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+    if len(ref_rows) > 1:
+        print(f"  ERROR: {len(ref_rows)} reference rows in {summary_table_path}. Using the first one.")
+
+    row = ref_rows.iloc[0]
+    struct_type = str(row['structure_type']).strip().lower()
+    struct_id = str(row['structure_id']).strip()
+    uniprot_id = row['uniprot_id'] if isinstance(row['uniprot_id'], str) else ''
+    uniprot_dir = os.path.join(locus_dir, uniprot_id.strip())
+
+    candidates = []
+    if struct_type == 'pdb':
+        ref_pdb = os.path.join(uniprot_dir, reference_chain_filename(struct_id, parse_chain_field(row['chain'])))
+        candidates = [ref_pdb, ref_pdb[:-len('.pdb')] + '.cif']
+    elif struct_type == 'alphafold':
+        candidates = [os.path.join(uniprot_dir, f"AF_{uniprot_id.strip() or struct_id}.pdb")]
+    elif struct_type == 'colabfold':
+        if not colabfold:
+            print(f"  Reference for {locus_tag} is ColabFold but ColabFold is disabled.")
+            return None
+        candidates = sorted(glob.glob(os.path.join(locus_dir, 'CB_*.pdb')))
+
+    for path in candidates:
+        if files.file_check(path) and os.path.getsize(path) > 0:
+            print(f"  Using reference from summary table: {path}")
+            return [path]
+
+    expected = candidates[0] if candidates else f"{struct_type} {struct_id}"
+    print(f"  ERROR: Reference structure from summary table not found for {locus_tag}: {expected}")
+    logging.warning(f"Reference structure {expected} listed in {summary_table_path} was not found.")
+    return None
 
 def find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False):
     """
@@ -3237,7 +3314,7 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
     summary_table_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
 
     if not full_mode:
-        ref_structure = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
+        ref_structure = find_reference_structure_from_summary(locus_dir, colabfold=colabfold)
         if ref_structure:
             selected_structures_path.extend(ref_structure)
         else:
@@ -3247,7 +3324,7 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
         elegible_af = False
         if files.file_check(summary_table_path):
             # Keep "NA" as string (valid chain name) instead of treating it as NaN
-            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+            summary_df = pd.read_csv(summary_table_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
             #DF of PDBS
             PDBs_summary_df = summary_df[summary_df['structure_type'] == 'PDB']
             AFs_summary_df = summary_df[summary_df['structure_type'] == 'AlphaFold']
@@ -3439,7 +3516,7 @@ def pockets_finder_for_locus(locus_dir, container_engine='docker', full_mode=Fal
 
         # TRACK 1: DEFAULT - Select reference structure (PDB/AF priority, CB fallback)
         if not full_mode:
-            pdb_files = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+            pdb_files = find_reference_structure_from_summary(locus_dir, colabfold=colabfold)
             if pdb_files:
                 for pdb_file in pdb_files:
                     print(f"Running Fpocket on default structure: {pdb_file}")
@@ -3707,7 +3784,7 @@ def p2rank_finder_for_locus(locus_dir, cpus, container_engine='docker', full_mod
 
         # TRACK 1: DEFAULT - Select reference structure (PDB/AF priority, CB fallback)
         if not full_mode:
-            pdb_files = find_structures_for_locus(locus_dir, colabfold=colabfold, colabfold_all_models=False)
+            pdb_files = find_reference_structure_from_summary(locus_dir, colabfold=colabfold)
             if pdb_files:
                 for pdb_file in pdb_files:
                     # Determine if it's an AlphaFold or ColabFold structure (both need alphafold flag)
@@ -4297,7 +4374,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
             if files.file_check(structure_summary_path):
                 # Read structure_id as string to prevent scientific notation (e.g., 3E59 -> 3e+59)
                 # Keep "NA" as string (valid chain name) instead of treating it as NaN
-                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
+                struct_df = pd.read_csv(structure_summary_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str}, keep_default_na=False, na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null'])
               
                 if not full_mode:
                 
@@ -4706,13 +4783,10 @@ def get_reference_structure_path(output_path, organism_name, locus_tag):
     """
     Get the file path of the reference structure for a given locus_tag.
     
-    This is a convenience wrapper around find_structures_for_locus() that takes
-    output_path, organism_name, and locus_tag as parameters.
-    
-    Selection priority:
-    1) Structure marked as reference in *_structure_summary.tsv (PDB/AlphaFold/ColabFold)
-    2) Fallback via find_structures_for_locus()
-    3) None if no reference structure found
+    Convenience wrapper around find_reference_structure_from_summary(): the
+    reference is the row marked is_reference=True in *_structure_summary.tsv,
+    resolved to its exact file name. find_structures_for_locus() is used only for
+    loci without a summary table or without a reference row.
     
     :param output_path: Path to output directory.
     :param organism_name: Name of organism.
@@ -4722,86 +4796,13 @@ def get_reference_structure_path(output_path, organism_name, locus_tag):
     """
     structure_dir = os.path.join(output_path, organism_name, 'structures')
     locus_dir = os.path.join(structure_dir, locus_tag)
-    
+
     # Check if locus directory exists
     if not os.path.isdir(locus_dir):
         return None
-    
-    def _first_existing(patterns):
-        for pattern in patterns:
-            matches = sorted(set(glob.glob(pattern, recursive=True)))
-            if matches:
-                return matches[0]
-        return None
 
-    def _resolve_from_summary(ref_row):
-        structure_type = str(ref_row.get('structure_type', '')).strip().lower()
-        structure_id = str(ref_row.get('structure_id', '')).strip()
-        uniprot_id = str(ref_row.get('uniprot_id', '')).strip()
-        chain_field = str(ref_row.get('chain', '')).strip()
-
-        search_roots = [locus_dir]
-        if uniprot_id and uniprot_id.lower() not in ('nan', 'none'):
-            uniprot_dir = os.path.join(locus_dir, uniprot_id)
-            if os.path.isdir(uniprot_dir):
-                search_roots.insert(0, uniprot_dir)
-
-        chains = []
-        if chain_field and chain_field.lower() not in ('nan', 'none'):
-            chains = [c.strip() for c in chain_field.split(';') if c.strip()]
-
-        patterns = []
-
-        if structure_type == 'pdb':
-            for root in search_roots:
-                # Preferred: extracted reference chain(s)
-                patterns.append(os.path.join(root, '**', f'PDB_{structure_id}_*_ref.pdb'))
-                patterns.append(os.path.join(root, '**', f'PDB_{structure_id}_ref.pdb'))
-                # Fallback: chain-extracted files generated in full mode
-                for chain in chains:
-                    patterns.append(os.path.join(root, '**', f'PDB_{structure_id}_chain_{chain}.pdb'))
-                patterns.append(os.path.join(root, '**', f'PDB_{structure_id}_chain_*.pdb'))
-                # Last fallback: raw structure files
-                patterns.append(os.path.join(root, '**', f'PDB_{structure_id}.pdb'))
-                patterns.append(os.path.join(root, '**', f'PDB_{structure_id}.cif'))
-
-        elif structure_type == 'alphafold':
-            for root in search_roots:
-                if uniprot_id and uniprot_id.lower() not in ('nan', 'none'):
-                    patterns.append(os.path.join(root, '**', f'AF_{uniprot_id}.pdb'))
-                patterns.append(os.path.join(root, '**', f'AF_{structure_id}.pdb'))
-                patterns.append(os.path.join(root, '**', 'AF_*.pdb'))
-
-        elif structure_type == 'colabfold':
-            for root in search_roots:
-                patterns.append(os.path.join(root, '**', f'{structure_id}.pdb'))
-                patterns.append(os.path.join(root, '**', 'CB_*.pdb'))
-
-        return _first_existing(patterns)
-
-    summary_table_path = os.path.join(locus_dir, f'{locus_tag}_structure_summary.tsv')
-    if files.file_check(summary_table_path):
-        try:
-            summary_df = pd.read_csv(
-                summary_table_path,
-                sep='\t',
-                dtype={'structure_id': str, 'chain': str, 'uniprot_id': str},
-                keep_default_na=False,
-                na_values=['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
-            )
-            if 'is_reference' in summary_df.columns:
-                ref_mask = summary_df['is_reference'].astype(str).str.lower().isin(['true', '1', 'yes'])
-                ref_rows = summary_df[ref_mask]
-                if not ref_rows.empty:
-                    ref_path = _resolve_from_summary(ref_rows.iloc[0])
-                    if ref_path:
-                        return ref_path
-                    logging.warning(f"Reference row found in summary but file not resolved for {locus_tag}. Falling back to find_structures_for_locus resolver.")
-        except Exception as e:
-            logging.warning(f"Could not parse summary table {summary_table_path}: {e}. Falling back to find_structures_for_locus() resolver.")
-
-    # Fallback for backward compatibility
-    reference_data = find_structures_for_locus(locus_dir, colabfold=False, colabfold_all_models=False)
+    # colabfold=True: a ColabFold model marked as reference in the table is returned too.
+    reference_data = find_reference_structure_from_summary(locus_dir, colabfold=True)
     if reference_data:
         return reference_data[0]
     return None
