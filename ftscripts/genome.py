@@ -981,10 +981,24 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
             for feature in record.features:
                 if feature.type == 'CDS' and 'translation' in feature.qualifiers:
                     reference_loci.update(feature.qualifiers.get('locus_tag', []))
-    unknown_loci = set(core_locus_tag) - reference_loci
-    if unknown_loci:
-        raise ValueError('Roary mapped loci absent from translated reference CDS: '
-                         + ', '.join(sorted(unknown_loci)[:20]))
+    # A CDS without a /translation qualifier is a legitimate GenBank feature
+    # (a partial gene, a pseudogene, an annotation that omits the protein), and it
+    # appears in the GFF given to Roary even though it cannot be in the protein
+    # reference list. Such a locus has no protein, so it can be neither a target
+    # nor a row of the results table: it is dropped, not treated as an error.
+    # P. aeruginosa PA14 has exactly one, PA14_29405, and refusing it stopped the
+    # whole conservation module.
+    untranslated = sorted(set(core_locus_tag) - reference_loci)
+    if untranslated:
+        logging.warning(
+            'Ignoring %d Roary locus/loci with no translated CDS in the reference: %s',
+            len(untranslated), ', '.join(untranslated[:20]),
+        )
+        print(
+            f'Ignoring {len(untranslated)} core locus/loci with no protein in the '
+            f'annotation, e.g. {untranslated[:3]}'
+        )
+        core_locus_tag = [locus for locus in core_locus_tag if locus in reference_loci]
 
     cells = [cell for cell in df[organism_name] if cell.strip()]
     mapping = id_to_locustag_gff(mapping_file, cells,
@@ -995,8 +1009,17 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
             continue
         loci = {mapping[member.strip()] for member in row[organism_name].split('\t')}
         for locus in loci:
-            if locus not in reference_loci or locus in occupancy:
-                raise ValueError(f'Unknown or multi-family reference locus in Roary: {locus}')
+            # Same reason as above: a locus with no translated CDS has no protein
+            # to be conserved, so it contributes no occupancy.
+            if locus not in reference_loci:
+                continue
+            # The same reference locus in two families leaves its occupancy
+            # undefined, which is a different problem and still an error.
+            if locus in occupancy:
+                raise ValueError(
+                    f'Reference locus {locus} belongs to more than one Roary family, '
+                    f'so its occupancy is ambiguous'
+                )
             occupancy[locus] = int(counts.loc[row_index])
     missing = reference_loci - set(occupancy)
     if missing:
