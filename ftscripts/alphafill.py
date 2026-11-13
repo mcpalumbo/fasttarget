@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import csv
+import gzip
 import json
 import logging
 import math
 import os
 import re
+import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +24,7 @@ import requests
 
 
 BASE_URL = "https://alphafill.eu/v1/aff"
+RSYNC_URL = "rsync://rsync.alphafill.eu/alphafill/"
 RCSB_URL = "https://data.rcsb.org/rest/v1/core"
 UNIPROT_URL = "https://rest.uniprot.org/uniprotkb"
 USER_AGENT = "FastTarget/AlphaFill"
@@ -35,7 +39,8 @@ GENE_SUMMARY_COLUMNS = ["gene", "alphafill_status", "alphafill_complete", *COMPO
 IDENTITY_CATEGORIES = ("below_25", "25-35", "35-45", "45-55", "55-65", "65-75", ">=75", "unknown")
 UNIPROT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 LIGAND_COLUMNS = [
-    "gene", "uniprot", "ligand_instance_id", "compound_code",
+    "gene", "uniprot", "selection_source", "mapped_uniprot", "sequence_identity",
+    "query_coverage", "subject_coverage", "ligand_instance_id", "compound_code",
     "analogue_id", "donor_compound_id", "asym_id", "chain_id",
     "donor_pdb", "donor_chain", "donor_protein_chain",
     "donor_uniprot", "donor_protein_name", "donor_gene", "donor_organism", "donor_tax_id",
@@ -46,7 +51,9 @@ LIGAND_COLUMNS = [
     "cif_path", "pymol_script_path",
 ]
 SUMMARY_COLUMNS = [
-    "gene", "uniprot", "alphafill_status", "metadata_usable", "total_transfers",
+    "gene", "uniprot", "selection_source", "mapped_uniprot", "sequence_identity",
+    "query_coverage", "subject_coverage", "download_source",
+    "alphafill_status", "metadata_usable", "total_transfers",
     "accepted_transfers", "rejected_transfers", *CONFIDENCE_COUNT_COLUMNS,
     *COMPOUND_SUMMARY_COLUMNS, "cif_path", "metadata_path", "pymol_script_path",
     "model_output_status", "model_output_error", "error_message",
@@ -449,6 +456,103 @@ def _valid_cif_response(response: requests.Response) -> bool:
     )
 
 
+def _archive_path(root: Path, accession: str, kind: str) -> Path:
+    suffix = "json" if kind == "metadata" else "gz"
+    return root / "rsync_raw" / accession[:2] / f"AF-{accession}-F1-filled_v4.cif.{suffix}"
+
+
+def _source_with(existing: str, source: str) -> str:
+    sources = set(existing.split("+")) - {"", "cache"}
+    sources.add(source)
+    return "+".join(item for item in ("rsync", "https") if item in sources)
+
+
+def _archive_payload(root: Path, accession: str, kind: str) -> Any | None:
+    """Read an already downloaded official archive file, rejecting incomplete files."""
+    path = _archive_path(root, accession, kind)
+    try:
+        if kind == "metadata":
+            with path.open(encoding="utf-8") as handle:
+                payload = json.load(handle)
+            parse_alphafill_metadata(accession, payload)
+            return payload
+        with gzip.open(path, "rb") as handle:
+            data = handle.read()
+        if not data.lstrip().startswith(b"data_") or b"_atom_site." not in data:
+            return None
+        return data
+    except (OSError, ValueError, EOFError):
+        return None
+
+
+def _rsync_batch(root: Path, accessions: set[str], kind: str,
+                 timeout: float, proxy: str = "") -> bool:
+    """Fetch missing archive members in one rsync call; HTTPS handles missing ones."""
+    missing = [accession for accession in sorted(accessions)
+               if _archive_payload(root, accession, kind) is None]
+    if not missing:
+        return True
+    suffix = "json" if kind == "metadata" else "gz"
+    paths = [f"{accession[:2]}/AF-{accession}-F1-filled_v4.cif.{suffix}"
+             for accession in missing]
+    archive = root / "rsync_raw"
+    archive.mkdir(parents=True, exist_ok=True)
+    command = ["rsync", "-a", "--ignore-missing-args", "--partial",
+               f"--contimeout={max(1, int(timeout))}", f"--timeout={max(1, int(timeout))}",
+               "--files-from=-", RSYNC_URL, str(archive) + "/"]
+    env = os.environ.copy()
+    if proxy:
+        if not re.fullmatch(r"[A-Za-z0-9.:-]+", proxy):
+            raise ValueError("rsync_proxy must be a host:port SOCKS endpoint")
+        env["RSYNC_CONNECT_PROG"] = f"nc -X 5 -x {proxy} %H 873"
+    try:
+        result = subprocess.run(command, input="\n".join(paths) + "\n", text=True,
+                                env=env, capture_output=True, timeout=max(30, timeout * 2 + len(paths)))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        logging.warning("AlphaFill rsync unavailable: %s", error)
+        return False
+    if result.returncode:
+        logging.warning("AlphaFill rsync failed (%s): %s", result.returncode,
+                        result.stderr.strip()[-500:])
+        return False
+    return True
+
+
+def _blast_candidates(path: Path, loci: set[str], min_identity: float,
+                      min_coverage: float) -> dict[str, list[dict[str, Any]]]:
+    """Use full query coverage and aligned length/full subject length."""
+    by_gene: dict[str, dict[str, dict[str, Any]]] = {}
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        for row in csv.reader(handle, delimiter="\t"):
+            if len(row) < 16 or row[0] not in loci:
+                continue
+            try:
+                accession = sanitize_uniprot_id(row[1])
+                identity, aligned, query_coverage, subject_length, bitscore = (
+                    float(row[2]), float(row[3]), float(row[13]), float(row[15]), float(row[11]))
+                subject_coverage = 100 * aligned / subject_length
+            except (ValueError, ZeroDivisionError):
+                continue
+            if identity < min_identity or min(query_coverage, subject_coverage) < min_coverage:
+                continue
+            hit = {"accession": accession, "identity": identity,
+                   "query_coverage": query_coverage, "subject_coverage": subject_coverage,
+                   "bitscore": bitscore}
+            old = by_gene.setdefault(row[0], {}).get(accession)
+            if old is None or _candidate_score(hit) > _candidate_score(old):
+                by_gene[row[0]][accession] = hit
+    return {gene: sorted(hits.values(), key=_candidate_score, reverse=True)
+            for gene, hits in by_gene.items()}
+
+
+def _candidate_score(hit: dict[str, Any]) -> tuple[Any, ...]:
+    exact = hit["identity"] == hit["query_coverage"] == hit["subject_coverage"] == 100
+    return (exact, hit["identity"], min(hit["query_coverage"], hit["subject_coverage"]),
+            hit["query_coverage"], hit["subject_coverage"], hit["bitscore"], hit["accession"])
+
+
 def _request(session: requests.Session, url: str, timeout: float,
              retries: int, backoff: float) -> requests.Response:
     """
@@ -751,6 +855,7 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "responses": {}, "error_message": "", "refresh_cache": refresh_cache,
         "metadata_usable": False, "cif_usable": False, "path_base": "../..",
+        "download_source": "",
     }
     session = requests.Session()
 
@@ -765,33 +870,48 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
         return response
 
     try:
+        previous = {}
+        if not refresh_cache and status_path.is_file():
+            try:
+                previous = json.loads(status_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
         if not refresh_cache and _valid_json(metadata_path):
             with metadata_path.open(encoding="utf-8") as handle:
                 payload = json.load(handle)
             status["responses"]["metadata"] = {"url": urls["metadata"], "cached": True}
+            status["download_source"] = previous.get("download_source", "cache")
+        elif (not refresh_cache and previous.get("status") == "not_found"
+              and _archive_payload(output_root, accession, "metadata") is None):
+            status["status"] = "not_found"
+            status["responses"]["metadata"] = {"cached": True, "status_code": 404}
+            status["error_message"] = "AlphaFill metadata unavailable (cached HTTP 404)"
+            return status
         else:
-            response = fetch("metadata")
-            if response.status_code == 404:
-                status["status"] = (
-                    "metadata_missing" if not refresh_cache and _valid_cif(cif_path)
-                    else "not_found"
-                )
-                status["error_message"] = "AlphaFill metadata unavailable (HTTP 404)"
-                return status
-            response.raise_for_status()
-            try:
-                payload = response.json()
-            except ValueError as error:
-                status["status"] = "invalid_json"
-                status["error_message"] = str(error)
-                return status
-            # Reject unsupported responses before they can replace good cache.
-            try:
-                parse_alphafill_metadata(accession, payload)
-            except ValueError as error:
-                status["status"] = "unsupported_schema"
-                status["error_message"] = str(error)
-                return status
+            payload = None if refresh_cache else _archive_payload(output_root, accession, "metadata")
+            if payload is not None:
+                status["responses"]["metadata"] = {"source": RSYNC_URL, "cached": True}
+                status["download_source"] = "rsync"
+            else:
+                response = fetch("metadata")
+                status["download_source"] = "https"
+                if response.status_code == 404:
+                    status["status"] = "not_found"
+                    status["error_message"] = "AlphaFill metadata unavailable (HTTP 404)"
+                    return status
+                response.raise_for_status()
+                try:
+                    payload = response.json()
+                except ValueError as error:
+                    status["status"] = "invalid_json"
+                    status["error_message"] = str(error)
+                    return status
+                try:
+                    parse_alphafill_metadata(accession, payload)
+                except ValueError as error:
+                    status["status"] = "unsupported_schema"
+                    status["error_message"] = str(error)
+                    return status
             _atomic_json(metadata_path, payload)
 
         ligands = parse_alphafill_metadata(accession, payload)
@@ -812,17 +932,24 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
             status["cif_usable"] = True
             status["cif_path"] = str(cif_path)
         else:
-            response = fetch("cif")
-            if response.status_code == 404:
-                status["status"] = "cif_missing"
-                status["error_message"] = "AlphaFill metadata exists but CIF is unavailable (HTTP 404)"
-                return status
-            response.raise_for_status()
-            if not _valid_cif_response(response):
-                status["status"] = "invalid_cif"
-                status["error_message"] = "AlphaFill CIF response failed Content-Type/mmCIF validation"
-                return status
-            _atomic_bytes(cif_path, response.content)
+            raw_cif = None if refresh_cache else _archive_payload(output_root, accession, "cif")
+            if raw_cif is not None:
+                status["responses"]["cif"] = {"source": RSYNC_URL, "cached": True}
+                status["download_source"] = _source_with(status["download_source"], "rsync")
+            else:
+                response = fetch("cif")
+                if response.status_code == 404:
+                    status["status"] = "cif_missing"
+                    status["error_message"] = "AlphaFill metadata exists but CIF is unavailable (HTTP 404)"
+                    return status
+                response.raise_for_status()
+                if not _valid_cif_response(response):
+                    status["status"] = "invalid_cif"
+                    status["error_message"] = "AlphaFill CIF response failed Content-Type/mmCIF validation"
+                    return status
+                raw_cif = response.content
+                status["download_source"] = _source_with(status["download_source"], "https")
+            _atomic_bytes(cif_path, raw_cif)
             status["cif_usable"] = True
             status["cif_path"] = str(cif_path)
         status["status"] = "available" if ligands else "no_transplants"
@@ -906,6 +1033,10 @@ def _validated_config(config: dict[str, Any]) -> tuple[dict[str, float], dict[st
             "enrich_donors": config.get("enrich_donors", True),
             "generate_pymol": config.get("generate_pymol", True),
             "strict_errors": config.get("strict_errors", False),
+            "rsync_proxy": str(config.get("rsync_proxy", "")),
+            "fallback_identity": float(config.get("fallback_identity", 95.0)),
+            "fallback_coverage": float(config.get("fallback_coverage", 95.0)),
+            "similarity_fallback": config.get("similarity_fallback", True),
         }
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid AlphaFill configuration value: {error}") from error
@@ -918,6 +1049,13 @@ def _validated_config(config: dict[str, Any]) -> tuple[dict[str, float], dict[st
         errors.append("generate_pymol must be a boolean")
     if not isinstance(options["strict_errors"], bool):
         errors.append("strict_errors must be a boolean")
+    if not isinstance(options["similarity_fallback"], bool):
+        errors.append("similarity_fallback must be a boolean")
+    if options["rsync_proxy"] and not re.fullmatch(r"[A-Za-z0-9.:-]+", options["rsync_proxy"]):
+        errors.append("rsync_proxy must be a host:port SOCKS endpoint")
+    for key in ("fallback_identity", "fallback_coverage"):
+        if not math.isfinite(options[key]) or not 0 < options[key] <= 100:
+            errors.append(f"{key} must be between 0 and 100")
     for key, value in thresholds.items():
         if not math.isfinite(value) or value <= 0:
             errors.append(f"{key} must be a positive finite number")
@@ -969,28 +1107,168 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
     cache_root = root / "cache"
     root.mkdir(parents=True, exist_ok=True)
     pairs = _mapping_pairs(mapping)
+    direct_pairs = list(pairs)
     accessions = sorted({accession for _, accession in pairs})
     primary_loci = {}
     for gene, accession in pairs:
         primary_loci.setdefault(accession, gene)
-    max_workers = min(options["max_workers"], len(accessions) or 1)
     statuses = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(download_uniprot, accession, root,
-                                   options["timeout"], options["retries"],
-                                   options["backoff"], options["download_cif"],
-                                   thresholds, options["refresh_cache"], primary_loci[accession]): accession
-                   for accession in accessions}
-        for future in as_completed(futures):
-            accession = futures[future]
+    rsync_available = True
+
+    def download_batch(wanted: set[str], policy: str) -> None:
+        nonlocal rsync_available
+        if not wanted:
+            return
+        metadata_needed = set()
+        for accession in wanted:
+            cached = cache_root / accession
+            if not options["refresh_cache"] and _valid_json(cached / "alphafill.json"):
+                continue
             try:
-                statuses[accession] = future.result()
-            except Exception as error:  # one protein must never abort the stage
-                logging.exception("Unexpected AlphaFill error for %s", accession)
-                statuses[accession] = {"uniprot_id": accession, "status": "error_transient",
-                                       "error_message": str(error), "responses": {}}
+                previous = json.loads((cached / "download_status.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                previous = {}
+            if not options["refresh_cache"] and previous.get("status") == "not_found":
+                continue
+            metadata_needed.add(accession)
+        if rsync_available and metadata_needed:
+            rsync_available = _rsync_batch(root, metadata_needed, "metadata",
+                                           options["timeout"], options["rsync_proxy"])
+        def execute(accessions_for_call: set[str], policy_for_call: str, refresh: bool) -> None:
+            if not accessions_for_call:
+                return
+            with ThreadPoolExecutor(max_workers=min(options["max_workers"], len(accessions_for_call))) as executor:
+                futures = {executor.submit(download_uniprot, accession, root,
+                                           options["timeout"], options["retries"],
+                                           options["backoff"], policy_for_call,
+                                           thresholds, refresh, primary_loci[accession]): accession
+                           for accession in accessions_for_call}
+                for future in as_completed(futures):
+                    accession = futures[future]
+                    try:
+                        statuses[accession] = future.result()
+                    except Exception as error:
+                        logging.exception("Unexpected AlphaFill error for %s", accession)
+                        statuses[accession] = {"uniprot_id": accession, "status": "error_transient",
+                                               "error_message": str(error), "responses": {}}
+
+        execute(wanted, "never", options["refresh_cache"])
+        if policy == "never":
+            return
+        usable = {accession for accession in wanted if statuses[accession].get("metadata_usable")}
+        if rsync_available and policy != "never":
+            cif_needed = set()
+            for accession in usable:
+                if _valid_cif(root / "models" / primary_loci[accession] / f"{accession}_alphafill.cif") and not options["refresh_cache"]:
+                    continue
+                metadata = cache_root / accession / "alphafill.json"
+                payload = None
+                try:
+                    payload = json.loads(metadata.read_text(encoding="utf-8")) if _valid_json(metadata) else None
+                    ligands = parse_alphafill_metadata(accession, payload) if payload is not None else []
+                except (OSError, ValueError):
+                    ligands = []
+                if payload is not None and (policy == "always" or any(
+                        filter_ligand(item, **thresholds)["filter_status"] == "accepted" for item in ligands)):
+                    cif_needed.add(accession)
+            if cif_needed:
+                rsync_available = _rsync_batch(root, cif_needed, "cif",
+                                               options["timeout"], options["rsync_proxy"])
+        execute(usable, policy, False)
+
+    download_batch(set(accessions), options["download_cif"])
+
+    selection: dict[str, dict[str, Any]] = {}
+    for gene, accession in direct_pairs:
+        status = statuses[accession]
+        if not status.get("metadata_usable"):
+            continue
+        try:
+            with (cache_root / accession / "alphafill.json").open(encoding="utf-8") as handle:
+                count = len(parse_alphafill_metadata(accession, json.load(handle)))
+        except (OSError, ValueError):
+            count = 0
+        if count and gene not in selection:
+            selection[gene] = {"accession": accession, "source": "direct", "identity": "",
+                               "query_coverage": "", "subject_coverage": "",
+                               "transplants": count}
+
+    unresolved = set(mapping) - set(selection)
+    blast_files = sorted((Path(output_path).resolve() / organism_name / "structures" / "uniprot_files").glob(
+        "uniprot_species_taxid_*_rest_cdhit100_blast.tsv"))
+    blast_path = blast_files[0] if blast_files else None
+    candidates = (_blast_candidates(blast_path, unresolved, options["fallback_identity"],
+                                    options["fallback_coverage"])
+                  if options["similarity_fallback"] and blast_path else {})
+    direct_by_gene = {gene: {accession for g, accession in direct_pairs if g == gene}
+                      for gene in mapping}
+    for gene in candidates:
+        candidates[gene] = [hit for hit in candidates[gene]
+                            if hit["accession"] not in direct_by_gene[gene]]
+    checked = {gene: 0 for gene in mapping}
+    pending = {gene: hits[0] for gene, hits in candidates.items()
+               if gene not in selection and hits}
+    for gene, hit in pending.items():
+        primary_loci.setdefault(hit["accession"], gene)
+    download_batch({hit["accession"] for hit in pending.values()} - set(statuses), "never")
+    for gene, hit in pending.items():
+        accession = hit["accession"]
+        checked[gene] = 1
+        count = 0
+        if statuses[accession].get("metadata_usable"):
+            try:
+                with (cache_root / accession / "alphafill.json").open(encoding="utf-8") as handle:
+                    count = len(parse_alphafill_metadata(accession, json.load(handle)))
+            except (OSError, ValueError):
+                pass
+        exact = hit["identity"] == hit["query_coverage"] == hit["subject_coverage"] == 100
+        selection[gene] = {**hit, "source": "exact" if exact else "similar",
+                           "transplants": count}
+    fallback_accessions = {hit["accession"] for hit in selection.values() if hit["source"] != "direct"}
+    if options["download_cif"] != "never":
+        download_batch(fallback_accessions, options["download_cif"])
+    pairs = sorted(set(pairs) | {(gene, hit["accession"]) for gene, hit in selection.items()
+                                 if hit["source"] != "direct"})
+    accessions = sorted({accession for _, accession in pairs})
+
+    selection_rows = []
+    for gene in sorted(mapping):
+        hit = selection.get(gene, {})
+        matched = hit.get("accession", "")
+        states = [statuses[accession].get("status", "error_transient")
+                  for accession in direct_by_gene[gene]]
+        if matched and hit.get("transplants"):
+            result_status = "transplants_found"
+        elif matched and statuses[matched].get("status") == "not_found":
+            result_status = "alphafill_entry_not_found"
+        elif matched and statuses[matched].get("status") not in {"available", "no_transplants", "not_found"}:
+            result_status = "incomplete_download"
+        elif matched:
+            result_status = "entry_found_without_transplants"
+        elif any(state not in {"available", "no_transplants", "not_found"} for state in states):
+            result_status = "incomplete_download"
+        elif states and all(state == "not_found" for state in states):
+            result_status = "alphafill_entry_not_found"
+        elif not direct_by_gene[gene] and not candidates.get(gene):
+            result_status = "unmapped_or_no_candidates"
+        else:
+            result_status = "entry_found_without_transplants"
+        selection_rows.append({"gene": gene, "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
+                               "selected_uniprot": matched, "selection_source": hit.get("source", "none"),
+                               "mapped_alphafill_status": ";".join(sorted(set(states))),
+                               "selected_alphafill_status": statuses.get(matched, {}).get("status", ""),
+                               "identity": hit.get("identity", ""),
+                               "query_coverage": hit.get("query_coverage", ""),
+                               "subject_coverage": hit.get("subject_coverage", ""),
+                               "transplants": hit.get("transplants", ""),
+                               "candidates_checked": checked[gene], "result_status": result_status,
+                               "download_source": statuses.get(matched, {}).get("download_source", "")})
+    _atomic_bytes(root / "alphafill_selection.tsv", pd.DataFrame(selection_rows).to_csv(
+        sep="\t", index=False).encode())
 
     normalized: dict[str, list[dict[str, Any]]] = {}
+    analysis_keys: dict[str, str] = {}
+    restored_analysis: set[str] = set()
     for accession in accessions:
         metadata_path = cache_root / accession / "alphafill.json"
         status = statuses[accession]
@@ -998,6 +1276,20 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
             normalized[accession] = []
             continue
         try:
+            cache_key = hashlib.sha256(metadata_path.read_bytes() + json.dumps(
+                {"thresholds": thresholds, "enrich_donors": options["enrich_donors"]},
+                sort_keys=True).encode()).hexdigest()
+            analysis_keys[accession] = cache_key
+            analysis_path = cache_root / accession / "analysis.json"
+            if not options["refresh_cache"] and analysis_path.is_file():
+                try:
+                    cached_analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+                    if cached_analysis.get("key") == cache_key and isinstance(cached_analysis.get("ligands"), list):
+                        normalized[accession] = cached_analysis["ligands"]
+                        restored_analysis.add(accession)
+                        continue
+                except (OSError, ValueError):
+                    pass
             with metadata_path.open(encoding="utf-8") as handle:
                 parsed = parse_alphafill_metadata(accession, json.load(handle))
             normalized[accession] = [filter_ligand(item, **thresholds) for item in parsed]
@@ -1023,12 +1315,20 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
     resolver = DonorResolver(root / "donor_cache", options["timeout"],
                              options["retries"], options["backoff"], options["refresh_cache"])
     try:
-        for ligands in normalized.values():
+        for accession, ligands in normalized.items():
+            if accession in restored_analysis:
+                continue
             for ligand in ligands:
                 if options["enrich_donors"]:
                     ligand.update(resolver.resolve(ligand.get("donor_pdb"), ligand.get("donor_protein_chain")))
                 else:
                     ligand["donor_annotation_status"] = "not_requested"
+            if accession in analysis_keys and all(
+                    ligand.get("donor_annotation_status") != "error" and
+                    not (ligand.get("donor_annotation_status") == "partial" and ligand.get("donor_annotation_error"))
+                    for ligand in ligands):
+                _atomic_json(cache_root / accession / "analysis.json",
+                             {"key": analysis_keys[accession], "ligands": ligands})
     finally:
         resolver.close()
 
@@ -1070,7 +1370,9 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
     mapped_genes = {gene for gene, _ in pairs}
     for gene in sorted(set(mapping) - mapped_genes):
         summary_rows.append({
-            "gene": gene, "uniprot": "", "alphafill_status": "unmapped", "metadata_usable": False,
+            "gene": gene, "uniprot": "", "selection_source": "none", "mapped_uniprot": "",
+            "sequence_identity": "", "query_coverage": "", "subject_coverage": "",
+            "download_source": "", "alphafill_status": "unmapped", "metadata_usable": False,
             "total_transfers": 0, "accepted_transfers": 0, "rejected_transfers": 0,
             **{column: 0 for column in CONFIDENCE_COUNT_COLUMNS},
             **summarize_compounds([], usable=False),
@@ -1085,14 +1387,29 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
     for gene, accession in pairs:
         ligands = normalized[accession]
         output = pair_outputs[(gene, accession)]
+        selected_hit = selection.get(gene, {}) if selection.get(gene, {}).get("accession") == accession else {}
+        pair_source = selected_hit.get("source", "direct" if accession in direct_by_gene[gene] else "none")
         all_rows.extend({**_tsv_row(gene, accession, ligand),
+                         "selection_source": pair_source,
+                         "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
+                         "sequence_identity": selected_hit.get("identity", ""),
+                         "query_coverage": selected_hit.get("query_coverage", ""),
+                         "subject_coverage": selected_hit.get("subject_coverage", ""),
                          "cif_path": output["cif_path"], "pymol_script_path": output["pymol_script_path"]}
                         for ligand in ligands)
         accepted = [ligand for ligand in ligands if ligand["filter_status"] == "accepted"]
         status = statuses[accession]
         usable = status.get("metadata_usable", False)
+        hit = selection.get(gene, {}) if selection.get(gene, {}).get("accession") == accession else {}
+        source = hit.get("source", "direct" if accession in direct_by_gene[gene] else "none")
         summary_rows.append({
-            "gene": gene, "uniprot": accession, "alphafill_status": status.get("status"),
+            "gene": gene, "uniprot": accession, "selection_source": source,
+            "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
+            "sequence_identity": hit.get("identity", ""),
+            "query_coverage": hit.get("query_coverage", ""),
+            "subject_coverage": hit.get("subject_coverage", ""),
+            "download_source": status.get("download_source", ""),
+            "alphafill_status": status.get("status"),
             "metadata_usable": usable, "total_transfers": len(ligands),
             "accepted_transfers": len(accepted), "rejected_transfers": len(ligands) - len(accepted),
             **{f"{category}_confidence_transfers": sum(
@@ -1144,9 +1461,34 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
             "accepted": "high or intermediate confidence, independently of identity",
         },
         "compound_summary_rule": "Unique placed compound codes per locus across all UniProt accessions; best known confidence wins; high + intermediate = accepted unique count",
+        "selection_rule": "Direct mapped accessions first; if none has transplants, use only the highest-ranked BLAST candidate meeting both sequence coverage limits, whether or not it has transplants",
+        "blast_file": str(blast_path) if blast_path else "",
         "gene_summaries": json.loads(summary_df.to_json(orient="records")),
         "genes": genes_json,
     }, root))
+    _atomic_bytes(root / "README.txt", (
+        "AlphaFill results from FastTarget\n\n"
+        "Start with alphafill_selection.tsv: one row per locus. mapped_uniprot is the "
+        "original mapping; selected_uniprot is the chosen evidence source. "
+        "selection_source is direct, exact (100% sequence match), similar, or none. "
+        "A fallback uses only the top BLAST candidate with identity and coverage of "
+        "both proteins at or above the configured thresholds; it stops even if that "
+        "candidate has no transplants.\n\n"
+        "result_status: transplants_found = AlphaFill entry with placements; "
+        "entry_found_without_transplants = valid entry with zero placements; "
+        "alphafill_entry_not_found = HTTP 404; incomplete_download = network, "
+        "schema or file error; unmapped_or_no_candidates = no eligible UniProt ID.\n\n"
+        "alphafill_summary.tsv has one row per locus for the FastTarget merge. "
+        "alphafill_accession_summary.tsv has one row per locus and evaluated accession, "
+        "with transfer counts, selection provenance, download source and file paths. "
+        "alphafill_ligands_all.tsv lists every placed compound; "
+        "alphafill_ligands_filtered.tsv lists accepted high/intermediate confidence "
+        "placements. alphafill_category_counts.tsv counts placements by category. "
+        "alphafill_results.json contains the same data and execution failures.\n\n"
+        "Path columns are relative to this directory. Raw rsync files live in "
+        "rsync_raw/. Valid downloads and analysis checkpoints live in cache/. "
+        "Reruns reuse them; refresh_cache: True requests fresh data.\n"
+    ).encode())
     if options["strict_errors"] and failures:
         raise AlphaFillExecutionError(failures, root / "alphafill_results.json")
     return summary_df
