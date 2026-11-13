@@ -855,6 +855,34 @@ def run_core_cruncher(corecruncher_dir, reference, core_threshold=99, identity=9
     else:
         logging.error(f"Directory '{corecruncher_dir}' not found.")
 
+PANAROO_IMAGE = 'staphb/panaroo:1.8.0'
+
+
+def run_panaroo(work_dir, gff_list, output_dir, identity=95, core_threshold=99, mode='strict',
+                cpus=multiprocessing.cpu_count(), container_engine='docker'):
+    """
+    Run Panaroo (graph-based pangenome; corrects fragmented, missing and contaminant
+    annotations) in the pinned staphb/panaroo image.
+
+    :param work_dir: Directory mounted in the container; gff_list and output_dir are relative to it.
+    :param gff_list: File listing one GFF3 (with ##FASTA) per line, relative to work_dir.
+    :param output_dir: Output directory, relative to work_dir. Panaroo creates it.
+    :param identity: Sequence identity (percentage) to cluster genes (Panaroo -c; its default is 98).
+    :param core_threshold: Core frequency (percentage), only for Panaroo's own summary statistics.
+    :param mode: Panaroo --clean-mode: strict, moderate or sensitive.
+    :param cpus: Number of threads.
+    :param container_engine: 'docker' or 'singularity'.
+    """
+    command = [
+        'panaroo', '-i', gff_list, '-o', output_dir,
+        '--clean-mode', mode, '--remove-invalid-genes',
+        '-c', str(identity / 100), '--core_threshold', str(core_threshold / 100),
+        '-t', str(cpus),
+    ]
+    work_dir = os.path.abspath(work_dir)
+    run_container(work_dir, work_dir, PANAROO_IMAGE, command, container_engine=container_engine)
+
+
 def run_foldseek_create_index_db(structures_dir, DB_name, container_engine='docker'):
 
     """

@@ -875,7 +875,69 @@ def _check_core_run_parameters(output_file, parameters, program, stale_dir):
             f'({"; ".join(differences)}). {remedy}'
         )
 
-def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker'):
+def panaroo_gff(source, destination):
+    """Write a copy of a GFF3 that Panaroo accepts.
+
+    bp_genbank2gff3 writes the GenBank codon_start (1-3) in the CDS phase column,
+    where GFF3 expects 0-2. Roary ignores the column; Panaroo reads phase 1 as a
+    frameshift and drops every gene, then rejects the genome ("Invalid GFF!").
+    Only files written by bp_genbank2gff3 are shifted, since other converters
+    already write real phases. The line lengths do not change.
+    """
+    temporary = destination + '.tmp'
+    with open(source) as handle, open(temporary, 'w') as out:
+        bioperl = False
+        in_fasta = False
+        for line in handle:
+            if not in_fasta:
+                if line.startswith('# conversion-by bp_genbank2gff3'):
+                    bioperl = True
+                elif line.strip() == '##FASTA':
+                    in_fasta = True
+                elif bioperl and not line.startswith('#'):
+                    fields = line.split('\t')
+                    if len(fields) == 9 and fields[2] == 'CDS' and fields[7] in ('1', '2', '3'):
+                        fields[7] = str(int(fields[7]) - 1)
+                        line = '\t'.join(fields)
+            out.write(line)
+    os.replace(temporary, destination)
+
+
+def prepare_panaroo_inputs(gff_dir, panaroo_gff_dir):
+    """Mirror gff_dir into panaroo_gff_dir as Panaroo-compatible copies.
+
+    Each copy records the identity of the file it came from (inode, size, mtime) in
+    .sources.json; it is rewritten when that changes (gff_dir holds hardlinks into
+    the prepared-genome cache, so a rebuilt genome is a different file). Copies of
+    genomes no longer in gff_dir are removed: the folder is exactly the cohort.
+    """
+    os.makedirs(panaroo_gff_dir, exist_ok=True)
+    record_path = os.path.join(panaroo_gff_dir, '.sources.json')
+    try:
+        with open(record_path) as handle:
+            record = json.load(handle)
+    except (OSError, ValueError):
+        record = {}
+    sources = {os.path.basename(p): p for p in glob.glob(os.path.join(gff_dir, '*.gff'))}
+    for name in os.listdir(panaroo_gff_dir):
+        if name.endswith('.gff') and name not in sources:
+            os.remove(os.path.join(panaroo_gff_dir, name))
+    updated, written = {}, 0
+    for name, source in sources.items():
+        stat = os.stat(source)
+        identity = [stat.st_ino, stat.st_size, stat.st_mtime_ns]
+        target = os.path.join(panaroo_gff_dir, name)
+        if not (record.get(name) == identity and os.path.isfile(target)
+                and os.path.getsize(target) == stat.st_size):
+            panaroo_gff(source, target)
+            written += 1
+        updated[name] = identity
+    files.atomic_write_json(updated, record_path)
+    print(f'Panaroo inputs: {len(sources)} GFFs ({written} written, {len(sources) - written} reused)')
+    return sorted(sources)
+
+
+def core_genome_programs(output_path, organism_name, core_threshold=99, identity=95, cpus=multiprocessing.cpu_count(), program_list=['roary','corecruncher'], container_engine='docker', panaroo_mode='strict'):
 
     """
     Run Roary and CoreCruncher programs for the core genomes analysis of the given organism.
@@ -939,6 +1001,38 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         else:
             print(f'{gff_dir} not found.')
 
+    if 'panaroo' in program_list:
+        panaroo_dir = os.path.join(conservation_dir, 'panaroo_output')
+        panaroo_gff_dir = os.path.join(panaroo_dir, 'gff')
+        panaroo_results = os.path.join(panaroo_dir, 'results')
+        panaroo_csv = os.path.join(panaroo_results, 'gene_presence_absence_roary.csv')
+        if os.path.exists(gff_dir):
+            names = prepare_panaroo_inputs(gff_dir, panaroo_gff_dir)
+            core_parameters = core_parameters_for(panaroo_gff_dir, '*.gff')
+            core_parameters.update({'clean_mode': panaroo_mode, 'image': programs.PANAROO_IMAGE})
+            if not files.file_check(panaroo_csv):
+                if os.path.exists(panaroo_results):
+                    print(f'Removing incomplete Panaroo output: {panaroo_results}')
+                    shutil.rmtree(panaroo_results)
+                gff_list = os.path.join(panaroo_dir, 'gff_list.txt')
+                with open(gff_list, 'w') as handle:
+                    handle.writelines(f'gff/{name}\n' for name in names)
+                print('Running Panaroo')
+                print(f'Panaroo parameters: identity {identity}%, core frequency {core_threshold}%, '
+                      f'clean mode {panaroo_mode}')
+                programs.run_panaroo(panaroo_dir, 'gff_list.txt', 'results', identity=identity,
+                                     core_threshold=core_threshold, mode=panaroo_mode, cpus=cpus,
+                                     container_engine=container_engine)
+                if not files.file_check(panaroo_csv):
+                    raise RuntimeError(f'Panaroo finished without {panaroo_csv}')
+                files.write_manifest(panaroo_csv, core_parameters, extra={'program': 'panaroo'})
+                print('Finished')
+            else:
+                _check_core_run_parameters(panaroo_csv, core_parameters, 'Panaroo', panaroo_results)
+                print(f'Panaroo output file already exists: {panaroo_csv}.')
+        else:
+            print(f'{gff_dir} not found.')
+
     if 'corecruncher' in program_list:
         ccruncher_out_dir = os.path.join(conservation_dir, 'corecruncher_output')
         cc_output_file = os.path.join(ccruncher_out_dir, 'families_core.txt')
@@ -959,42 +1053,77 @@ def core_genome_programs(output_path, organism_name, core_threshold=99, identity
         else:
             print(f'{fasta_dir} not found.')
 
+# Roary and Panaroo write the same presence/absence CSV (Panaroo's
+# gene_presence_absence_roary.csv), so one parser serves both. Panaroo separates
+# paralogs with ';' and names genes it re-found in unannotated sequence
+# <genome>_refound_<n>; such a gene has no reference locus tag.
+PANGENOME_TOOLS = {
+    'roary': {'label': 'Roary', 'dir': 'roary_output', 'csv': 'gene_presence_absence.csv',
+              'fixed': 'fixed_input_files', 'separator': '\t'},
+    'panaroo': {'label': 'Panaroo', 'dir': 'panaroo_output', 'csv': 'gene_presence_absence_roary.csv',
+                'fixed': None, 'separator': ';'},
+}
+
+
 def roary_output(output_path, organism_name, core_threshold=0.99):
-    """    
-    This function processes the output files generated by Roary for the specified organism.
-    It reads the 'gene_presence_absence.csv' file to extract the core locus tags and generates a metadata table with these IDs.
+    """Roary core and per-protein occupancy table (core_roary.tsv). See pangenome_output."""
+    return pangenome_output(output_path, organism_name, core_threshold, tool='roary')
+
+
+def panaroo_output(output_path, organism_name, core_threshold=0.99):
+    """Panaroo core and per-protein occupancy table (core_panaroo.tsv). See pangenome_output."""
+    return pangenome_output(output_path, organism_name, core_threshold, tool='panaroo')
+
+
+def _reference_members(cell, separator):
+    """Members of a reference cell as Roary-style tab-separated IDs, without re-found genes."""
+    members = [m.strip() for m in cell.replace(';', '\t').split('\t')] if separator == ';' \
+        else [m.strip() for m in cell.split('\t')]
+    return '\t'.join(m for m in members if m and '_refound_' not in m)
+
+
+def pangenome_output(output_path, organism_name, core_threshold=0.99, tool='roary'):
+    """
+    Parse a Roary-format presence/absence CSV (Roary or Panaroo) for the reference.
+
+    Every reference protein gets the number and percentage of cohort genomes in its
+    family (<tool>_genomes_present, <tool>_conservation_pct), and core_<tool> is
+    True when that is at least core_threshold.
 
     :param output_path: Directory of the oraganism output.
     :param organism_name: Name of the organism.
-    :core_threshold: Threshold to consider a gene as core (default is 0.99 for 99%).
-    
-    :return: A list containing the core locus tags and a true/false table.
+    :param core_threshold: Threshold to consider a gene as core (default is 0.99 for 99%).
+    :param tool: 'roary' or 'panaroo'.
+    :return: Table with one row per reference protein.
     """
+    spec = PANGENOME_TOOLS[tool]
+    label = spec['label']
     conservation_dir = os.path.join(output_path, organism_name, 'conservation')
-    roary_out_dir = os.path.join(conservation_dir, 'roary_output')
+    roary_out_dir = os.path.join(conservation_dir, spec['dir'])
     gff_dir = os.path.join(roary_out_dir,'gff')
     results_dir = os.path.join(roary_out_dir, 'results')
-    roary_results_table = os.path.join(conservation_dir, 'core_roary.tsv')
+    roary_results_table = os.path.join(conservation_dir, f'core_{tool}.tsv')
 
     # Each missing input used to fall through to `return roary_table` with the
     # variable never assigned, surfacing as UnboundLocalError instead of naming
     # the file that was absent.
     if not os.path.exists(results_dir):
-        raise FileNotFoundError(f'No Roary output found in {roary_out_dir}.')
+        raise FileNotFoundError(f'No {label} output found in {roary_out_dir}.')
 
-    fixed_input_dir = os.path.join(results_dir, 'fixed_input_files')
-    genes_csv_file = os.path.join(results_dir, 'gene_presence_absence.csv')
+    # Roary rewrites GFFs with duplicate IDs under fixed_input_files; Panaroo does not.
+    fixed_input_dir = os.path.join(results_dir, spec['fixed'] or 'no_fixed_input_files')
+    genes_csv_file = os.path.join(results_dir, spec['csv'])
 
     if not os.path.exists(genes_csv_file):
         raise FileNotFoundError(
-            f'Roary did not produce "gene_presence_absence.csv" in {results_dir}.'
+            f'{label} did not produce "{spec["csv"]}" in {results_dir}.'
         )
 
     # The threshold is applied here, at parse time, so a cached table built with a
     # different one does not describe the requested core genome. Rebuilding it only
     # costs a pandas filter, unlike the Roary run itself.
     if not 0 <= core_threshold <= 1:
-        raise ValueError('Roary core_threshold must be between 0 and 1')
+        raise ValueError(f'{label} core_threshold must be between 0 and 1')
     metadata_columns = [
         'Gene', 'Non-unique Gene name', 'Annotation', 'No. isolates',
         'No. sequences', 'Avg sequences per isolate', 'Genome Fragment',
@@ -1004,36 +1133,36 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     with open(genes_csv_file, newline='') as handle:
         header = next(csv.reader(handle), [])
     if header[:len(metadata_columns)] != metadata_columns:
-        raise ValueError('Unrecognized Roary presence/absence CSV schema; cannot determine cohort')
+        raise ValueError(f'Unrecognized {label} presence/absence CSV schema; cannot determine cohort')
     samples = header[len(metadata_columns):]
     prepared = {os.path.splitext(os.path.basename(path))[0]
                 for path in glob.glob(os.path.join(gff_dir, '*.gff'))}
     if (not samples or len(samples) != len(set(samples)) or any(not x for x in samples)
             or organism_name not in samples or set(samples) != prepared):
-        raise ValueError('Roary sample columns must match the prepared GFF cohort and include the reference once')
+        raise ValueError(f'{label} sample columns must match the prepared GFF cohort and include the reference once')
     cohort_manifest = os.path.join(conservation_dir, 'cohort.json')
     if os.path.isfile(cohort_manifest):
         with open(cohort_manifest) as handle:
             if set(json.load(handle)['cohort']) != set(samples):
-                raise ValueError('Roary samples differ from the authoritative cohort')
+                raise ValueError(f'{label} samples differ from the authoritative cohort')
     total_genomes = len(samples)
     mapping_file = os.path.join(fixed_input_dir, f'{organism_name}.gff')
     if not os.path.isfile(mapping_file):
         mapping_file = os.path.join(gff_dir, f'{organism_name}.gff')
     reference_file = os.path.join(output_path, organism_name, 'genome', f'{organism_name}.gbk')
-    table_parameters = {'core_threshold': core_threshold, 'parser_schema': 4,
+    table_parameters = {'core_threshold': core_threshold, 'parser_schema': 4 if tool == 'roary' else 1,
                         'csv_sha256': files.sha256_file(genes_csv_file),
                         'mapping_sha256': files.sha256_file(mapping_file),
                         'reference_sha256': files.sha256_file(reference_file),
                         'samples': samples}
 
-    if files.manifest_matches(roary_results_table, table_parameters, label='core_roary.tsv'):
-        print(f'Roary output file already exists: {roary_results_table}.')
+    if files.manifest_matches(roary_results_table, table_parameters, label=f'core_{tool}.tsv'):
+        print(f'{label} output file already exists: {roary_results_table}.')
         cached_table = pd.read_csv(roary_results_table, sep='\t', index_col=0, header=0)
         # Reporting the counts only when the table is computed meant a resumed run
         # said nothing about the size of the core genome, which is the number the
         # run exists to produce.
-        report_core_table(cached_table, 'core_roary', 'Roary', core_threshold * 100, roary_results_table)
+        report_core_table(cached_table, f'core_{tool}', label, core_threshold * 100, roary_results_table)
         return cached_table
 
     df = pd.read_csv(genes_csv_file, dtype=str, keep_default_na=False)
@@ -1041,7 +1170,8 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     observed = df[samples].apply(lambda column: column.str.strip().ne('')).sum(axis=1)
     if ((counts < 0) | (counts > total_genomes) | (counts % 1 != 0)
             | (counts != observed)).any():
-        raise ValueError('Roary isolate counts disagree with sample presence/absence cells')
+        raise ValueError(f'{label} isolate counts disagree with sample presence/absence cells')
+    df[organism_name] = df[organism_name].map(lambda cell: _reference_members(cell, spec['separator']))
     empty = [sample for sample in samples if not df[sample].str.strip().ne('').any()]
     if empty:
         # Roary drops a genome whose proteins it cannot extract with only a log line
@@ -1049,15 +1179,17 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
         # reference came out as reference_not_reported everywhere, and an empty
         # comparator would silently lower every conservation percentage.
         raise RuntimeError(
-            f'Roary reported no genes for {len(empty)} genome(s): {empty[:10]}; they were '
-            f'dropped from the analysis. Check the Roary log for "Could not extract any '
-            f'protein sequences" and that their GFF feature seqids match the ##FASTA headers.'
+            f'{label} reported no genes for {len(empty)} genome(s): {empty[:10]}; they were '
+            f'dropped from the analysis. Check the {label} log (Roary: "Could not extract any '
+            f'protein sequences") and that their GFF feature seqids match the ##FASTA headers.'
         )
-    print(f'Total genomes analyzed by Roary: {total_genomes}')
+    if not df[organism_name].str.strip().ne('').any():
+        raise RuntimeError(f'{label} assigned no annotated gene of the reference {organism_name} to any family')
+    print(f'Total genomes analyzed by {label}: {total_genomes}')
     core_rows = df[counts >= total_genomes * core_threshold]
-    print(f'Roary total core families (>= {core_threshold*100}% strains): {len(core_rows)}')
+    print(f'{label} total core families (>= {core_threshold*100}% strains): {len(core_rows)}')
     gbk_ids = [value for value in core_rows[organism_name] if value.strip()]
-    print(f'Roary {organism_name} core genes: {len(gbk_ids)}')
+    print(f'{label} {organism_name} core genes: {len(gbk_ids)}')
 
     gff_file = os.path.join(gff_dir, f'{organism_name}.gff')
     gff_file_fixed = os.path.join(fixed_input_dir, f'{organism_name}.gff')
@@ -1074,7 +1206,7 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
         # unassigned and fail on the next line with no indication of the cause.
         raise FileNotFoundError(
             f'{organism_name}.gff not found in {fixed_input_dir} or {gff_dir}; '
-            f'cannot map Roary gene IDs to locus tags.'
+            f'cannot map {label} gene IDs to locus tags.'
         )
 
     reference_loci = set()
@@ -1093,8 +1225,8 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
     untranslated = sorted(set(core_locus_tag) - reference_loci)
     if untranslated:
         logging.warning(
-            'Ignoring %d Roary locus/loci with no translated CDS in the reference: %s',
-            len(untranslated), ', '.join(untranslated[:20]),
+            'Ignoring %d %s locus/loci with no translated CDS in the reference: %s',
+            len(untranslated), label, ', '.join(untranslated[:20]),
         )
         print(
             f'Ignoring {len(untranslated)} core locus/loci with no protein in the '
@@ -1119,20 +1251,21 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
             # undefined, which is a different problem and still an error.
             if locus in occupancy:
                 raise ValueError(
-                    f'Reference locus {locus} belongs to more than one Roary family, '
+                    f'Reference locus {locus} belongs to more than one {label} family, '
                     f'so its occupancy is ambiguous'
                 )
             occupancy[locus] = int(counts.loc[row_index])
     missing = reference_loci - set(occupancy)
     if missing:
-        logging.warning('Roary did not report %d reference loci; conservation remains unavailable', len(missing))
-    roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, 'core_roary', conservation_dir)
-    roary_table['roary_genomes_present'] = roary_table['gene'].map(occupancy).astype('Int64')
-    roary_table['roary_genomes_total'] = total_genomes
-    roary_table['roary_conservation_pct'] = 100 * roary_table['roary_genomes_present'] / total_genomes
-    roary_table['core_roary'] = roary_table['core_roary'].astype('boolean')
-    roary_table.loc[roary_table['gene'].isin(missing), 'core_roary'] = pd.NA
-    roary_table['roary_occupancy_status'] = roary_table['gene'].map(
+        logging.warning('%s did not report %d reference loci; conservation remains unavailable', label, len(missing))
+    core_column = f'core_{tool}'
+    roary_table = metadata.metadata_table_bool(output_path, organism_name, core_locus_tag, core_column, conservation_dir)
+    roary_table[f'{tool}_genomes_present'] = roary_table['gene'].map(occupancy).astype('Int64')
+    roary_table[f'{tool}_genomes_total'] = total_genomes
+    roary_table[f'{tool}_conservation_pct'] = 100 * roary_table[f'{tool}_genomes_present'] / total_genomes
+    roary_table[core_column] = roary_table[core_column].astype('boolean')
+    roary_table.loc[roary_table['gene'].isin(missing), core_column] = pd.NA
+    roary_table[f'{tool}_occupancy_status'] = roary_table['gene'].map(
         lambda gene: 'evaluated' if gene in occupancy else 'reference_not_reported')
     roary_table.to_csv(roary_results_table, sep='\t')
     files.write_manifest(
@@ -1143,7 +1276,100 @@ def roary_output(output_path, organism_name, core_threshold=0.99):
 
     return roary_table
 
-def corecruncher_output(output_path, organism_name, core_threshold=None):
+def _fasta_lengths(path):
+    lengths, name, size = {}, None, 0
+    with open(path) as handle:
+        for line in handle:
+            if line.startswith('>'):
+                if name is not None:
+                    lengths[name] = size
+                name, size = line[1:].split()[0], 0
+            else:
+                size += len(line.strip())
+    if name is not None:
+        lengths[name] = size
+    return lengths
+
+
+def _usearch_best_hits(path, query_lengths, target_lengths, identity, length):
+    """Best hit per query, keeping only the hits CoreCruncher itself accepts.
+
+    CoreCruncher (big_cruncher.py) accepts a hit when its identity is at least the
+    -score value and the query/target length ratio is within [length, 2 - length].
+    """
+    south = length / 100
+    north = 2 - south
+    best = {}
+    with open(path) as handle:
+        for line in handle:
+            fields = line.rstrip('\n').split('\t')
+            if len(fields) < 3:
+                continue
+            query, target = fields[0], fields[1]
+            try:
+                score = float(fields[2])
+            except ValueError:
+                continue
+            if query not in query_lengths or target not in target_lengths or score < identity:
+                continue
+            ratio = query_lengths[query] / target_lengths[target]
+            if south <= ratio <= north and score > best.get(query, ('', -1.0))[1]:
+                best[query] = (target, score)
+    return best
+
+
+def _corecruncher_genome_bbh(job):
+    """Reference proteins with a bidirectional best hit in one comparator genome."""
+    cc_dir, faa_dir, reference, genome_file, identity, length, reference_lengths = job
+    lengths = _fasta_lengths(os.path.join(faa_dir, genome_file))
+    forward = _usearch_best_hits(os.path.join(cc_dir, f'{reference}-{genome_file}'),
+                                 reference_lengths, lengths, identity, length)
+    reverse = _usearch_best_hits(os.path.join(cc_dir, f'{genome_file}-{reference}'),
+                                 lengths, reference_lengths, identity, length)
+    return [query for query, (target, _) in forward.items()
+            if reverse.get(target, ('',))[0] == query]
+
+
+def corecruncher_hit_occupancy(corecruncher_dir, reference, cohort, identity=95, length=80, cpus=1):
+    """
+    Number of cohort genomes in which each reference protein has an ortholog.
+
+    CoreCruncher only reports the families it keeps as core. Its CC/ folder,
+    however, holds the usearch searches of every genome against the reference in
+    both directions, so the presence of every reference protein can be counted:
+    an ortholog is a bidirectional best hit passing CoreCruncher's own identity
+    and length filters. This is presence before CoreCruncher's paralog and
+    double-outlier filters, which is what a conservation percentage should say.
+
+    :return: {reference protein ID: genomes with an ortholog, the reference included}.
+    """
+    cc_dir = os.path.join(corecruncher_dir, 'CC')
+    faa_dir = os.path.join(corecruncher_dir, 'faa')
+    reference_lengths = _fasta_lengths(os.path.join(faa_dir, reference))
+    comparators = sorted(name for name in cohort if name != reference)
+    missing = [name for name in comparators
+               if not os.path.isfile(os.path.join(cc_dir, f'{reference}-{name}'))
+               or not os.path.isfile(os.path.join(cc_dir, f'{name}-{reference}'))]
+    if missing:
+        raise FileNotFoundError(f'CoreCruncher CC/ lacks the searches of {len(missing)} genome(s), e.g. {missing[:3]}')
+    jobs = [(cc_dir, faa_dir, reference, name, identity, length, reference_lengths) for name in comparators]
+    counts = {protein: 1 for protein in reference_lengths}
+    workers = max(1, min(cpus, len(jobs)))
+    if workers == 1:
+        results = map(_corecruncher_genome_bbh, jobs)
+        for found in results:
+            for protein in found:
+                counts[protein] += 1
+        return counts
+    # spawn, not fork: the pipeline process is multi-threaded by the time it gets here.
+    with multiprocessing.get_context('spawn').Pool(workers) as pool:
+        for found in pool.imap_unordered(_corecruncher_genome_bbh, jobs, chunksize=8):
+            for protein in found:
+                counts[protein] += 1
+    return counts
+
+
+def corecruncher_output(output_path, organism_name, core_threshold=None, identity=95, length=80, cpus=1):
     
     """
     Process the output from CoreCruncher for the given organism.
@@ -1206,8 +1432,15 @@ def corecruncher_output(output_path, organism_name, core_threshold=None):
     table['corecruncher_conservation_pct'] = 100 * table['corecruncher_genomes_present'] / len(cohort)
     table['corecruncher_occupancy_status'] = table['gene'].map(
         lambda gene: 'retained_core_family' if gene in occupancy else 'occupancy_unavailable')
+    # Presence of every protein, not only the retained core families (see
+    # corecruncher_hit_occupancy). FAA IDs are the locus tags of the reference.
+    hits = corecruncher_hit_occupancy(os.path.join(conservation_dir, 'corecruncher_output'),
+                                      ref_genome, cohort, identity=identity, length=length, cpus=cpus)
+    table['corecruncher_hit_genomes'] = table['gene'].map(hits).astype('Int64')
+    table['corecruncher_hit_pct'] = 100 * table['corecruncher_hit_genomes'] / len(cohort)
     table.to_csv(cc_results_table, sep='\t')
-    files.write_manifest(cc_results_table, {'core_threshold': core_threshold, 'parser_schema': 2,
+    files.write_manifest(cc_results_table, {'core_threshold': core_threshold, 'parser_schema': 3,
+                         'identity': identity, 'length': length,
                          'source_sha256': files.sha256_file(cc_output_file)},
                          extra={'genomes_analyzed': len(cohort), 'core_families': families})
     return table

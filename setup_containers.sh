@@ -22,6 +22,7 @@ mkdir -p singularity_sfi_files
 echo "Pulling containers..."
 
 $CONTAINER_CMD pull --name singularity_sfi_files/sangerpathogens_roary.sif docker://sangerpathogens/roary
+$CONTAINER_CMD pull --name singularity_sfi_files/staphb_panaroo_1.8.0.sif docker://staphb/panaroo:1.8.0
 $CONTAINER_CMD pull --name singularity_sfi_files/fpocket_fpocket.sif docker://fpocket/fpocket
 $CONTAINER_CMD pull --name singularity_sfi_files/brinkmanlab_psortb_commandline_1.0.2.sif docker://brinkmanlab/psortb_commandline:1.0.2
 $CONTAINER_CMD pull --name singularity_sfi_files/mcpalumbo_corecruncher_1.sif docker://mcpalumbo/corecruncher:1

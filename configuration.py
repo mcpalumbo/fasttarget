@@ -47,6 +47,7 @@ class Config:
     SECTION_DEFAULTS = {
         'structures': {'pocket_full_mode': False, 'uniparc_fallback': False},
         'colabfold': {'amber': False, 'gpu': False, 'colabfold_run_all': False},
+        'core': {'panaroo': False, 'panaroo_mode': 'strict'},
     }
 
     @staticmethod
@@ -77,7 +78,7 @@ class Config:
         self.colabfold = self._section(config, 'colabfold', self.SECTION_DEFAULTS['colabfold'])
         self.metabolism_pathwaytools = self._section(config, 'metabolism-PathwayTools')
         self.metabolism_sbml = self._section(config, 'metabolism-SBML')
-        self.core = self._section(config, 'core')
+        self.core = self._section(config, 'core', self.SECTION_DEFAULTS['core'])
         self.metadata = self._section(config, 'metadata')
         self.offtarget = self._section(config, 'offtarget')
         self.deg = self._section(config, 'deg')
@@ -363,8 +364,10 @@ def validate_config(config):
             errors.append(str(error))
         
         # Check at least one core method is enabled
-        if not core.get('roary') and not core.get('corecruncher'):
-            errors.append("Core analysis enabled but neither 'roary' nor 'corecruncher' is enabled")
+        if not core.get('roary') and not core.get('corecruncher') and not core.get('panaroo'):
+            errors.append("Core analysis enabled but none of 'roary', 'corecruncher' or 'panaroo' is enabled")
+        if core.get('panaroo_mode', 'strict') not in ('strict', 'moderate', 'sensitive'):
+            errors.append(f"core.panaroo_mode must be strict, moderate or sensitive (got {core.get('panaroo_mode')})")
         
         # Validate identity and frequency (0-100%)
         if 'min_identity' in core:
@@ -566,6 +569,7 @@ def print_config(config):
     if config.core:
         print(f"Roary Enabled: {config.core['roary']}")       
         print(f"CoreCruncher Enabled: {config.core['corecruncher']}")
+        print(f"Panaroo Enabled: {config.core['panaroo']} (clean mode {config.core['panaroo_mode']})")
         print(f"Minimum Identity: {config.core['min_identity']}%")
         print(f"Minimum Core Frequency: {config.core['min_core_freq']}%")
     else:

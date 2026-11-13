@@ -182,14 +182,15 @@ def write_roary_inputs(output_path, organism_name, presence, genomes=10):
             ] + cells)
 
 
-def write_corecruncher_inputs(output_path, organism_name, core_genes, genomes=10):
+def write_corecruncher_inputs(output_path, organism_name, core_genes, genomes=10, hits=None):
     """
-    Write the families_core.txt the CoreCruncher parser reads.
+    Write the families_core.txt and CC/ searches the CoreCruncher parser reads.
 
     :param output_path: Output directory.
     :param organism_name: Organism name.
     :param core_genes: Genes that belong to a core family.
     :param genomes: Number of genomes in the cohort, the reference included.
+    :param hits: Optional {gene: comparators with an ortholog}; default all of them.
     """
     ccruncher = os.path.join(output_path, organism_name, 'conservation', 'corecruncher_output')
     faa_dir = os.path.join(ccruncher, 'faa')
@@ -198,10 +199,27 @@ def write_corecruncher_inputs(output_path, organism_name, core_genes, genomes=10
     # The parser checks that the cohort it ran over includes the reference, so the
     # faa directory has to hold it: a core genome computed without the reference
     # genome in the cohort would describe other organisms.
-    for sample in [organism_name] + [f'genome_{index:02d}' for index in range(1, genomes)]:
+    comparators = [f'genome_{index:02d}' for index in range(1, genomes)]
+    for sample in [organism_name] + comparators:
         with open(os.path.join(faa_dir, f'{sample}.faa'), 'w') as handle:
             for gene in GENES:
-                handle.write(f'>{sample}_{gene}\n{SEQUENCES[gene]}\n')
+                # As in a real run, the reference proteins are named by locus tag.
+                name = gene if sample == organism_name else f'{sample}_{gene}'
+                handle.write(f'>{name}\n{SEQUENCES[gene]}\n')
+
+    # usearch blast6 searches of every comparator against the reference, both ways.
+    cc_dir = os.path.join(ccruncher, 'CC')
+    os.makedirs(cc_dir, exist_ok=True)
+    hits = hits or {}
+    for index, sample in enumerate(comparators):
+        with open(os.path.join(cc_dir, f'{organism_name}.faa-{sample}.faa'), 'w') as forward, \
+                open(os.path.join(cc_dir, f'{sample}.faa-{organism_name}.faa'), 'w') as reverse:
+            for gene in GENES:
+                if index >= hits.get(gene, len(comparators)):
+                    continue
+                n = len(SEQUENCES[gene])
+                forward.write(f'{gene}\t{sample}_{gene}\t99.0\t{n}\t0\t0\t1\t{n}\t1\t{n}\t*\t*\n')
+                reverse.write(f'{sample}_{gene}\t{gene}\t99.0\t{n}\t0\t0\t1\t{n}\t1\t{n}\t*\t*\n')
 
     with open(os.path.join(ccruncher, 'families_core.txt'), 'w') as handle:
         for gene in core_genes:

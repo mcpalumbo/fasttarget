@@ -2,6 +2,7 @@
 
 # Pull Docker images
 docker pull sangerpathogens/roary:latest
+docker pull staphb/panaroo:1.8.0
 docker pull fpocket/fpocket:4.2.2
 docker pull brinkmanlab/psortb_commandline:1.0.2
 docker pull mcpalumbo/corecruncher:1

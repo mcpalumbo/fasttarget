@@ -442,6 +442,23 @@ def conservation_module(config, databases_path, output_path, cpus):
             else:
                 logging.info('Roary not enabled')
 
+            if config.core.get('panaroo'):
+                try:
+                    print('----- 2. Running Panaroo -----')
+                    logging.info('Starting Panaroo analysis')
+                    genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus,
+                                                program_list=['panaroo'], container_engine=config.container_engine,
+                                                panaroo_mode=config.core.get('panaroo_mode', 'strict'))
+                    print('----- 2. Parsing Panaroo results -----')
+                    df_panaroo = genome.panaroo_output(output_path, organism_name, core_threshold=min_core_freq/100)
+                    module_tables.append(df_panaroo)
+                    logging.info('Panaroo analysis finished')
+                    print('----- 2. Finished -----')
+                except Exception as e:
+                    record_failure('Panaroo analysis', e)
+            else:
+                logging.info('Panaroo not enabled')
+
             if config.core['corecruncher']:
                 try:
                     # Run CoreCruncher
@@ -450,7 +467,8 @@ def conservation_module(config, databases_path, output_path, cpus):
                     genome.core_genome_programs(output_path, organism_name, min_core_freq, min_identity, cpus, program_list=['corecruncher'], container_engine=config.container_engine)
                     # Parse output
                     print('----- 2. Parsing CoreCruncher results -----')
-                    df_cc = genome.corecruncher_output(output_path, organism_name, core_threshold=min_core_freq)
+                    df_cc = genome.corecruncher_output(output_path, organism_name, core_threshold=min_core_freq,
+                                                      identity=min_identity, cpus=cpus)
                     module_tables.append(df_cc)
                     logging.info('CoreCruncher analysis finished')
                     print('----- 2. Finished -----')
@@ -1047,7 +1065,7 @@ def print_run_summary(config, results):
         ('ligands', bool(config.ligands and config.ligands.get('enabled')),
          ('ligand analysis', 'ligands module', 'alphafill')),
         ('core genome', bool(config.core),
-         ('core analysis', 'roary analysis', 'corecruncher analysis', 'conservation module')),
+         ('core analysis', 'roary analysis', 'panaroo analysis', 'corecruncher analysis', 'conservation module')),
         ('offtarget', bool(config.offtarget),
          ('offtarget', 'foldseek', 'silva', 'microbiome')),
         ('essentiality (DEG)', bool(config.deg),

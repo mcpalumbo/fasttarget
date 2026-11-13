@@ -134,6 +134,11 @@ core:
   enabled: False
   roary: False
   corecruncher: False
+  # panaroo: Graph-based pangenome (corrects fragmented, missing and contaminant annotations).
+  # Uses min_identity (Panaroo -c) and min_core_freq like Roary/CoreCruncher. Image staphb/panaroo:1.8.0.
+  panaroo: False
+  # panaroo_mode: Panaroo --clean-mode: strict (recommended for core genes), moderate or sensitive.
+  panaroo_mode: strict
   # min_identity: Minimum percentage identity for core genome analysis (0-100). Example: 95 for 95% identity.
   min_identity: 95
   # min_core_freq: Minimum frequency for a gene to be considered core (0-100). Example: 99 means gene must be present in 99% of genomes.
