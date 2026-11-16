@@ -79,6 +79,7 @@ class Config:
         self.metabolism_pathwaytools = self._section(config, 'metabolism-PathwayTools')
         self.metabolism_sbml = self._section(config, 'metabolism-SBML')
         self.metabolism_annotation = self._section(config, 'metabolism-annotation')
+        self.metabolism_eggnog = self._section(config, 'metabolism-eggnog', {'min_confidence': 'medium'})
         self.core = self._section(config, 'core', self.SECTION_DEFAULTS['core'])
         self.metadata = self._section(config, 'metadata')
         self.offtarget = self._section(config, 'offtarget')
@@ -224,6 +225,20 @@ def validate_config(config):
             model = annotation.get('sbml_file')
             if model and not os.path.isfile(model):
                 errors.append(f'metabolism-annotation.sbml_file not found: {model}')
+
+    if 'metabolism-eggnog' in config:
+        eggnog = config['metabolism-eggnog']
+        if not isinstance(eggnog, dict) or not isinstance(eggnog.get('enabled'), bool):
+            errors.append('metabolism-eggnog.enabled must be boolean')
+        elif eggnog['enabled']:
+            path = eggnog.get('annotations_file')
+            if not path or not isinstance(path, str):
+                errors.append('metabolism-eggnog.annotations_file is required when enabled')
+            elif not os.path.isfile(path):
+                errors.append(f'metabolism-eggnog.annotations_file not found: {path}')
+            level = eggnog.get('min_confidence', 'medium')
+            if level not in ('high', 'medium', 'low'):
+                errors.append(f"metabolism-eggnog.min_confidence must be high, medium or low (got {level!r})")
 
     if 'container_engine' in config:
         engine = config['container_engine']

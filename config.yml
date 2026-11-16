@@ -37,6 +37,15 @@ metabolism-annotation:
   # kegg_organism: pau  # Optional; otherwise resolve exact organism.strain_taxid.
   # sbml_file: /path/to/model.xml  # Optional; uses the enabled metabolic model if present.
 
+metabolism-eggnog:
+  enabled: False
+  # Output of eggNOG-mapper (e.g. the eggNOG 7 web server) run on the organism .faa.
+  annotations_file: /path/to/query.emapper.annotations
+  # Lowest annotation confidence kept (high | medium | low). high: seed or one-to-one
+  # ortholog; medium: one-to-many/many-to-one; low: many-to-many (paralogs, function may differ).
+  # Dropped values are listed in eggnog_low_confidence_dropped.
+  min_confidence: medium
+
 metabolism-PathwayTools:
   enabled: False
   network_metrics:

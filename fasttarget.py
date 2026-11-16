@@ -3,7 +3,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill, functional_annotations, foldseek_pocket_alignment
+from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill, functional_annotations, foldseek_pocket_alignment, eggnog
 from datetime import datetime
 import logging
 import sys
@@ -205,6 +205,16 @@ def metabolic_module(config, output_path):
             module_tables.append(table)
         except Exception as error:
             record_failure('metabolic functional annotation (KEGG/GO)', error)
+
+    if getattr(config, 'metabolism_eggnog', False):
+        try:
+            settings = config.metabolism_eggnog
+            logging.info(f"eggNOG-mapper annotations: {settings['annotations_file']}")
+            module_tables.append(eggnog.annotate(
+                output_path, organism_name, settings['annotations_file'],
+                min_confidence=settings.get('min_confidence', 'medium')))
+        except Exception as error:
+            record_failure('eggNOG-mapper annotation (COG/KEGG/Pfam)', error)
 
     return module_tables
     
