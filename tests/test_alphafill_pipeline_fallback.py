@@ -151,3 +151,94 @@ def test_successful_ligand_analysis_is_not_repeated(tmp_path, monkeypatch):
     calls.clear()
     alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
     assert calls == []
+
+
+def test_absent_from_successful_rsync_is_not_found_without_https(tmp_path, monkeypatch):
+    """rsync --ignore-missing-args skips absent entries: no HTTPS 404 check needed."""
+    def no_http(*args, **kwargs):
+        raise AssertionError("HTTPS requested for an entry absent from the archive")
+
+    monkeypatch.setattr(alphafill, "_rsync_batch", lambda *args: True)
+    monkeypatch.setattr(requests.Session, "get", no_http)
+    config = {"download_cif": "always", "enrich_donors": False,
+              "generate_pymol": False, "similarity_fallback": False}
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    root = tmp_path / "Example" / "ligands" / "alphafill"
+    status = json.loads((root / "cache" / "P12345" / "download_status.json").read_text())
+    assert status["status"] == "not_found"
+    assert status["download_source"] == "rsync"
+    report = pd.read_csv(root / "alphafill_selection.tsv", sep="\t", keep_default_na=False)
+    assert report.set_index("gene").loc["G", "result_status"] == "alphafill_entry_not_found"
+    # The cached not_found is reused: a second run neither rsyncs nor uses HTTPS.
+    monkeypatch.setattr(alphafill, "_rsync_batch",
+                        lambda *args: (_ for _ in ()).throw(AssertionError("rsync repeated")))
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+
+
+def test_failed_rsync_still_falls_back_to_https(tmp_path, monkeypatch):
+    requested = []
+
+    class Response:
+        status_code, url, headers = 404, "", {}
+
+    def fake_get(self, url, **kwargs):
+        requested.append(url)
+        return Response()
+
+    monkeypatch.setattr(alphafill, "_rsync_batch", lambda *args: False)
+    monkeypatch.setattr(requests.Session, "get", fake_get)
+    config = {"download_cif": "never", "enrich_donors": False,
+              "generate_pymol": False, "similarity_fallback": False}
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    assert requested and requested[0].endswith("/P12345/json")
+
+
+def _archive_only(monkeypatch):
+    def fake_rsync(root, accessions, kind, timeout, proxy):
+        for accession in accessions:
+            path = alphafill._archive_path(root, accession, kind)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"hits": []}')
+        return True
+    monkeypatch.setattr(alphafill, "_rsync_batch", fake_rsync)
+    monkeypatch.setattr(requests.Session, "get",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("HTTP requested")))
+
+
+def test_unchanged_completed_run_is_reused_whole(tmp_path, monkeypatch):
+    _archive_only(monkeypatch)
+    config = {"download_cif": "never", "enrich_donors": False,
+              "generate_pymol": False, "similarity_fallback": False}
+    first = alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    calls = []
+    original = alphafill.download_uniprot
+    monkeypatch.setattr(alphafill, "download_uniprot",
+                        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    again = alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    assert calls == []
+    assert again["gene"].tolist() == first["gene"].tolist()
+
+    # Another mapping, or refresh_cache, runs the analysis again.
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345", "H": "Q99999"}, config)
+    assert calls
+    calls.clear()
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345", "H": "Q99999"},
+                            {**config, "refresh_cache": True})
+    assert calls
+
+
+def test_a_run_with_failures_is_not_reused(tmp_path, monkeypatch):
+    _archive_only(monkeypatch)
+    config = {"download_cif": "never", "enrich_donors": False,
+              "generate_pymol": False, "similarity_fallback": False}
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    report_path = tmp_path / "Example" / "ligands" / "alphafill" / "alphafill_results.json"
+    report = json.loads(report_path.read_text())
+    report["execution"]["status"] = "completed_with_errors"
+    report_path.write_text(json.dumps(report))
+    calls = []
+    original = alphafill.download_uniprot
+    monkeypatch.setattr(alphafill, "download_uniprot",
+                        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    alphafill.run_alphafill(str(tmp_path), "Example", {"G": "P12345"}, config)
+    assert calls

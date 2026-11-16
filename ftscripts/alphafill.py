@@ -369,15 +369,23 @@ def filter_ligand(ligand: dict[str, Any], high_local_rmsd: float = 0.92,
     return result
 
 
-def _atomic_bytes(path: Path, content: bytes) -> None:
+def _atomic_bytes(path: Path, content: bytes, durable: bool = True) -> None:
     """
     Atomically write `content` bytes to `path`.
 
     The function writes to a temporary file in the destination directory,
-    flushes and fsyncs, then moves the temporary file into place.
+    flushes (and fsyncs when durable), then moves the temporary file into place.
+
+    durable=False skips the fsync. The rename still guarantees readers never see
+    a partial file; only a power loss could leave an older version or an empty
+    file, which cache validation treats as missing. It is used for the
+    per-accession cache, status and viewer files: there are tens of thousands of
+    them, and on slow or external disks one fsync can take a quarter of a
+    second, which made a fully cached run spend hours only rewriting them.
 
     :param path: Destination file path.
     :param content: Bytes to write to the file.
+    :param durable: fsync before the rename (default True).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
@@ -385,21 +393,64 @@ def _atomic_bytes(path: Path, content: bytes) -> None:
         with os.fdopen(fd, "wb") as handle:
             handle.write(content)
             handle.flush()
-            os.fsync(handle.fileno())
+            if durable:
+                os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
 
-def _atomic_json(path: Path, value: Any) -> None:
+class _StreamingTsv:
+    """
+    Write a large TSV in chunks and move it into place atomically on success.
+
+    Each chunk is a DataFrame formatted by pandas exactly as a single to_csv call
+    would, so the file is identical to writing the whole table at once, without
+    holding the whole table in memory. On error the temporary file is removed and
+    any previous version of the destination is left untouched.
+    """
+
+    def __init__(self, path: Path, columns: list[str]):
+        self.path = path
+        self.columns = columns
+        self.rows = 0
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, self.temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+        self.handle = os.fdopen(fd, "w", newline="", encoding="utf-8")
+        pd.DataFrame(columns=columns).to_csv(self.handle, sep="\t", index=False)
+
+    def write(self, frame: pd.DataFrame) -> None:
+        if not frame.empty:
+            frame.to_csv(self.handle, sep="\t", index=False, header=False, columns=self.columns)
+            self.rows += len(frame)
+
+    def __enter__(self) -> "_StreamingTsv":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        try:
+            if exc_type is None:
+                self.handle.flush()
+                os.fsync(self.handle.fileno())
+            self.handle.close()
+            if exc_type is None:
+                os.replace(self.temporary, self.path)
+        finally:
+            if os.path.exists(self.temporary):
+                os.unlink(self.temporary)
+
+
+def _atomic_json(path: Path, value: Any, durable: bool = True) -> None:
     """
     Atomically write a JSON-serializable `value` to `path` in a human-readable form.
 
     :param path: Destination file path.
     :param value: JSON-serializable object to write.
+    :param durable: fsync before the rename (see _atomic_bytes).
     """
-    _atomic_bytes(path, (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n").encode())
+    _atomic_bytes(path, (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n").encode(),
+                  durable=durable)
 
 
 def _valid_json(path: Path) -> bool:
@@ -553,10 +604,82 @@ def _candidate_score(hit: dict[str, Any]) -> tuple[Any, ...]:
             hit["query_coverage"], hit["subject_coverage"], hit["bitscore"], hit["accession"])
 
 
+class HostUnavailable(requests.ConnectionError):
+    """Raised without contacting a host that failed repeatedly in this run."""
+
+
+class _HostGuard:
+    """Per-host politeness shared by all download threads.
+
+    * Rate: at most one request every ``interval`` seconds per host
+      (AlphaFill only by default), whatever the number of workers.
+    * Circuit breaker: after ``max_failures`` consecutive connection errors
+      or timeouts, the host is skipped for the rest of the run instead of
+      being retried thousands of times. Any response resets the count.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self, intervals: dict[str, float] | None = None, max_failures: int = 10) -> None:
+        with self.lock:
+            self.intervals = dict(intervals or {})
+            self.max_failures = max_failures
+            self.next_slot: dict[str, float] = {}
+            self.failures: dict[str, int] = {}
+            self.open: set[str] = set()
+
+    def before(self, host: str) -> None:
+        with self.lock:
+            if host in self.open:
+                raise HostUnavailable(f"{host} skipped: unreachable earlier in this run")
+            interval = self.intervals.get(host, 0.0)
+            now = time.monotonic()
+            slot = max(now, self.next_slot.get(host, now))
+            self.next_slot[host] = slot + interval
+        if slot > now:
+            time.sleep(slot - now)
+
+    def delay(self, host: str, seconds: float) -> None:
+        """Push back every thread's next request to this host (HTTP 429)."""
+        with self.lock:
+            self.next_slot[host] = max(self.next_slot.get(host, 0.0), time.monotonic() + seconds)
+
+    def success(self, host: str) -> None:
+        with self.lock:
+            self.failures[host] = 0
+
+    def failure(self, host: str) -> bool:
+        """Record a connection failure; return True if the host is now skipped."""
+        with self.lock:
+            self.failures[host] = self.failures.get(host, 0) + 1
+            if host not in self.open and self.failures[host] >= self.max_failures:
+                self.open.add(host)
+                logging.warning(
+                    "%s unreachable after %s consecutive connection failures: skipping it for "
+                    "the rest of this run. Affected entries are marked incomplete; rerun later "
+                    "(cached results are kept).", host, self.failures[host])
+            return host in self.open
+
+
+_HOSTS = _HostGuard()
+
+
+def _retry_after(response: requests.Response) -> float | None:
+    try:
+        return min(60.0, max(0.0, float(response.headers.get("Retry-After", ""))))
+    except (TypeError, ValueError):
+        return None
+
+
 def _request(session: requests.Session, url: str, timeout: float,
              retries: int, backoff: float) -> requests.Response:
     """
     Perform an HTTP GET request with retries and exponential backoff.
+
+    Requests go through the per-host guard: rate limited, and skipped once
+    the host failed repeatedly (HostUnavailable, a ConnectionError).
 
     :param session: `requests.Session` instance to use for the request.
     :param url: URL to fetch.
@@ -566,17 +689,26 @@ def _request(session: requests.Session, url: str, timeout: float,
     :return: `requests.Response` on success.
     :raises: Last encountered exception when all retries fail.
     """
+    host = urlparse(url).hostname or ""
     last_error = None
     for attempt in range(retries + 1):
+        _HOSTS.before(host)
+        wait = backoff * (2 ** attempt)
         try:
             response = session.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
+            _HOSTS.success(host)
             if response.status_code != 429 and response.status_code < 500:
                 return response
             last_error = requests.HTTPError(f"HTTP {response.status_code}", response=response)
+            if response.status_code == 429:
+                wait = max(wait, _retry_after(response) or 0.0)
+                _HOSTS.delay(host, wait)
         except (requests.Timeout, requests.ConnectionError) as error:
             last_error = error
+            if _HOSTS.failure(host):
+                break
         if attempt < retries:
-            time.sleep(backoff * (2 ** attempt))
+            time.sleep(wait)
     raise last_error or requests.RequestException("AlphaFill request failed")
 
 
@@ -676,8 +808,16 @@ del _show_alphafill
     source = source.replace("__ROOT__", repr("AF_" + re.sub(r"[^A-Za-z0-9_]", "_", accession)))
     source = source.replace("__ENTRIES__", repr(entries))
     compile(source, str(output_path), "exec")
-    _atomic_bytes(output_path, source.encode("utf-8"))
+    _atomic_bytes(output_path, source.encode("utf-8"), durable=False)
     return output_path
+
+
+class DonorNotFound(ValueError):
+    """The API answered 404: the entry is obsolete or the chain no longer exists.
+
+    A permanent outcome, cached like a payload so it is not requested again on
+    every run; refresh_cache asks again.
+    """
 
 
 class DonorResolver:
@@ -717,17 +857,24 @@ class DonorResolver:
                 try:
                     with path.open(encoding="utf-8") as handle:
                         cached = json.load(handle)
+                    if isinstance(cached, dict) and cached.get("not_found") is True:
+                        raise DonorNotFound(f"Not found (HTTP 404, cached): {url}")
                     if valid(cached):
                         self.payloads[url] = cached
                         return cached
+                except DonorNotFound:
+                    raise
                 except (OSError, ValueError):
                     pass
             response = _request(self.session, url, self.timeout, self.retries, self.backoff)
+            if response.status_code == 404:
+                _atomic_json(path, {"not_found": True, "url": url}, durable=False)
+                raise DonorNotFound(f"Not found (HTTP 404): {url}")
             response.raise_for_status()
             payload = response.json()
             if not valid(payload):
                 raise ValueError(f"Unsupported donor metadata from {url}: missing/invalid {required_key}")
-            _atomic_json(path, payload)
+            _atomic_json(path, payload, durable=False)
             self.payloads[url] = payload
             return payload
         except (requests.RequestException, OSError, ValueError) as error:
@@ -813,6 +960,12 @@ class DonorResolver:
             result["donor_annotation_status"] = ("available" if states == {"available"}
                                                   else "error" if states == {"error"} else "partial")
             result["donor_annotation_error"] = "; ".join(errors)
+        except DonorNotFound as error:
+            # Obsolete PDB entries (replaced by a new ID) and renumbered chains: a
+            # final answer like "unmapped", not a failure to retry on every run.
+            result["donor_annotation_status"] = "not_found"
+            result["donor_annotation_error"] = str(error)
+            logging.debug("Donor not found in RCSB for %s/%s: %s", pdb_id, protein_chain, error)
         except (requests.RequestException, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
             result["donor_annotation_status"] = "error"
             result["donor_annotation_error"] = str(error)
@@ -825,8 +978,14 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
                      backoff: float = 1.0, download_cif: str = "always",
                      thresholds: dict[str, float] | None = None,
                      refresh_cache: bool = False,
-                     locus_tag: str | None = None) -> dict[str, Any]:
+                     locus_tag: str | None = None,
+                     archive_checked: bool = False) -> dict[str, Any]:
     """Fetch one accession; reuse valid cache unless refresh_cache is True.
+
+    archive_checked=True means a successful rsync of the official archive was
+    just requested for this accession: a missing metadata file then means the
+    entry does not exist (rsync skips it via --ignore-missing-args), so it is
+    recorded as not_found without an HTTPS request.
 
     output_root contains models/<locus_tag>/<accession>_alphafill.cif as a primary result
     and cache/<accession>/ metadata/status files.
@@ -892,6 +1051,13 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
             if payload is not None:
                 status["responses"]["metadata"] = {"source": RSYNC_URL, "cached": True}
                 status["download_source"] = "rsync"
+            elif archive_checked and not refresh_cache:
+                status["status"] = "not_found"
+                status["download_source"] = "rsync"
+                status["responses"]["metadata"] = {"source": RSYNC_URL, "cached": False,
+                                                   "absent_from_archive": True}
+                status["error_message"] = "AlphaFill entry absent from the rsync archive"
+                return status
             else:
                 response = fetch("metadata")
                 status["download_source"] = "https"
@@ -965,7 +1131,7 @@ def download_uniprot(uniprot_id: str, output_root: str | Path,
         logging.warning("AlphaFill failed for %s: %s", accession, error)
     finally:
         session.close()
-        _atomic_json(status_path, _portable_paths(status, output_root))
+        _atomic_json(status_path, _portable_paths(status, output_root), durable=False)
     return status
 
 
