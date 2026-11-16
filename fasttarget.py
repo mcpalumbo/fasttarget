@@ -3,7 +3,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill, functional_annotations
+from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill, functional_annotations, foldseek_pocket_alignment
 from datetime import datetime
 import logging
 import sys
@@ -701,6 +701,18 @@ def offtarget_module(config, databases_path, output_path, cpus):
                             mapped_dict_foldseek_colab
                         )
                         module_tables.append(final_foldseek_colab_df)
+
+                    # Compare pocket residues after all enabled Foldseek searches
+                    # have written their residue-level alignments.
+                    try:
+                        organism_dir = os.path.join(output_path, organism_name)
+                        foldseek_pocket_alignment.screen_to_tsv(
+                            organism_dir,
+                            os.path.join(databases_path, 'human_structures'),
+                            os.path.join(organism_dir, 'offtarget', 'pocket_human_alignment.tsv'),
+                        )
+                    except Exception as error:
+                        record_failure('Foldseek pocket-human alignment screen', error)
 
                     logging.info('Foldseek human offtarget analysis finished')
                     print('----- Finished -----')
