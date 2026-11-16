@@ -211,6 +211,20 @@ def validate_config(config):
                 )
 
     #Validate container engine
+    if 'metabolism-annotation' in config:
+        annotation = config['metabolism-annotation']
+        if not isinstance(annotation, dict) or not isinstance(annotation.get('enabled'), bool):
+            errors.append('metabolism-annotation.enabled must be boolean')
+        else:
+            if 'go_slim' in annotation and not isinstance(annotation['go_slim'], bool):
+                errors.append('metabolism-annotation.go_slim must be boolean')
+            code = annotation.get('kegg_organism')
+            if code is not None and (not isinstance(code, str) or not code.strip()):
+                errors.append('metabolism-annotation.kegg_organism must be a non-empty string')
+            model = annotation.get('sbml_file')
+            if model and not os.path.isfile(model):
+                errors.append(f'metabolism-annotation.sbml_file not found: {model}')
+
     if 'container_engine' in config:
         engine = config['container_engine']
         valid_engines = ['docker', 'singularity', 'apptainer']
