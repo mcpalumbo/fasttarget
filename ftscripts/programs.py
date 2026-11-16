@@ -998,7 +998,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
                         unique_tmp,
                         "--exhaustive-search", "1",
                         "--format-mode", "4",
-                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
+                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob,qaln,taln,lddtfull,u,t"
                     ]
                     env_vars = {'PATH': '/usr/local/bin:/usr/bin:/bin'}
                 else:
@@ -1010,7 +1010,7 @@ def run_foldseek_search(structures_dir, DB_dir, DB_name, query, output_dir, cont
                         unique_tmp,
                         "--exhaustive-search", "1",
                         "--format-mode", "4",
-                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob"
+                        "--format-output", "query,target,evalue,gapopen,pident,fident,nident,qstart,qend,qlen,tstart,tend,tlen,alnlen,mismatch,qcov,tcov,lddt,qtmscore,ttmscore,alntmscore,rmsd,prob,qaln,taln,lddtfull,u,t"
                     ]
                     env_vars = None
 
