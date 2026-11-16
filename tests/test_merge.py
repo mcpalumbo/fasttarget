@@ -179,3 +179,15 @@ def test_none_tables_are_ignored(organism):
 
     assert len(results) == len(GENES)
     assert 'ok' in results.columns
+
+
+def test_sodium_code_is_written_readably():
+    import pandas as pd
+    import fasttarget as ft
+    df = pd.DataFrame({'gene': ['g1', 'g2', 'g3'],
+                       'alphafill_high_confidence_compounds': ['NA', 'MG;NA;ZN', None],
+                       'chembl_compounds': ['NA', 'CHEMBL1', None]})
+    out = ft._readable_compound_codes(df)
+    assert out['alphafill_high_confidence_compounds'].tolist()[:2] == ['Na', 'MG;Na;ZN']
+    assert pd.isna(out['alphafill_high_confidence_compounds'].iloc[2])
+    assert out['chembl_compounds'].iloc[0] == 'NA'  # other columns untouched

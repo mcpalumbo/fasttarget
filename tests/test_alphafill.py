@@ -436,3 +436,50 @@ def test_every_error_is_reported_not_only_the_first():
 
     message = str(error.value)
     assert 'retries' in message and 'max_workers' in message and 'download_cif' in message
+
+
+# ------------------------------------------------------------- streaming export
+
+def test_a_streamed_table_is_identical_to_writing_it_at_once(tmp_path):
+    frame = pd.DataFrame({"gene": ["G1", "G1", "G2"], "value": [1.5, None, 3.0],
+                          "text": ["a\tb", "", "c"]})
+    with alphafill._StreamingTsv(tmp_path / "streamed.tsv", list(frame.columns)) as writer:
+        writer.write(frame.iloc[:2])
+        writer.write(frame.iloc[:0])
+        writer.write(frame.iloc[2:])
+
+    expected = frame.to_csv(sep="\t", index=False)
+    assert (tmp_path / "streamed.tsv").read_text() == expected
+    assert writer.rows == 3
+
+
+def test_an_empty_streamed_table_has_only_the_header(tmp_path):
+    with alphafill._StreamingTsv(tmp_path / "empty.tsv", ["gene", "value"]):
+        pass
+    assert (tmp_path / "empty.tsv").read_text() == pd.DataFrame(columns=["gene", "value"]).to_csv(sep="\t", index=False)
+
+
+def test_a_failed_stream_keeps_the_previous_file_and_leaves_no_temporary(tmp_path):
+    target = tmp_path / "table.tsv"
+    target.write_text("previous\n")
+    with pytest.raises(RuntimeError):
+        with alphafill._StreamingTsv(target, ["gene"]) as writer:
+            writer.write(pd.DataFrame({"gene": ["G1"]}))
+            raise RuntimeError("interrupted")
+    assert target.read_text() == "previous\n"
+    assert [path.name for path in tmp_path.iterdir()] == ["table.tsv"]
+
+
+def test_reused_summary_keeps_sodium_code(tmp_path):
+    # NA is the CCD code of sodium; reading the cached summary must not turn it into a missing value
+    (tmp_path / "alphafill_results.json").write_text(json.dumps(
+        {"cache_key": "k", "execution": {"status": "completed"}}))
+    for name in ("alphafill_accession_summary.tsv", "alphafill_selection.tsv", "alphafill_ligands_all.tsv",
+                 "alphafill_ligands_filtered.tsv", "alphafill_category_counts.tsv"):
+        (tmp_path / name).write_text("gene\n")
+    (tmp_path / "alphafill_summary.tsv").write_text(
+        "gene\talphafill_high_confidence_compounds\talphafill_high_confidence_compound_count\n"
+        "g1\tNA\t1\ng2\t\t0\n")
+    summary = alphafill._reusable_summary(tmp_path, "k")
+    assert summary.loc[0, "alphafill_high_confidence_compounds"] == "NA"
+    assert pd.isna(summary.loc[1, "alphafill_high_confidence_compounds"])

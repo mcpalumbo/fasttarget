@@ -799,6 +799,23 @@ def metadata_loading(config, output_path):
     
     return module_tables
 
+def _readable_compound_codes(df):
+    """
+    Write the sodium CCD code NA as Na in the AlphaFill compound lists.
+
+    NA is the Chemical Component Dictionary code for sodium, but pandas and R read a
+    cell holding only "NA" as a missing value, so a protein whose only ligand is
+    sodium looked like it had none (tables_for_TP, which re-reads the table, lost
+    it). Only whole ';'-separated tokens are changed.
+    """
+    for column in df.columns:
+        if column.startswith('alphafill_') and column.endswith('_compounds') and df[column].dtype == object:
+            df[column] = df[column].map(
+                lambda value: ';'.join('Na' if token == 'NA' else token for token in value.split(';'))
+                if isinstance(value, str) else value)
+    return df
+
+
 def _check_results_table(results, reference_genes):
     """
     Verify the contract of the merged table before it is written.
@@ -970,6 +987,7 @@ def merge_final_tables(config, output_path, tables):
 
         _check_results_table(combined_df, reference_genes)
 
+        combined_df = _readable_compound_codes(combined_df)
         combined_df.to_csv(results_table_path, sep='\t', index=False)
         
         print(f'Final FastTarget results saved in {results_table_path}.')
@@ -984,7 +1002,7 @@ def merge_final_tables(config, output_path, tables):
         logging.info('Tables for Target Pathogen created')
 
     elif len(tables) == 1:
-        tables[0] = metadata.add_gene_product_info(tables[0], output_path, organism_name)
+        tables[0] = _readable_compound_codes(metadata.add_gene_product_info(tables[0], output_path, organism_name))
         tables[0].to_csv(results_table_path, sep='\t', index=False)
         print(f'Final FastTarget results saved in {results_table_path}.')
         logging.info(f'Final FastTarget results saved.')
