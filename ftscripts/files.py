@@ -436,13 +436,123 @@ def dict_to_json(output_path, file_name, my_dict):
         json.dump(_sanitize_for_json(my_dict), file, allow_nan=False)
     logging.debug(f"File '{full_path}' saved.")
 
-def sha256_file(file_path):
-    """
-    Calculates the SHA-256 checksum of a file.
+# ---------------------------------------------------------------- checksum memo
+#
+# A fully cached run used to re-read tens of GB (every comparator genome and its
+# derived files, several times) only to confirm that nothing had changed. A
+# checksum is now reused while the file keeps the same inode, size and mtime_ns,
+# the make/rsync-style check the genome cache already relies on; rewriting a file
+# changes its mtime and forces a real hash. Files modified in the last few seconds
+# are never memoized ("racily clean", as in git): a same-size rewrite inside the
+# filesystem's timestamp granularity would otherwise go unnoticed.
+#
+# The memo lives in memory and, once enable_hash_cache() is called, in a JSON
+# file shared by later runs. It is only a cache: losing or deleting it costs one
+# re-hash of each file.
 
-    :param file_path: Path to the input file.
-    :return: Hexadecimal SHA-256 checksum.
-    """
+_HASH_LOCK = threading.Lock()
+_HASH_MEMO = {}  # abspath -> {'stat': [ino, size, mtime_ns], 'sha256': str|None, 'facts': {}}
+_HASH_STATE = {'path': None, 'pid': None, 'dirty': False, 'last_save': 0.0}
+HASH_CACHE_SAVE_INTERVAL = 60  # seconds between incremental saves
+HASH_RACY_WINDOW_NS = 2_000_000_000
+
+
+def _stat_signature(path):
+    st = os.stat(path)
+    return [st.st_ino, st.st_size, st.st_mtime_ns], st.st_mtime_ns
+
+
+def _memo_entry(path):
+    """Return (key, signature, entry or None) for path; entry only if still valid."""
+    key = os.path.abspath(path)
+    signature, mtime_ns = _stat_signature(path)
+    racy = time.time_ns() - mtime_ns < HASH_RACY_WINDOW_NS
+    with _HASH_LOCK:
+        entry = _HASH_MEMO.get(key)
+        if entry is not None and entry.get('stat') != signature:
+            del _HASH_MEMO[key]
+            entry = None
+    return key, signature, (None if racy else entry), racy
+
+
+def _memo_store(key, signature, field, value):
+    with _HASH_LOCK:
+        entry = _HASH_MEMO.get(key)
+        if entry is None or entry.get('stat') != signature:
+            entry = _HASH_MEMO[key] = {'stat': signature, 'sha256': None, 'facts': {}}
+        if field == 'sha256':
+            entry['sha256'] = value
+        else:
+            entry['facts'][field] = value
+        _HASH_STATE['dirty'] = True
+    if time.monotonic() - _HASH_STATE['last_save'] > HASH_CACHE_SAVE_INTERVAL:
+        save_hash_cache()
+
+
+def enable_hash_cache(cache_file):
+    """Persist the checksum memo in cache_file (loaded now, saved periodically and at exit)."""
+    cache_file = os.path.abspath(cache_file)
+    loaded = {}
+    try:
+        with open(cache_file) as handle:
+            data = json.load(handle)
+        if isinstance(data, dict) and data.get('schema') == 1 and isinstance(data.get('files'), dict):
+            loaded = {key: value for key, value in data['files'].items()
+                      if isinstance(value, dict) and isinstance(value.get('stat'), list)
+                      and isinstance(value.get('facts', {}), dict)}
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as error:
+        logging.warning(f'Ignoring unreadable checksum cache {cache_file}: {error}')
+    with _HASH_LOCK:
+        for value in loaded.values():
+            value.setdefault('facts', {})
+            value.setdefault('sha256', None)
+        loaded.update(_HASH_MEMO)
+        _HASH_MEMO.clear()
+        _HASH_MEMO.update(loaded)
+        first = _HASH_STATE['path'] is None
+        _HASH_STATE.update(path=cache_file, pid=os.getpid(), last_save=time.monotonic())
+    if first:
+        atexit.register(save_hash_cache, True)
+    logging.debug(f'Checksum cache: {len(loaded)} entries from {cache_file}')
+
+
+def save_hash_cache(prune=False):
+    """Write the memo to the enabled cache file (only from the process that enabled it)."""
+    path = _HASH_STATE['path']
+    if path is None or _HASH_STATE['pid'] != os.getpid():
+        return
+    with _HASH_LOCK:
+        if not _HASH_STATE['dirty'] and not prune:
+            return
+        snapshot = {key: {'stat': list(value['stat']), 'sha256': value.get('sha256'),
+                          'facts': dict(value.get('facts', {}))}
+                    for key, value in _HASH_MEMO.items()}
+        _HASH_STATE['dirty'] = False
+        _HASH_STATE['last_save'] = time.monotonic()
+    if prune:
+        # Staging and temporary files are hashed too; forget the ones that are gone.
+        snapshot = {key: value for key, value in snapshot.items() if os.path.exists(key)}
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(path),
+                                         prefix='.sha256-cache-', delete=False) as handle:
+            temporary = handle.name
+            json.dump({'schema': 1, 'files': snapshot}, handle)
+        os.replace(temporary, path)
+        temporary = None
+    except OSError as error:
+        logging.warning(f'Could not save checksum cache {path}: {error}')
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def _sha256_uncached(file_path):
     sha256 = hashlib.sha256()
     with open(file_path, "rb") as input_file:
         for chunk in iter(lambda: input_file.read(1024 * 1024), b""):

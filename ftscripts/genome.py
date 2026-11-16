@@ -304,6 +304,12 @@ def _gff_seqids(gff_file):
     return feature_ids, fasta_ids
 
 
+def _gff_orphan_seqids(gff_file):
+    """Sorted feature seqids of a GFF that have no ##FASTA record."""
+    feature_ids, fasta_ids = _gff_seqids(gff_file)
+    return sorted(feature_ids - set(fasta_ids))
+
+
 def reconcile_gff_seqids(gff_file):
     """Make every feature seqid of a GFF have a sequence in its ##FASTA section.
 

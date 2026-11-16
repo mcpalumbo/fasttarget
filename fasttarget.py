@@ -88,6 +88,9 @@ def prepare_genome_files(config, output_path):
     files.create_organism_subfolders(output_path, organism_name)
     logging.info(f'Organism subfolders created in {output_path}/{organism_name}')
 
+    # Checksums of unchanged files are reused across runs (files.sha256_file).
+    files.enable_hash_cache(os.path.join(output_path, organism_name, '.sha256_cache.json'))
+
     # Create organism genome files (gbk, gff3 and fasta)
     files_dir = os.path.join(output_path, organism_name, 'genome')
     if not os.path.exists(files_dir):

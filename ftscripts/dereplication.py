@@ -16,8 +16,10 @@ import pandas as pd
 
 
 def digest(path):
-    with open(path, 'rb') as handle:
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+    # Memoized by inode/size/mtime (files.sha256_file): a cached run no longer
+    # re-reads every comparator GenBank and staged GFF/FAA to confirm it is unchanged.
+    from ftscripts import files
+    return files.sha256_file(path)
 
 
 # ---------------------------------------------------------------------------
