@@ -345,7 +345,7 @@ The `config.yml` file is the **central configuration file** for this repository.
    
    A **reference structure** is the single best structure selected for each protein based on quality criteria:
    - For **PDB structures**: Selected based on resolution (≤3.5Å) and coverage (>40%) with X-ray preferred over EM
-   - For **AlphaFold structures**: Used when no suitable PDB structure meets the criteria
+   - For **AlphaFold structures**: Used when no suitable PDB structure meets the criteria. A gene is mapped to a species UniProt entry (≥95% identity) ahead of its strain entry when that entry has PDB structures; if none of them meets the criteria, the strain entry's AlphaFold model is used rather than the other entry's.
    - For **ColabFold models**: Used when enabled and no other structures are available
    
    **Pocket Detection Modes:**
@@ -481,6 +481,10 @@ ligands:
     enrich_donors: True
     max_workers: 4
     strict_errors: False
+    similarity_fallback: True
+    fallback_identity: 95
+    fallback_coverage: 95
+    # rsync_proxy: 127.0.0.1:1080  # optional existing SOCKS tunnel
 ```
 
 The final FastTarget table contains one row per reference CDS, with unique compound
@@ -497,6 +501,17 @@ artifact paths. CIFs are primary outputs at
 `models/<locus_tag>/<uniprot_id>_alphafill.cif`, alongside
 `<uniprot_id>_view_alphafill.py`. Open a viewer with PyMOL's `run /path/to/viewer.py`.
 All stored artifact paths are relative to the `ligands/alphafill/` directory.
+`alphafill_selection.tsv` is the per-locus starting point: it records the original
+UniProt mapping, the selected accession, whether it was direct, an exact sequence
+match or a similar protein, and the identity and coverage of both proteins. The
+fallback evaluates only the best BLAST candidate meeting the configured thresholds;
+it stops even when that candidate has no transplants. `result_status` distinguishes
+`entry_found_without_transplants`, `alphafill_entry_not_found` (HTTP 404), and
+`incomplete_download` (an execution error). The mapped and selected AlphaFill
+statuses appear in separate columns. A `README.txt` beside the outputs
+explains each file. AlphaFill first downloads required IDs in rsync batches, then
+tries HTTPS for missing or invalid archive files. Valid downloads and completed
+analysis are cached so interrupted runs can resume without repeating them.
 
 The default confidence limits are local RMSD <0.92 Å and TCS <0.64 for high, or
 local RMSD <3.10 Å and TCS <1.27 for intermediate; both metrics must meet a tier's

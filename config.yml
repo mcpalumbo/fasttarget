@@ -88,53 +88,155 @@ colabfold:
   colabfold_run_all: False
 
 
-# ---- Ligands (standalone) ----
-# Independent of structures.enabled. Reuses its UniProt mapping when available;
-# otherwise creates the mapping without running pockets or ColabFold.
+# ---- Ligands ----
+# Known or predicted ligands for each protein, from three independent sources:
+#   chembl / bindingdb: measured bioactivity data (local databases, no internet needed).
+#   alphafill: ligands transplanted from homologous PDB structures onto AlphaFold models
+#              (needs internet, or files downloaded with rsync).
+# Runs on its own: it does not need structures.enabled. If the structures module already
+# created the UniProt mapping, it is reused; otherwise it is created (no pockets/ColabFold).
+# Results: organism/<name>/ligands/<source>/. Each source adds one row per locus_tag to the
+# final table; detailed tables and a README.txt are written in each source folder.
 ligands:
   enabled: False
-  # Relative paths resolve against --databases_path; null uses prepared local databases.
+  # taxonomy_dir: NCBI taxonomy folder (nodes.dmp) used to include all strains/subspecies
+  # below organism.tax_id when searching ChEMBL/BindingDB. null: use the local copy
+  # prepared by databases.py. Relative paths are resolved against --databases_path.
   taxonomy_dir: null
+
+  # ChEMBL: compounds with activity measured on proteins of this species. The ChEMBL
+  # target sequences are aligned to your proteins (BLAST) to assign them to locus_tags.
+  # Final table: chembl_status, chembl_target_count, chembl_compounds, chembl_compound_count.
   chembl:
     enabled: False
+    # database: path to the ChEMBL SQLite file. null: newest version downloaded with
+    # databases.py --download chembl.
     database: null
+    # include_human: also count activity of the same compounds on human targets
+    # (selectivity/toxicity context). Reported in the detail tables.
     include_human: False
+    # include_species_context: also collect cellular/whole-organism assays in this species
+    # (e.g. MIC), which have no molecular target. Reported separately, never as binding.
     include_species_context: True
+    # min_identity / min_coverage (%): minimum BLAST identity and coverage (of both
+    # sequences) to assign a ChEMBL target to one of your proteins.
     min_identity: 90
     min_coverage: 70
+    # direct_only: True keeps only activities directly assigned to the protein target
+    # (ChEMBL relationship type D), excluding homologue/complex assignments.
     direct_only: False
+    # min_confidence_score: minimum ChEMBL target assignment confidence (0-9; 9 = direct
+    # single protein). null: no filter.
     min_confidence_score: null
+    # require_pchembl: True keeps only activities with a standardized potency value (pChEMBL).
     require_pchembl: False
+    # exclude_problematic: True drops activities flagged by ChEMBL as potentially invalid
+    # (data_validity_comment), unless manually validated.
     exclude_problematic: True
+    # strict_errors: True stops the pipeline if ChEMBL fails; False records the error and continues.
     strict_errors: False
+
+  # BindingDB: measured binding affinities (Ki, Kd, IC50, EC50) on proteins of this species,
+  # assigned to locus_tags by BLAST as for ChEMBL.
+  # Final table: bindingdb_status, bindingdb_target_count, bindingdb_compounds, bindingdb_compound_count.
   bindingdb:
     enabled: False
+    # database: path to the BindingDB SQLite/dump. null: version downloaded with
+    # databases.py --download bindingdb.
     database: null
+    # include_human: also count measurements of the same compounds on human proteins/complexes.
     include_human: False
+    # min_identity / min_coverage (%): BLAST thresholds to assign a BindingDB target to a locus_tag.
     min_identity: 90
     min_coverage: 70
+    # strict_errors: True stops the pipeline if BindingDB fails; False records the error and continues.
     strict_errors: False
+
+  # AlphaFill: ligands, cofactors and metals present in PDB structures of homologous
+  # proteins, transplanted onto the AlphaFold model of each protein (alphafill.eu).
+  # Each transplant gets a confidence: high, intermediate (both = "accepted"), low or unknown.
+  # Final table: alphafill_status, alphafill_complete, compounds and counts per confidence,
+  # alphafill_unique_compounds, alphafill_unique_accepted_compounds, plus the
+  # alphafill_pocket_* columns (see pocket_overlap below).
+  # Start with ligands/alphafill/README.txt and alphafill_selection.tsv.
   alphafill:
     enabled: True
-    # Primary CIF outputs and PyMOL viewers: organism/<name>/ligands/alphafill/models/<locus_tag>/
-    # always: all available CIFs; accepted_only: high/intermediate transfers; never: metadata only.
+    # download_cif: which AlphaFill models (.cif with the ligands) to download into
+    #   ligands/alphafill/models/<locus_tag>/:
+    #   always = every protein with an AlphaFill entry; accepted_only = only proteins with
+    #   high/intermediate transplants; never = only the metadata (no 3D models).
     download_cif: always
+    # generate_pymol: write a PyMOL script next to each model, with every ligand as a
+    # separate object colored by confidence (in PyMOL: run <file>_view_alphafill.py).
     generate_pymol: True
+    # enrich_donors: identify the protein each ligand was copied from (UniProt, name,
+    # organism) via RCSB/UniProt. Annotation only, it does not change any result.
+    # The first run can take hours (one query per donor chain); results are cached.
     enrich_donors: True
+    # Downloads: parallel workers, timeout (s), retries and initial wait between retries (s).
+    # https_min_interval: minimum seconds between HTTPS requests to alphafill.eu, shared by
+    #   all workers (0.5 = at most 2 requests/s). Avoids being blocked by the server.
+    # max_connection_failures: after this many consecutive connection errors to a server,
+    #   stop contacting it in this run; affected entries are marked incomplete (rerun later).
+    https_min_interval: 0.5
+    max_connection_failures: 10
     max_workers: 4
     timeout: 30
     retries: 3
     backoff: 1
+    # rsync_proxy: host:port of a SOCKS proxy for rsync downloads, e.g. an SSH tunnel opened
+    # with `ssh -D 1080 user@server` -> localhost:1080. Use it when rsync.alphafill.eu
+    # (port 873) is blocked on your network. "": direct connection.
+    # Downloads use rsync first; HTTPS only for files rsync could not get.
+    rsync_proxy: ""
+    # refresh_cache: True downloads everything again; False reuses cached files.
     refresh_cache: False
-    # True: save available results, then stop on execution errors (allows external retries).
-    # Missing AlphaFill entries and absent donor mappings are valid outcomes.
+    # strict_errors: True saves the available results and then stops if some downloads or
+    # annotations failed (useful to retry). Proteins absent from AlphaFill are not errors.
     strict_errors: False
-    # Strict local RMSD (Angstrom) and TCS limits. Identity is categorized;
-    # global RMSD is reported without filtering.
+    # Confidence of each transplant, from AlphaFill fit metrics: local RMSD (Angstrom, fit of
+    # the binding site residues) and TCS (transplant clash score). Both must be below the
+    # limits: high if < high_*, intermediate if < intermediate_*, otherwise low.
+    # Sequence identity with the donor and global RMSD are reported but do not filter.
     high_local_rmsd: 0.92
     high_tcs: 0.64
     intermediate_local_rmsd: 3.10
     intermediate_tcs: 1.27
+
+    # pocket_overlap: check whether AlphaFill ligands fall in the pockets predicted by fpocket
+    # and P2Rank (needs a previous structures run). Pockets and AlphaFill models may come from
+    # different structures, so residues are compared by their position in your protein
+    # sequence. For each ligand it reports:
+    #   best_*  : the best pocket chosen by the structures module (highest fpocket
+    #             druggability / P2Rank ligandability; for AlphaFold/ColabFold models,
+    #             among pockets with mean pLDDT >= 70) and how much the ligand overlaps it;
+    #   match_* : the pocket the ligand coincides with most, its score and rank, and the overlap.
+    # Overlap (%) = ligand contact residues inside the pocket / all ligand contact residues.
+    # Output: ligands/alphafill/pocket_overlap/ (one row per ligand + one row per locus_tag).
+    # Run it alone after AlphaFill: python -m ftscripts.pocket_overlap --output_path organism --organism <name>
+    pocket_overlap: True
+    # pocket_exclude_ions: ignore ions (Zn, Mg, Na, SO4, ...): too small, false positive matches.
+    pocket_exclude_ions: True
+    # pocket_exclude_artifacts: ignore crystallization artifacts and noise (water, CO2, PEG,
+    # glycerol, detergents, buffers, solvents): BioLiP list, ftscripts/data/biolip_artifacts.tsv.
+    pocket_exclude_artifacts: True
+    # pocket_exclude_prosthetic: ignore prosthetic groups that stay bound in the structure
+    # (heme, Fe-S clusters, molybdopterin, cobalamin): their cavity is not a drug site.
+    # Mobile cofactors (ATP, NAD, FAD, CoA...) are always compared; the summary lists the
+    # compounds in each pocket with and without them (*_non_cofactor_compounds).
+    pocket_exclude_prosthetic: True
+    # pocket_contact_cutoff: distance (Angstrom) from a ligand atom for a residue to count as contact.
+    pocket_contact_cutoff: 4.5
+    # pocket_min_overlap: per-locus summary only. A compound is listed as "in the pocket"
+    # (*_compounds columns) if at least this % of its contact residues fall inside that pocket.
+    # The per-ligand table always reports the exact %.
+    pocket_min_overlap: 50
+    # pocket_min_contact_residues: ligands touching fewer residues are reported (status
+    # few_contacts) but left out of the summary: their % is not meaningful.
+    pocket_min_contact_residues: 4
+    # pocket_min_mapping_identity: minimum % identity to map a structure or model onto your
+    # protein sequence; lower values are rejected (wrong protein).
+    pocket_min_mapping_identity: 90
 
 # ---- Core ----
 core:
