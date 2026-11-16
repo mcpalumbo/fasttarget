@@ -401,13 +401,16 @@ def ref_genome_files(gbk_file, output_path, organism_name, container_engine='doc
                 'Use a new organism output directory to avoid reusing stale downstream results. '
                 f'Existing files were preserved: {output_path}'
             )
-        feature_ids, fasta_ids = _gff_seqids(os.path.join(output_path, names['gff']))
-        if feature_ids - set(fasta_ids):
+        # Memoized with the checksums: reading every comparator GFF in full on each
+        # run only to repeat this check cost minutes on a fully cached run.
+        orphan_seqids = files.cached_by_stat(
+            'gff_orphan_seqids', os.path.join(output_path, names['gff']), _gff_orphan_seqids)
+        if orphan_seqids:
             # Byte-verified, but built before reconcile_gff_seqids existed: Roary
             # would silently drop this genome after hours of clustering.
             raise RuntimeError(
                 f"{names['gff']} in {output_path} has feature seqids "
-                f"{sorted(feature_ids - set(fasta_ids))} without a ##FASTA sequence, so Roary "
+                f"{orphan_seqids} without a ##FASTA sequence, so Roary "
                 f"would extract no proteins from it. Rebuild it with "
                 f"genome.reconcile_gff_seqids and update {os.path.basename(manifest_path)}, "
                 f"or use a new organism output directory."

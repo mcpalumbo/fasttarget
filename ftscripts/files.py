@@ -6,6 +6,9 @@ import logging
 import math
 import tempfile
 import hashlib
+import threading
+import time
+import atexit
 from datetime import datetime
 
 
@@ -558,6 +561,41 @@ def _sha256_uncached(file_path):
         for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
+
+
+def sha256_file(file_path):
+    """
+    Calculates the SHA-256 checksum of a file.
+
+    The result is memoized against the file's inode, size and mtime_ns (see the
+    checksum memo above), so an unchanged file is read only once.
+
+    :param file_path: Path to the input file.
+    :return: Hexadecimal SHA-256 checksum.
+    """
+    key, signature, entry, racy = _memo_entry(file_path)
+    if entry is not None and entry.get('sha256'):
+        return entry['sha256']
+    digest = _sha256_uncached(file_path)
+    if not racy and _stat_signature(file_path)[0] == signature:
+        _memo_store(key, signature, 'sha256', digest)
+    return digest
+
+
+def cached_by_stat(kind, file_path, compute):
+    """
+    Return compute(file_path), memoized like sha256_file under the name kind.
+
+    For checks that read a whole file but depend only on its bytes. The value
+    must be JSON-serializable, since it is persisted with the checksums.
+    """
+    key, signature, entry, racy = _memo_entry(file_path)
+    if entry is not None and kind in entry.get('facts', {}):
+        return entry['facts'][kind]
+    value = compute(file_path)
+    if not racy and _stat_signature(file_path)[0] == signature:
+        _memo_store(key, signature, kind, value)
+    return value
 
 def fileset_fingerprint(paths, by_content=True):
     """
