@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from conftest import GENES, write_blast_output, write_corecruncher_inputs, write_roary_inputs
-from ftscripts import essentiality, files, genome
+from ftscripts import essentiality, files, genome, offtargets
 
 
 def _deg_blast(output_path, organism_name, rows):
@@ -301,3 +301,58 @@ def test_an_unrecorded_parameter_warns_and_reuses(organism, capsys):
     captured = capsys.readouterr().out
     assert 'genome_count' in captured and 'unknown' in captured
     assert os.path.exists(genes_csv)
+
+
+# ------------------------------------------------------------- human offtarget
+
+def _human_blast(output_path, organism_name, rows):
+    """rows: (qseqid, sseqid, pident, evalue, bitscore, qcov)."""
+    path = os.path.join(output_path, organism_name, 'offtarget', 'human_offtarget_blast.tsv')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as handle:
+        for qseqid, sseqid, pident, evalue, bitscore, qcov in rows:
+            handle.write('\t'.join(str(value) for value in [
+                qseqid, sseqid, pident, 100, 0, 0, 1, 100, 1, 100,
+                evalue, bitscore, qcov, qcov]) + '\n')
+
+
+def test_human_offtarget_reports_the_most_significant_hit_not_the_most_identical(organism):
+    """A short high-identity HSP against a fragment must not hide the real homologue."""
+    output_path, organism_name = organism
+    _human_blast(output_path, organism_name, [
+        (GENES[0], 'FRAGMENT', 81.8, '1.19e-10', 58.9, 8),
+        (GENES[0], 'TUFM', 55.9, '1.38e-169', 483.0, 99),
+    ])
+
+    table = offtargets.human_offtarget_parse(output_path, organism_name).set_index('gene')
+
+    row = table.loc[GENES[0]]
+    assert row['human_offtarget_subject'] == 'TUFM'
+    assert float(row['human_offtarget']) == 55.9
+    assert row['human_offtarget_qcovhsp'] == 99
+    assert row['human_offtarget_evalue'] == 1.38e-169
+    assert row['human_offtarget_bitscore'] == 483.0
+
+
+def test_human_offtarget_ties_in_evalue_are_broken_by_bitscore(organism):
+    output_path, organism_name = organism
+    _human_blast(output_path, organism_name, [
+        (GENES[0], 'LOW_BITS', 90.0, '0.0', 300.0, 50),
+        (GENES[0], 'HIGH_BITS', 40.0, '0.0', 900.0, 95),
+    ])
+
+    table = offtargets.human_offtarget_parse(output_path, organism_name).set_index('gene')
+    assert table.loc[GENES[0], 'human_offtarget_subject'] == 'HIGH_BITS'
+
+
+def test_human_offtarget_ignores_hits_above_the_evalue_cutoff(organism):
+    output_path, organism_name = organism
+    _human_blast(output_path, organism_name, [
+        (GENES[0], 'WEAK', 60.0, '1e-4', 40.0, 90),
+        (GENES[1], 'BORDER', 60.0, '1e-5', 45.0, 90),
+    ])
+
+    table = offtargets.human_offtarget_parse(output_path, organism_name).set_index('gene')
+    assert table.loc[GENES[0], 'human_offtarget'] == 'no_hit'
+    assert table.loc[GENES[1], 'human_offtarget_subject'] == 'BORDER'
+    assert table.loc[GENES[2], 'human_offtarget'] == 'no_hit'

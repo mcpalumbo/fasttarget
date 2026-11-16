@@ -606,7 +606,10 @@ Columns are prefixed `MGT_` (SBML + MetaGraphTools) or `PTOOLS_` (Pathway Tools)
 - `core_corecruncher`: Whether the gene is in the core genome (CoreCruncher analysis)
 
 **Offtarget columns** (if `offtarget.enabled: True`):
-- `human_offtarget`: BLASTp hit in the human proteome (e-value and identity %)
+- `human_offtarget`: % identity of the most significant BLASTp hit in the human proteome (lowest e-value, ties broken by bitscore; only hits with e-value <= 1e-5), or `no_hit`
+- `human_offtarget_qcovhsp` / `human_offtarget_qcovs`: query coverage (%) of that hit (HSP / all HSPs with that subject)
+- `human_offtarget_evalue` / `human_offtarget_bitscore`: e-value and bitscore of that hit
+- `human_offtarget_subject`: human UniProt accession of that hit
 - `<catalogue>_offtarget_norm`: Fraction of analyzed catalogue genomes with at least one valid hit.
 - `<catalogue>_offtarget_counts`: Number of analyzed catalogue genomes with a valid hit.
 - `<catalogue>_genomes_analyzed`: Number of genomes used as the normalization denominator.

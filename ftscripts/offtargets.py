@@ -8,6 +8,7 @@ from ftscripts.microbiome_catalogues import (
 import os
 from pathlib import Path
 import json
+import hashlib
 import csv
 import pandas as pd
 import multiprocessing
@@ -24,6 +25,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 MICROBIOME_BLAST_COLUMNS = 13
+# Significance cutoff for the human BLASTP search and for selecting the best hit.
+HUMAN_OFFTARGET_EVALUE = 1e-5
 MICROBIOME_HIT_COLUMNS = (
     "gene",
     "representative_genome_id",
@@ -1095,7 +1098,7 @@ def human_offtarget_blast (databases_path, output_path, organism_name, cpus=mult
         blastdb= humanprot_index_path,
         query= organism_prot_seq_path,
         output=blast_output_path,
-        evalue= '1e-5',
+        evalue= str(HUMAN_OFFTARGET_EVALUE),
         outfmt= '6 std qcovhsp qcovs',
         cpus=cpus
     )
@@ -1308,15 +1311,16 @@ def human_offtarget_parse (output_path, organism_name):
 
     """
     Parse NCBI BLASTP results against human proteome, stored in the file 'human_offtarget_blast.tsv'.
-    Obtains the hit with the highest percentage of identity for each locus_tag.
-    Returns a dictionary with locus_tag as key and highest percentage of identity as value, 
-    and a DataFrame with all locus_tags from the genome and their respective values.
+    Keeps hits with e-value <= HUMAN_OFFTARGET_EVALUE (1e-5) and, for each locus_tag,
+    reports the most significant hit (lowest e-value, ties broken by highest bitscore):
+    its identity (human_offtarget), query coverage (qcovhsp, qcovs), e-value, bitscore
+    and subject. Loci without significant hits are 'no_hit'.
+    Returns a DataFrame with all locus_tags from the genome and their respective values.
     The DataFrame is created using the `metadata_table_with_values` function from the `metadata` module.
 
     :param output_path: Directory of the organism output.
     :param organism_name: Name of the organism.
     
-    :return: Dictionary with locus_tag as key and highest percentage of identity value.
     :return: DataFrame with all locus_tags from the genome and their respective values.
     """
 
@@ -1336,15 +1340,23 @@ def human_offtarget_parse (output_path, organism_name):
         if values.isna().any() or ((values < 0) | (values > 100)).any():
             raise ValueError(f'Invalid human BLAST {field}')
         blast_output_df[field] = values
-    selected = {}
-    for _, row in blast_output_df.iterrows():
-        query = row['qseqid']
-        if query not in selected or row['pident'] > selected[query]['pident']:
-            selected[query] = row
+    for field in ('evalue', 'bitscore'):
+        values = pd.to_numeric(blast_output_df[field], errors='raise')
+        if values.isna().any() or (values < 0).any():
+            raise ValueError(f'Invalid human BLAST {field}')
+        blast_output_df[field] = values
+    # Keep only significant hits, then report the most significant one per gene
+    # (lowest e-value; ties broken by highest bitscore). Choosing the highest
+    # identity instead favoured short HSPs against protein fragments.
+    significant = blast_output_df[blast_output_df['evalue'] <= HUMAN_OFFTARGET_EVALUE]
+    best = (significant.sort_values(['qseqid', 'evalue', 'bitscore'],
+                                    ascending=[True, True, False], kind='mergesort')
+            .drop_duplicates('qseqid', keep='first'))
+    selected = {row['qseqid']: row for _, row in best.iterrows()}
     values = {query: row['pident'] for query, row in selected.items()}
     df_human = metadata.metadata_table_with_values(
         output_path, organism_name, values, 'human_offtarget', offtarget_path, 'no_hit')
-    for field in ('qcovhsp', 'qcovs'):
+    for field in ('qcovhsp', 'qcovs', 'evalue', 'bitscore'):
         df_human[f'human_offtarget_{field}'] = df_human['gene'].map(
             {query: row[field] for query, row in selected.items()})
     df_human['human_offtarget_subject'] = df_human['gene'].map(
@@ -2265,12 +2277,16 @@ def merge_foldseek_data (output_path, organism_name):
     # content, so the reformat was skipped even once the parsed dict held 19 hits.
     # Keyed on the dict it reformats, a changed source rebuilds it.
     source_dict = files.json_to_dict(foldseek_res_file) if files.file_check(foldseek_res_file) else None
+    # Counts alone missed a changed reference: switching a locus from one model to
+    # another keeps the gene and hit counts, so the old query structures were
+    # reused. The source checksum catches any change to the parsed dict.
     merge_parameters = {
         'source_genes': len(source_dict or {}),
         'source_hits': sum(
             1 for value in (source_dict or {}).values()
             if isinstance(value, dict) and value.get('target_foldseek') is not None
         ),
+        'source_sha256': files.sha256_file(foldseek_res_file) if source_dict is not None else None,
     }
 
     if not files.manifest_matches(foldseek_mapped_file, merge_parameters,
@@ -2400,6 +2416,10 @@ def final_foldseek_structure_table (output_path, organism_name, mapped_dict):
             1 for value in (mapped_dict or {}).values()
             if isinstance(value, dict) and value.get('target') is not None
         ),
+        # Content, not just counts: a changed query structure keeps both counts.
+        'mapped_sha256': hashlib.sha256(
+            json.dumps(mapped_dict or {}, sort_keys=True, default=str).encode()
+        ).hexdigest()[:16],
     }
 
     if not files.manifest_matches(final_foldseek_file, table_parameters,
