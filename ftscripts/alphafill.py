@@ -12,12 +12,13 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import pandas as pd
 import requests
@@ -1200,9 +1201,19 @@ def _validated_config(config: dict[str, Any]) -> tuple[dict[str, float], dict[st
             "generate_pymol": config.get("generate_pymol", True),
             "strict_errors": config.get("strict_errors", False),
             "rsync_proxy": str(config.get("rsync_proxy", "")),
+            "https_min_interval": float(config.get("https_min_interval", 0.5)),
+            "max_connection_failures": int(config.get("max_connection_failures", 10)),
             "fallback_identity": float(config.get("fallback_identity", 95.0)),
             "fallback_coverage": float(config.get("fallback_coverage", 95.0)),
             "similarity_fallback": config.get("similarity_fallback", True),
+            "pocket_overlap": config.get("pocket_overlap", True),
+            "pocket_exclude_ions": config.get("pocket_exclude_ions", True),
+            "pocket_exclude_artifacts": config.get("pocket_exclude_artifacts", True),
+            "pocket_exclude_prosthetic": config.get("pocket_exclude_prosthetic", True),
+            "pocket_contact_cutoff": float(config.get("pocket_contact_cutoff", 4.5)),
+            "pocket_min_overlap": float(config.get("pocket_min_overlap", 50.0)),
+            "pocket_min_contact_residues": int(config.get("pocket_min_contact_residues", 4)),
+            "pocket_min_mapping_identity": float(config.get("pocket_min_mapping_identity", 90.0)),
         }
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid AlphaFill configuration value: {error}") from error
@@ -1217,6 +1228,16 @@ def _validated_config(config: dict[str, Any]) -> tuple[dict[str, float], dict[st
         errors.append("strict_errors must be a boolean")
     if not isinstance(options["similarity_fallback"], bool):
         errors.append("similarity_fallback must be a boolean")
+    for key in ("pocket_overlap", "pocket_exclude_ions", "pocket_exclude_artifacts", "pocket_exclude_prosthetic"):
+        if not isinstance(options[key], bool):
+            errors.append(f"{key} must be a boolean")
+    if not math.isfinite(options["pocket_contact_cutoff"]) or not 0 < options["pocket_contact_cutoff"] <= 10:
+        errors.append("pocket_contact_cutoff must be in (0, 10] Angstrom")
+    for key in ("pocket_min_overlap", "pocket_min_mapping_identity"):
+        if not math.isfinite(options[key]) or not 0 < options[key] <= 100:
+            errors.append(f"{key} must be between 0 and 100")
+    if options["pocket_min_contact_residues"] < 1:
+        errors.append("pocket_min_contact_residues must be >= 1")
     if options["rsync_proxy"] and not re.fullmatch(r"[A-Za-z0-9.:-]+", options["rsync_proxy"]):
         errors.append("rsync_proxy must be a host:port SOCKS endpoint")
     for key in ("fallback_identity", "fallback_coverage"):
@@ -1230,6 +1251,10 @@ def _validated_config(config: dict[str, Any]) -> tuple[dict[str, float], dict[st
             errors.append(f"high_{metric} must be less than intermediate_{metric}")
     if not math.isfinite(options["timeout"]) or options["timeout"] <= 0:
         errors.append("timeout must be a positive finite number")
+    if not math.isfinite(options["https_min_interval"]) or not 0 <= options["https_min_interval"] <= 60:
+        errors.append("https_min_interval must be between 0 and 60 seconds")
+    if options["max_connection_failures"] < 1:
+        errors.append("max_connection_failures must be >= 1")
     if options["retries"] < 0:
         errors.append("retries must be >= 0")
     if not math.isfinite(options["backoff"]) or options["backoff"] < 0:
@@ -1247,6 +1272,46 @@ def validate_options(config: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize options for callers such as the YAML loader."""
     thresholds, options = _validated_config(config)
     return {**thresholds, **options}
+
+
+def _run_cache_key(mapping: dict[str, Any], thresholds: dict[str, float],
+                   options: dict[str, Any], blast_path: Path | None) -> str:
+    """Digest of everything a run's outputs depend on besides the download cache.
+
+    With refresh_cache off, cached downloads, not_found entries and donor answers
+    are never requested again, so a run that completed without failures yields
+    the same outputs for the same key.
+    """
+    from ftscripts import files
+    payload = {"mapping": mapping, "thresholds": thresholds,
+               "options": {key: value for key, value in options.items()
+                           if key not in {"max_workers", "timeout", "retries", "backoff",
+                                          "https_min_interval", "max_connection_failures",
+                                          "rsync_proxy", "strict_errors"}},
+               "blast": [str(blast_path), files.sha256_file(blast_path)] if blast_path else None,
+               "code": files.sha256_file(__file__)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _reusable_summary(root: Path, cache_key: str) -> pd.DataFrame | None:
+    """alphafill_summary.tsv of a previous failure-free run with the same key, or None."""
+    try:
+        with (root / "alphafill_results.json").open(encoding="utf-8") as handle:
+            report = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(report, dict) or report.get("cache_key") != cache_key
+            or (report.get("execution") or {}).get("status") != "completed"):
+        return None
+    required = ("alphafill_summary.tsv", "alphafill_accession_summary.tsv", "alphafill_selection.tsv",
+                "alphafill_ligands_all.tsv", "alphafill_ligands_filtered.tsv", "alphafill_category_counts.tsv")
+    if not all((root / name).is_file() for name in required):
+        return None
+    try:
+        # "NA" is the CCD code of sodium: only empty cells are missing values.
+        return pd.read_csv(root / "alphafill_summary.tsv", sep="\t", keep_default_na=False, na_values=[""])
+    except (OSError, ValueError):
+        return None
 
 
 def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
@@ -1269,9 +1334,21 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
     thresholds, options = _validated_config(config)
     for gene in mapping:
         _validate_locus_tag(gene)
+    _HOSTS.reset({urlparse(BASE_URL).hostname: options["https_min_interval"]},
+                 options["max_connection_failures"])
     root = Path(output_path).resolve() / organism_name / "ligands" / "alphafill"
     cache_root = root / "cache"
     root.mkdir(parents=True, exist_ok=True)
+    blast_files = sorted((Path(output_path).resolve() / organism_name / "structures" / "uniprot_files").glob(
+        "uniprot_species_taxid_*_rest_cdhit100_blast.tsv"))
+    blast_path = blast_files[0] if blast_files else None
+    run_key = _run_cache_key(mapping, thresholds, options, blast_path)
+    if not options["refresh_cache"]:
+        reused = _reusable_summary(root, run_key)
+        if reused is not None:
+            logging.info("AlphaFill results reused from %s: mapping, options and code unchanged "
+                         "and the previous run had no failures", root)
+            return reused
     pairs = _mapping_pairs(mapping)
     direct_pairs = list(pairs)
     accessions = sorted({accession for _, accession in pairs})
@@ -1297,9 +1374,13 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
             if not options["refresh_cache"] and previous.get("status") == "not_found":
                 continue
             metadata_needed.add(accession)
+        archive_checked: set[str] = set()
         if rsync_available and metadata_needed:
             rsync_available = _rsync_batch(root, metadata_needed, "metadata",
                                            options["timeout"], options["rsync_proxy"])
+            if rsync_available:
+                archive_checked = metadata_needed
+
         def execute(accessions_for_call: set[str], policy_for_call: str, refresh: bool) -> None:
             if not accessions_for_call:
                 return
@@ -1307,7 +1388,8 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
                 futures = {executor.submit(download_uniprot, accession, root,
                                            options["timeout"], options["retries"],
                                            options["backoff"], policy_for_call,
-                                           thresholds, refresh, primary_loci[accession]): accession
+                                           thresholds, refresh, primary_loci[accession],
+                                           accession in archive_checked): accession
                            for accession in accessions_for_call}
                 for future in as_completed(futures):
                     accession = futures[future]
@@ -1360,9 +1442,6 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
                                "transplants": count}
 
     unresolved = set(mapping) - set(selection)
-    blast_files = sorted((Path(output_path).resolve() / organism_name / "structures" / "uniprot_files").glob(
-        "uniprot_species_taxid_*_rest_cdhit100_blast.tsv"))
-    blast_path = blast_files[0] if blast_files else None
     candidates = (_blast_candidates(blast_path, unresolved, options["fallback_identity"],
                                     options["fallback_coverage"])
                   if options["similarity_fallback"] and blast_path else {})
@@ -1494,7 +1573,7 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
                     not (ligand.get("donor_annotation_status") == "partial" and ligand.get("donor_annotation_error"))
                     for ligand in ligands):
                 _atomic_json(cache_root / accession / "analysis.json",
-                             {"key": analysis_keys[accession], "ligands": ligands})
+                             {"key": analysis_keys[accession], "ligands": ligands}, durable=False)
     finally:
         resolver.close()
 
@@ -1530,9 +1609,13 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
 
     for accession, status in statuses.items():
         status["path_base"] = "../.."
-        _atomic_json(cache_root / accession / "download_status.json", _portable_paths(status, root))
+        _atomic_json(cache_root / accession / "download_status.json", _portable_paths(status, root), durable=False)
 
-    all_rows, summary_rows, genes_json = [], [], {}
+    # Ligand tables can hold millions of rows. They are written locus by locus
+    # (sorted by gene, accession and ligand id, as before) instead of building
+    # them, and a JSON copy of every ligand, in memory: that used to exceed the RAM.
+    summary_rows, genes_json = [], {}
+    category_counter: dict[tuple[str, str, str, str], int] = {}
     mapped_genes = {gene for gene, _ in pairs}
     for gene in sorted(set(mapping) - mapped_genes):
         summary_rows.append({
@@ -1548,61 +1631,67 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
         })
         genes_json[gene] = {"": {
             "download": {"status": "unmapped", "error_message": "No valid UniProt accession in gene mapping"},
-            "thresholds": thresholds, "ligands": [],
+            "thresholds": thresholds, "ligand_count": 0, "accepted_ligand_count": 0,
         }}
-    for gene, accession in pairs:
-        ligands = normalized[accession]
-        output = pair_outputs[(gene, accession)]
-        selected_hit = selection.get(gene, {}) if selection.get(gene, {}).get("accession") == accession else {}
-        pair_source = selected_hit.get("source", "direct" if accession in direct_by_gene[gene] else "none")
-        all_rows.extend({**_tsv_row(gene, accession, ligand),
-                         "selection_source": pair_source,
-                         "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
-                         "sequence_identity": selected_hit.get("identity", ""),
-                         "query_coverage": selected_hit.get("query_coverage", ""),
-                         "subject_coverage": selected_hit.get("subject_coverage", ""),
-                         "cif_path": output["cif_path"], "pymol_script_path": output["pymol_script_path"]}
-                        for ligand in ligands)
-        accepted = [ligand for ligand in ligands if ligand["filter_status"] == "accepted"]
-        status = statuses[accession]
-        usable = status.get("metadata_usable", False)
-        hit = selection.get(gene, {}) if selection.get(gene, {}).get("accession") == accession else {}
-        source = hit.get("source", "direct" if accession in direct_by_gene[gene] else "none")
-        summary_rows.append({
-            "gene": gene, "uniprot": accession, "selection_source": source,
-            "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
-            "sequence_identity": hit.get("identity", ""),
-            "query_coverage": hit.get("query_coverage", ""),
-            "subject_coverage": hit.get("subject_coverage", ""),
-            "download_source": status.get("download_source", ""),
-            "alphafill_status": status.get("status"),
-            "metadata_usable": usable, "total_transfers": len(ligands),
-            "accepted_transfers": len(accepted), "rejected_transfers": len(ligands) - len(accepted),
-            **{f"{category}_confidence_transfers": sum(
-                item["confidence_category"] == category for item in ligands
-            ) for category in CONFIDENCE_CATEGORIES},
-            **summarize_compounds(ligands, usable=usable), **output,
-            "metadata_path": status.get("metadata_path", ""),
-            "error_message": status.get("error_message", ""),
-        })
-        genes_json.setdefault(gene, {})[accession] = {
-            "download": status, "model_output": output, "thresholds": thresholds, "ligands": ligands,
-        }
+    with _StreamingTsv(root / "alphafill_ligands_all.tsv", LIGAND_COLUMNS) as all_writer, \
+            _StreamingTsv(root / "alphafill_ligands_filtered.tsv", LIGAND_COLUMNS) as filtered_writer:
+        for gene, accession in sorted(set(pairs)):
+            ligands = normalized[accession]
+            output = pair_outputs[(gene, accession)]
+            selected_hit = selection.get(gene, {}) if selection.get(gene, {}).get("accession") == accession else {}
+            pair_source = selected_hit.get("source", "direct" if accession in direct_by_gene[gene] else "none")
+            rows = [{**_tsv_row(gene, accession, ligand),
+                     "selection_source": pair_source,
+                     "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
+                     "sequence_identity": selected_hit.get("identity", ""),
+                     "query_coverage": selected_hit.get("query_coverage", ""),
+                     "subject_coverage": selected_hit.get("subject_coverage", ""),
+                     "cif_path": output["cif_path"], "pymol_script_path": output["pymol_script_path"]}
+                    for ligand in ligands]
+            if rows:
+                frame = _portable_frame(
+                    pd.DataFrame(rows, columns=LIGAND_COLUMNS)
+                    .sort_values("ligand_instance_id", kind="mergesort"), root)
+                all_writer.write(frame)
+                filtered_writer.write(frame[frame["filter_status"] == "accepted"])
+                for key in zip(frame["confidence_category"], frame["identity_category"]):
+                    if all(isinstance(value, str) for value in key):
+                        full_key = (gene, accession, *key)
+                        category_counter[full_key] = category_counter.get(full_key, 0) + 1
+                del frame, rows
+            accepted = [ligand for ligand in ligands if ligand["filter_status"] == "accepted"]
+            status = statuses[accession]
+            usable = status.get("metadata_usable", False)
+            summary_rows.append({
+                "gene": gene, "uniprot": accession, "selection_source": pair_source,
+                "mapped_uniprot": ";".join(sorted(direct_by_gene[gene])),
+                "sequence_identity": selected_hit.get("identity", ""),
+                "query_coverage": selected_hit.get("query_coverage", ""),
+                "subject_coverage": selected_hit.get("subject_coverage", ""),
+                "download_source": status.get("download_source", ""),
+                "alphafill_status": status.get("status"),
+                "metadata_usable": usable, "total_transfers": len(ligands),
+                "accepted_transfers": len(accepted), "rejected_transfers": len(ligands) - len(accepted),
+                **{f"{category}_confidence_transfers": sum(
+                    item["confidence_category"] == category for item in ligands
+                ) for category in CONFIDENCE_CATEGORIES},
+                **summarize_compounds(ligands, usable=usable), **output,
+                "metadata_path": status.get("metadata_path", ""),
+                "error_message": status.get("error_message", ""),
+            })
+            # The JSON report keeps provenance and counts; ligands are in the TSV files.
+            genes_json.setdefault(gene, {})[accession] = {
+                "download": status, "model_output": output, "thresholds": thresholds,
+                "ligand_count": len(ligands), "accepted_ligand_count": len(accepted),
+            }
 
-    all_df = pd.DataFrame(all_rows, columns=LIGAND_COLUMNS).sort_values(["gene", "uniprot", "ligand_instance_id"]) if all_rows else pd.DataFrame(columns=LIGAND_COLUMNS)
-    filtered_df = all_df[all_df["filter_status"] == "accepted"].copy()
     category_columns = ["gene", "uniprot", "confidence_category", "identity_category", "transfer_count"]
-    if all_df.empty:
-        category_counts = pd.DataFrame(columns=category_columns)
-    else:
-        category_counts = (all_df.groupby(category_columns[:-1], sort=True)
-                           .size().reset_index(name="transfer_count"))
+    category_counts = pd.DataFrame(
+        [(*key, count) for key, count in sorted(category_counter.items())], columns=category_columns)
     accession_summary = pd.DataFrame(summary_rows, columns=SUMMARY_COLUMNS).sort_values(["gene", "uniprot"]) if summary_rows else pd.DataFrame(columns=SUMMARY_COLUMNS)
     summary_df = compact_summary(accession_summary)
     failures = _execution_failures(statuses, normalized, pair_outputs)
-    for filename, frame in (("alphafill_ligands_all.tsv", all_df),
-                            ("alphafill_ligands_filtered.tsv", filtered_df),
-                            ("alphafill_summary.tsv", summary_df),
+    for filename, frame in (("alphafill_summary.tsv", summary_df),
                             ("alphafill_accession_summary.tsv", accession_summary),
                             ("alphafill_category_counts.tsv", category_counts)):
         _atomic_bytes(root / filename, _portable_frame(frame, root).to_csv(sep="\t", index=False).encode())
@@ -1613,6 +1702,7 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
                       "strict_errors": options["strict_errors"], "failure_count": len(failures),
                       "failures": failures},
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cache_key": run_key,
         "thresholds": thresholds,
         "category_definitions": {
             "confidence": {"high": "local_rmsd < high_local_rmsd AND tcs < high_tcs",
@@ -1642,7 +1732,7 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
         "candidate has no transplants.\n\n"
         "result_status: transplants_found = AlphaFill entry with placements; "
         "entry_found_without_transplants = valid entry with zero placements; "
-        "alphafill_entry_not_found = HTTP 404; incomplete_download = network, "
+        "alphafill_entry_not_found = HTTP 404 or absent from the rsync archive; incomplete_download = network, "
         "schema or file error; unmapped_or_no_candidates = no eligible UniProt ID.\n\n"
         "alphafill_summary.tsv has one row per locus for the FastTarget merge. "
         "alphafill_accession_summary.tsv has one row per locus and evaluated accession, "
@@ -1650,7 +1740,9 @@ def run_alphafill(output_path: str, organism_name: str, mapping: dict[str, Any],
         "alphafill_ligands_all.tsv lists every placed compound; "
         "alphafill_ligands_filtered.tsv lists accepted high/intermediate confidence "
         "placements. alphafill_category_counts.tsv counts placements by category. "
-        "alphafill_results.json contains the same data and execution failures.\n\n"
+        "alphafill_results.json records thresholds, execution failures and, per locus "
+        "and accession, download/model provenance and ligand counts; the ligands "
+        "themselves are only in the TSV files.\n\n"
         "Path columns are relative to this directory. Raw rsync files live in "
         "rsync_raw/. Valid downloads and analysis checkpoints live in cache/. "
         "Reruns reuse them; refresh_cache: True requests fresh data.\n"
