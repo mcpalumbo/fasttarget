@@ -2314,6 +2314,43 @@ def download_structures(output_path, organism_name):
         except Exception as e:
             logging.error(f"Error downloading structures for {locus_tag}: {e}")
             
+def pdb_format_residue(residue):
+    """
+    Whether a residue can be written in PDB format.
+
+    The PDB format has three columns for the residue name. Ligands with the newer
+    five-character CCD codes (e.g. A1H49) overflow into the chain and residue
+    number columns when Biopython writes them, and P2Rank then fails to load the
+    whole file ("NumberFormatException: For input string: 'A 8'"). Such ligands are
+    left out; pocket detection works on the protein atoms.
+
+    :param residue: Biopython Residue.
+    :return: False for a residue whose name is longer than three characters.
+    """
+    if len(residue.get_resname().strip()) > 3:
+        print(f"    Skipping ligand {residue.get_resname().strip()} (CCD code too long for PDB format)")
+        return False
+    return True
+
+def pdb_file_has_overflowing_resnames(pdb_file):
+    """
+    Detect a PDB file written with residue names longer than three characters.
+
+    Column 21 of ATOM/HETATM records is blank in the PDB format; a longer residue
+    name fills it. Used to rebuild reference files extracted before
+    pdb_format_residue existed.
+
+    :param pdb_file: Path to a .pdb file.
+    :return: True if any ATOM/HETATM record has a non-blank column 21.
+    """
+    if not pdb_file.endswith('.pdb') or not os.path.isfile(pdb_file):
+        return False
+    with open(pdb_file) as handle:
+        for line in handle:
+            if line.startswith(('ATOM  ', 'HETATM')) and len(line) > 20 and line[20] != ' ':
+                return True
+    return False
+
 def extract_chain_from_pdb(pdb_file, chain_ids, output_file):
     """
     Extracts one or more specific chains from a PDB file using Biopython
@@ -2345,6 +2382,10 @@ def extract_chain_from_pdb(pdb_file, chain_ids, output_file):
         def accept_chain(self, chain) -> bool:
             """Return True if chain ID is in the list of requested chains."""
             return chain.id in self.chain_ids
+
+        def accept_residue(self, residue) -> bool:
+            """Drop ligands whose CCD code does not fit the PDB format (see pdb_format_residue)."""
+            return pdb_format_residue(residue)
     
     parser = PDBParser(QUIET=True)
 
@@ -2404,13 +2445,18 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
         Accepts chains whose IDs match any in the provided list.
         Used for extracting multiple different subunits.
         """
-        def __init__(self, chain_ids: list):
+        def __init__(self, chain_ids: list, pdb_format: bool = False):
             super().__init__()
             self.chain_ids = [str(c).strip() for c in chain_ids]
+            self.pdb_format = pdb_format
 
         def accept_chain(self, chain) -> bool:
             """Return True if chain ID is in the list of requested chains."""
             return chain.id in self.chain_ids
+
+        def accept_residue(self, residue) -> bool:
+            """In PDB output, drop ligands whose CCD code does not fit the format."""
+            return pdb_format_residue(residue) if self.pdb_format else True
     
     parser = MMCIFParser(QUIET=True)
 
@@ -2445,7 +2491,7 @@ def extract_chain_from_cif(cif_file, chain_ids, output_file):
         # Use PDBIO for single-character chains (standard PDB format)
         io = PDBIO()
         io.set_structure(structure)
-        selector = MultiChainSelect(chain_ids)
+        selector = MultiChainSelect(chain_ids, pdb_format=True)
         io.save(output_file, select=selector)
     
     # Verify output file was created and has content
@@ -2673,7 +2719,19 @@ def get_chain_reference_structure_for_locus (locus_tag, locus_dir):
             cif_file_path = os.path.join(uniprot_dir, f"PDB_{struct_id}.cif")
             
             output_chain_file = os.path.join(uniprot_dir, reference_chain_filename(struct_id, chain_ids))
-            
+
+            # A reference written before long CCD codes were filtered cannot be read
+            # by P2Rank: rebuild it, and drop the pocket results computed from it.
+            if pdb_file_has_overflowing_resnames(output_chain_file):
+                print(f'  Rebuilding {output_chain_file}: residue names overflow the PDB columns')
+                os.remove(output_chain_file)
+                stem = os.path.splitext(os.path.basename(output_chain_file))[0]
+                for suffix in ('_fpocket', '_p2rank'):
+                    stale = os.path.join(locus_dir, 'pockets', stem + suffix)
+                    if os.path.isdir(stale):
+                        shutil.rmtree(stale)
+                drop_best_pocket_files(locus_dir, locus_tag)
+
             # Try PDB format first, then CIF format
             # Verify files exist AND have content (not empty/corrupt)
             try:
@@ -2749,6 +2807,233 @@ def get_chain_reference_structure(output_path, organism_name):
             get_chain_reference_structure_for_locus(locus_tag, locus_dir)
         except Exception as e:
             logging.error(f"Error extracting reference structure for {locus_tag}: {e}")
+
+def drop_best_pocket_files(locus_dir, locus_tag):
+    """
+    Remove the cached best-pocket summaries of a locus.
+
+    merge_structure_data reuses best_DS_fpocket_<locus>.json and
+    best_prob_p2rank_<locus>.json whenever they exist, so after the reference
+    changes they would keep reporting the pockets of the former structure.
+    """
+    for name in (f'best_DS_fpocket_{locus_tag}.json', f'best_prob_p2rank_{locus_tag}.json'):
+        path = os.path.join(locus_dir, 'pockets', name)
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def observed_chain_coverage(structure_file, chain_ids, seq_len):
+    """
+    Coverage (%) of a protein by the residues actually resolved in a PDB entry.
+
+    The coverage in the summary comes from the residue range UniProt lists for the
+    chain, which is the construct, not what was modelled: 13HR chain I is listed as
+    1-312 and has 7 residues with coordinates. This counts standard residues with a
+    CA atom in the requested chains, in the first model.
+
+    :param structure_file: Path to the downloaded .pdb or .cif entry.
+    :param chain_ids: List of chain IDs of this protein in the entry.
+    :param seq_len: Length of the UniProt sequence.
+    :return: Coverage in percent (capped at 100), or None if it cannot be computed.
+    """
+    if not seq_len or not structure_file or not os.path.isfile(structure_file):
+        return None
+    try:
+        if structure_file.endswith('.cif'):
+            from Bio.PDB import MMCIFParser
+            structure = MMCIFParser(QUIET=True).get_structure('s', structure_file)
+        else:
+            structure = PDBParser(QUIET=True).get_structure('s', structure_file)
+    except Exception as e:
+        logging.warning(f'Could not parse {structure_file} to compute observed coverage: {e}')
+        return None
+    model = next(iter(structure), None)
+    if model is None:
+        return None
+    observed = 0
+    for chain in model:
+        if chain.id in chain_ids:
+            observed += sum(1 for residue in chain if residue.id[0] == ' ' and 'CA' in residue)
+    return min(100.0, observed / float(seq_len) * 100.0)
+
+
+def validate_reference_structure_for_locus(locus_tag, locus_dir, resolution_cutoff=3.5, coverage_cutoff=40.0, strain_accession=None):
+    """
+    Check the reference structure of a locus against what was actually downloaded.
+
+    Two cases the summary cannot see when it is built, before any download:
+      1) A PDB reference whose resolved residues cover less than coverage_cutoff
+         (UniProt lists the construct range, not the modelled one). Every PDB row
+         gets an observed_coverage column, and the reference is selected again with
+         it: another PDB that really passes, or AlphaFold.
+      2) No reference row at all, because the AlphaFold row chosen as reference was
+         removed after a 404 (download_single_structure). The reference is selected
+         again among the remaining rows.
+    When the new choice needs an AlphaFold model the summary lacks, AlphaFold rows
+    are added (strain accession first) and downloaded. If no AlphaFold model exists,
+    the previous PDB reference is kept, with a warning.
+
+    :param locus_tag: Locus tag identifier.
+    :param locus_dir: Path to the locus directory.
+    :param resolution_cutoff: Maximum resolution (Å) for a PDB reference.
+    :param coverage_cutoff: Minimum observed coverage (%) for a PDB reference.
+    :param strain_accession: UniProt accession of the strain proteome for this locus.
+    :return: True if the summary was changed.
+    """
+    summary_path = os.path.join(locus_dir, f"{locus_tag}_structure_summary.tsv")
+    if not files.file_check(summary_path):
+        return False
+
+    na_values = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NULL', 'NaN', 'n/a', 'nan', 'null']
+
+    def read_summary():
+        table = pd.read_csv(summary_path, sep='\t', dtype={'structure_id': str, 'uniprot_id': str, 'chain': str},
+                            keep_default_na=False, na_values=na_values)
+        table['is_reference'] = table['is_reference'].astype(str).str.strip().str.lower().isin(['true', '1', 'yes'])
+        if 'observed_coverage' not in table.columns:
+            table['observed_coverage'] = float('nan')
+        table['observed_coverage'] = pd.to_numeric(table['observed_coverage'], errors='coerce')
+        return table.reset_index(drop=True)
+
+    df = read_summary()
+    has_pdb = (df['structure_type'] == 'PDB').any()
+    has_af = (df['structure_type'] == 'AlphaFold').any()
+    if not has_pdb and not has_af:
+        return False  # no structure at all ("No structure found")
+    ref_rows = df.index[df['is_reference']].tolist()
+    old_ref = ref_rows[0] if ref_rows else None
+    if old_ref is not None and df.at[old_ref, 'structure_type'] != 'PDB':
+        return False  # AlphaFold/ColabFold reference: nothing to check
+
+    def observed_for(idx):
+        row = df.loc[idx]
+        if not pd.isna(row['observed_coverage']):
+            return row['observed_coverage']
+        uniprot_dir = os.path.join(locus_dir, str(row['uniprot_id']))
+        path = None
+        for ext in ('.pdb', '.cif'):
+            candidate = os.path.join(uniprot_dir, f"PDB_{row['structure_id']}{ext}")
+            if files.file_check(candidate):
+                path = candidate
+                break
+        try:
+            seq_len = int(float(row['sequence_length']))
+        except (TypeError, ValueError):
+            seq_len = 0
+        value = observed_chain_coverage(path, parse_chain_field(row['chain']), seq_len)
+        if value is not None:
+            df.at[idx, 'observed_coverage'] = round(value, 2)
+        return value
+
+    def select():
+        structs = []
+        for _, row in df.iterrows():
+            res = pd.to_numeric(row.get('resolution'), errors='coerce')
+            cov = row['observed_coverage'] if row['structure_type'] == 'PDB' else pd.to_numeric(row.get('coverage'), errors='coerce')
+            structs.append({
+                'uniprot_id': row['uniprot_id'], 'structure_type': row['structure_type'],
+                'method': row.get('method'),
+                'resolution': None if pd.isna(res) else float(res),
+                'coverage': None if pd.isna(cov) else float(cov),
+            })
+        idx = select_reference_structure(structs, resolution_cutoff, coverage_cutoff, preferred_uniprot=strain_accession)
+        return None if idx is None else df.index[idx]
+
+    def write():
+        df.to_csv(summary_path, sep='\t', index=False, quoting=csv.QUOTE_NONNUMERIC)
+
+    if old_ref is not None:
+        old_id = (df.at[old_ref, 'uniprot_id'], df.at[old_ref, 'structure_id'])
+        observed = observed_for(old_ref)
+        if observed is None or observed >= coverage_cutoff:
+            write()  # records observed_coverage
+            return False
+        print(f"  {locus_tag}: reference PDB {old_id[1]} resolves {observed:.1f}% of the protein "
+              f"(< {coverage_cutoff}%), selecting the reference again.")
+    else:
+        old_id = None
+        print(f'  {locus_tag}: no reference row in the summary, selecting the reference again.')
+
+    # Observed coverage for every PDB row, so another fragment is not picked instead.
+    for idx in df.index[df['structure_type'] == 'PDB']:
+        observed_for(idx)
+
+    new_ref = select()
+    if new_ref is None or df.at[new_ref, 'structure_type'] == 'AlphaFold':
+        # Make sure the AlphaFold models exist: add missing rows (strain accession
+        # first), download, and let download_single_structure drop 404 rows.
+        candidates = ([strain_accession] if strain_accession else []) + list(df['uniprot_id'].dropna().unique())
+        have_af = set(df.loc[df['structure_type'] == 'AlphaFold', 'uniprot_id'])
+        seq_lens = pd.to_numeric(df['sequence_length'], errors='coerce').dropna()
+        new_rows = []
+        for uniprot_id in dict.fromkeys(candidates):
+            if not isinstance(uniprot_id, str) or not uniprot_id or uniprot_id in have_af:
+                continue
+            if files.file_check(os.path.join(locus_dir, uniprot_id, f'.no_af_{uniprot_id}')):
+                continue
+            row = {c: None for c in df.columns}
+            row.update({'uniprot_id': uniprot_id, 'structure_type': 'AlphaFold', 'structure_id': uniprot_id,
+                        'method': 'AlphaFold', 'chain': 'A', 'coverage': 100.0,
+                        'sequence_length': seq_lens.iloc[0] if len(seq_lens) else None, 'is_reference': False})
+            new_rows.append(row)
+            os.makedirs(os.path.join(locus_dir, uniprot_id), exist_ok=True)
+        for row in new_rows:
+            df.loc[len(df.index)] = row
+        df['is_reference'] = False
+        write()
+        download_single_structure(os.path.dirname(os.path.normpath(locus_dir)), locus_tag)
+        df = read_summary()
+        new_ref = select()
+
+    if new_ref is None and old_id is not None:
+        # Nothing qualifies and no AlphaFold model exists: keep the previous PDB.
+        match = df.index[(df['uniprot_id'] == old_id[0]) & (df['structure_id'] == old_id[1])].tolist()
+        if match:
+            new_ref = match[0]
+            logging.warning(f'{locus_tag}: no structure passes the cutoffs and no AlphaFold model is available; '
+                            f'keeping PDB {old_id[1]} as reference.')
+    if new_ref is None:
+        logging.warning(f'{locus_tag}: no reference structure available.')
+
+    df['is_reference'] = False
+    if new_ref is not None:
+        df.at[new_ref, 'is_reference'] = True
+        print(f"  {locus_tag}: reference is now {df.at[new_ref, 'structure_type']} {df.at[new_ref, 'structure_id']} "
+              f"(UniProt {df.at[new_ref, 'uniprot_id']})")
+    write()
+    drop_best_pocket_files(locus_dir, locus_tag)
+
+    if new_ref is not None and df.at[new_ref, 'structure_type'] == 'PDB':
+        get_chain_reference_structure_for_locus(locus_tag, locus_dir)
+    return True
+
+
+def validate_reference_structures(output_path, organism_name, resolution_cutoff=3.5, coverage_cutoff=40.0, strain_taxid=None):
+    """
+    Run validate_reference_structure_for_locus for every locus.
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of organism.
+    :param resolution_cutoff: Maximum resolution (Å) for a PDB reference.
+    :param coverage_cutoff: Minimum observed coverage (%) for a PDB reference.
+    :param strain_taxid: Strain Taxonomy ID, to prefer the strain AlphaFold model.
+    :return: List of locus tags whose summary changed.
+    """
+    structure_dir = os.path.join(output_path, organism_name, 'structures')
+    strain_map = strain_accession_mapping(output_path, organism_name, strain_taxid) if strain_taxid else {}
+    changed = []
+    for locus_tag in tqdm(metadata.ref_gbk_locus(output_path, organism_name), desc='Validating references'):
+        locus_dir = os.path.join(structure_dir, locus_tag)
+        if not os.path.isdir(locus_dir):
+            continue
+        try:
+            if validate_reference_structure_for_locus(locus_tag, locus_dir, resolution_cutoff, coverage_cutoff,
+                                                      strain_accession=strain_map.get(locus_tag)):
+                changed.append(locus_tag)
+        except Exception as e:
+            logging.exception(f'Error validating the reference structure of {locus_tag}: {e}')
+    return changed
+
 
 def parse_chain_field(chain_field):
     """
@@ -3505,6 +3790,326 @@ def select_structures_for_pockets(locus_dir, full_mode=False, resolution_cutoff=
                     else:
                         print(f"  Warning: No valid ColabFold file for {locus_dir}.")       
     return selected_structures_path, selected_structures_ids
+
+
+##  ------------------- Pocket pLDDT ------------------- ##
+# Predicted models (AlphaFold DB, ColabFold, AlphaFold3) store the per-residue
+# pLDDT in the B-factor column. A model with a good average pLDDT can still have
+# its top pocket between disordered loops, whose coordinates are arbitrary: the
+# pocket is then an artefact of the model. Each pocket therefore gets the mean
+# pLDDT of its lining residues and the fraction of them below 50 (disordered).
+# Experimental structures get None: their B-factor is atomic mobility, not
+# confidence, and is not comparable.
+PREDICTED_MODEL_PREFIXES = ('AF_', 'CB_', 'AF3_')
+POCKET_PLDDT_KEYS = ('mean_plddt', 'frac_plddt_lt50')
+PLDDT_DISORDER_CUTOFF = 50.0
+# The best pocket of a predicted model must have a mean pLDDT of at least this;
+# when the top-scoring pocket fails, the next one by score is taken. When no
+# pocket passes, the top-scoring pocket is kept (plddt_filter 'none_passed').
+POCKET_MIN_MEAN_PLDDT = 70.0
+
+
+def is_predicted_model(structure_name):
+    """
+    Whether a structure file or pocket folder name belongs to a predicted model.
+
+    :param structure_name: File name, path or pocket folder name (AF_<uniprot>,
+        CB_<locus>..., AF3_<locus>, PDB_<code>_<chain>_ref...).
+    :return: True for AlphaFold, ColabFold and AlphaFold3 models.
+    """
+    return os.path.basename(str(structure_name)).startswith(PREDICTED_MODEL_PREFIXES)
+
+
+def _pocket_residue_key(chain, number, icode=''):
+    return str(chain).strip(), int(number), (icode or '').strip()
+
+
+def residue_plddt_map(structure_file):
+    """
+    Per-residue pLDDT of a predicted model, read from the B-factor column.
+
+    The CA atom is used (AlphaFold3 gives every atom its own value); residues
+    without CA take their first atom. Values on a 0-1 scale are converted to 0-100.
+
+    :param structure_file: Path of a PDB file.
+    :return: Dict {(chain, resseq, icode): pLDDT}, empty when unreadable.
+    """
+    plddt, first_atom = {}, {}
+    try:
+        with open(structure_file, encoding='utf-8', errors='replace') as handle:
+            for line in handle:
+                if line.startswith('ENDMDL'):
+                    break
+                if not line.startswith('ATOM') or len(line) < 66:
+                    continue
+                try:
+                    key = _pocket_residue_key(line[21], line[22:26], line[26])
+                    value = float(line[60:66])
+                except ValueError:
+                    continue
+                first_atom.setdefault(key, value)
+                if line[12:16].strip() == 'CA':
+                    plddt[key] = value
+    except OSError as error:
+        logging.warning(f'Cannot read pLDDT from {structure_file}: {error}')
+        return {}
+    for key, value in first_atom.items():
+        plddt.setdefault(key, value)
+    if plddt and max(plddt.values()) <= 1.0:
+        plddt = {key: value * 100 for key, value in plddt.items()}
+    return plddt
+
+
+def pocket_plddt_stats(residue_keys, plddt_map):
+    """
+    Mean pLDDT of a pocket and fraction of its residues with pLDDT < 50.
+
+    :param residue_keys: Iterable of (chain, resseq, icode) lining the pocket.
+    :param plddt_map: Output of residue_plddt_map.
+    :return: Dict with mean_plddt and frac_plddt_lt50 (None when no residue maps).
+    """
+    values = [plddt_map[key] for key in set(residue_keys) if key in plddt_map]
+    if not values:
+        return dict.fromkeys(POCKET_PLDDT_KEYS)
+    return {
+        'mean_plddt': round(sum(values) / len(values), 2),
+        'frac_plddt_lt50': round(sum(value < PLDDT_DISORDER_CUTOFF for value in values) / len(values), 3),
+    }
+
+
+def fpocket_pocket_residues(atm_file):
+    """
+    Residues lining an fpocket pocket, from its pocketN_atm.pdb file.
+
+    :param atm_file: Path of pocketN_atm.pdb.
+    :return: Set of (chain, resseq, icode).
+    """
+    residues = set()
+    try:
+        with open(atm_file, encoding='utf-8', errors='replace') as handle:
+            for line in handle:
+                if line.startswith(('ATOM', 'HETATM')) and len(line) >= 27:
+                    try:
+                        residues.add(_pocket_residue_key(line[21], line[22:26], line[26]))
+                    except ValueError:
+                        continue
+    except OSError:
+        pass
+    return residues
+
+
+def p2rank_pocket_residues(residue_ids):
+    """
+    Residues of a P2Rank pocket, from the residue_ids field ('A_12 A_13B ...').
+
+    :param residue_ids: residue_ids value of a *_predictions.csv row.
+    :return: Set of (chain, resseq, icode).
+    """
+    residues = set()
+    for token in str(residue_ids or '').split():
+        chain, _, number = token.rpartition('_')
+        match = re.fullmatch(r'(-?\d+)([A-Za-z]?)', number)
+        if chain and match:
+            residues.add(_pocket_residue_key(chain, match.group(1), match.group(2)))
+    return residues
+
+
+def pocket_input_structure(pocket_folder, suffix):
+    """
+    Structure file a pocket folder was computed from.
+
+    Pocket folders live in <locus>/pockets/<name>_fpocket|_p2rank and the input is
+    <name>.pdb elsewhere in the locus folder (<locus>/<uniprot>/AF_<uniprot>.pdb,
+    <locus>/CB_<locus>....pdb, <locus>/AF_model/AF3_<locus>.pdb).
+
+    :param pocket_folder: Path of the pocket folder.
+    :param suffix: '_fpocket' or '_p2rank'.
+    :return: Path, or None when not found.
+    """
+    folder = os.path.normpath(pocket_folder)
+    name = os.path.basename(folder)
+    if name.endswith(suffix):
+        name = name[:-len(suffix)]
+    locus_dir = os.path.dirname(os.path.dirname(folder))
+    for root, dirs, list_files in os.walk(locus_dir):
+        dirs[:] = sorted(d for d in dirs if d != 'pockets' and not d.endswith(('_fpocket', '_p2rank')))
+        if f'{name}.pdb' in list_files:
+            return os.path.join(root, f'{name}.pdb')
+    return None
+
+
+def pocket_folder_residues(pocket_folder, method, pocket_label):
+    """
+    Residues of one pocket of an fpocket or P2Rank run.
+
+    :param pocket_folder: Path of the <name>_fpocket or <name>_p2rank folder.
+    :param method: 'fpocket' or 'p2rank'.
+    :param pocket_label: Label as stored in best_*.json ('Pocket 3', 'Pocket pocket1  ').
+    :return: Set of (chain, resseq, icode); empty when not found.
+    """
+    label = re.sub(r'^Pocket\s+', '', str(pocket_label).strip()).strip()
+    if method == 'fpocket':
+        return fpocket_pocket_residues(os.path.join(pocket_folder, 'pockets', f'pocket{label}_atm.pdb'))
+    for csv_file in glob.glob(os.path.join(pocket_folder, '*_predictions.csv')):
+        try:
+            df = pd.read_csv(csv_file, sep=',', skipinitialspace=True)
+        except Exception as error:
+            logging.warning(f'Cannot read {csv_file}: {error}')
+            return set()
+        df.columns = df.columns.str.strip()
+        rows = df[df['name'].astype(str).str.strip() == label]
+        if not rows.empty:
+            return p2rank_pocket_residues(rows.iloc[0].get('residue_ids', ''))
+    return set()
+
+
+# The best fpocket and P2Rank pockets point to the same site when at least this
+# share of the smaller pocket's residues is in both.
+POCKET_SAME_SITE_MIN_OVERLAP = 50.0
+POCKET_AGREEMENT_COLUMNS = ('fpocket_p2rank_shared_residues', 'fpocket_p2rank_overlap', 'fpocket_p2rank_same_site')
+
+
+def pocket_method_agreement(locus_dir, fpocket_label, p2rank_label):
+    """
+    Overlap between the best fpocket and the best P2Rank pocket of the reference structure.
+
+    Both pockets must come from the same structure (the locus reference, default
+    track), so residues are compared by chain and number directly.
+
+    :param locus_dir: Path of the locus folder.
+    :param fpocket_label: Best fpocket pocket label ('Pocket 3').
+    :param p2rank_label: Best P2Rank pocket label ('Pocket pocket1  ').
+    :return: Dict with fpocket_p2rank_shared_residues, fpocket_p2rank_overlap
+        (% of the smaller pocket) and fpocket_p2rank_same_site; None values when
+        either pocket is missing.
+    """
+    result = dict.fromkeys(POCKET_AGREEMENT_COLUMNS)
+    if not fpocket_label or not p2rank_label or 'No_pockets' in (fpocket_label, p2rank_label):
+        return result
+    pockets_dir = os.path.join(locus_dir, 'pockets')
+    if not os.path.isdir(pockets_dir):
+        return result
+    folders = {}
+    for method, suffix in (('fpocket', '_fpocket'), ('p2rank', '_p2rank')):
+        candidates = [d for d in os.listdir(pockets_dir)
+                      if d.endswith(suffix) and not d.startswith('CB_') and os.path.isdir(os.path.join(pockets_dir, d))]
+        folder = _reference_pocket_folder(locus_dir, candidates, suffix)
+        if not folder:
+            return result
+        folders[method] = folder
+    if folders['fpocket'][:-len('_fpocket')] != folders['p2rank'][:-len('_p2rank')]:
+        return result
+    fp_residues = pocket_folder_residues(os.path.join(pockets_dir, folders['fpocket']), 'fpocket', fpocket_label)
+    pr_residues = pocket_folder_residues(os.path.join(pockets_dir, folders['p2rank']), 'p2rank', p2rank_label)
+    if not fp_residues or not pr_residues:
+        return result
+    shared = len(fp_residues & pr_residues)
+    overlap = round(100.0 * shared / min(len(fp_residues), len(pr_residues)), 1)
+    return {
+        'fpocket_p2rank_shared_residues': shared,
+        'fpocket_p2rank_overlap': overlap,
+        'fpocket_p2rank_same_site': overlap >= POCKET_SAME_SITE_MIN_OVERLAP,
+    }
+
+
+def _model_plddt_map(pocket_folder, suffix):
+    """pLDDT map of the model behind a pocket folder, or None for experimental structures."""
+    if not is_predicted_model(os.path.basename(os.path.normpath(pocket_folder))):
+        return None
+    structure_file = pocket_input_structure(pocket_folder, suffix)
+    if not structure_file:
+        logging.warning(f'Model structure for {pocket_folder} not found; pocket pLDDT left empty.')
+        return {}
+    return residue_plddt_map(structure_file)
+
+
+def annotate_fpocket_plddt(fpocket_folder, pockets):
+    """
+    Add mean_plddt and frac_plddt_lt50 to every pocket of one fpocket run.
+
+    :param fpocket_folder: Path of the <name>_fpocket folder.
+    :param pockets: Dict {'Pocket N': {...}} parsed from <name>_info.txt (modified in place).
+    :return: The same dict.
+    """
+    if not isinstance(pockets, dict):
+        return pockets
+    plddt_map = _model_plddt_map(fpocket_folder, '_fpocket')
+    for label, props in pockets.items():
+        if not isinstance(props, dict):
+            continue
+        if plddt_map is None:
+            props.update(dict.fromkeys(POCKET_PLDDT_KEYS))
+            continue
+        number = label.split()[-1]
+        atm_file = os.path.join(fpocket_folder, 'pockets', f'pocket{number}_atm.pdb')
+        props.update(pocket_plddt_stats(fpocket_pocket_residues(atm_file), plddt_map))
+    return pockets
+
+
+def _pockets_missing_plddt(pockets_by_structure):
+    """True when a parsed pocket dict ({structure: {pocket: props}}) predates the pLDDT keys."""
+    for pockets in (pockets_by_structure or {}).values():
+        if isinstance(pockets, dict):
+            for props in pockets.values():
+                if isinstance(props, dict) and 'mean_plddt' not in props:
+                    return True
+    return False
+
+
+def _best_pockets_missing_plddt(best_by_structure):
+    """True when a best-pocket dict ({structure: {pocket, score...}}) predates the pLDDT filter."""
+    if isinstance(best_by_structure, list):
+        return any(_best_pockets_missing_plddt(item) for item in best_by_structure)
+    for props in (best_by_structure or {}).values():
+        if isinstance(props, dict) and props.get('pocket') is not None \
+                and props.get('plddt_cutoff') != POCKET_MIN_MEAN_PLDDT:
+            return True
+    return False
+
+
+def select_pocket_by_score(pockets, score_key, min_mean_plddt=POCKET_MIN_MEAN_PLDDT):
+    """
+    Best pocket of one structure: highest score among pockets passing the pLDDT cutoff.
+
+    Pockets of experimental structures have mean_plddt None and all pass. For a
+    predicted model, a pocket passes when its mean pLDDT is >= min_mean_plddt; if
+    none passes, the highest-scoring pocket is returned anyway. Only pockets with a
+    score > 0 are candidates, as before.
+
+    :param pockets: Dict {'Pocket N': {score_key: float, 'mean_plddt': ..., ...}}.
+    :param score_key: 'Druggability Score' (fpocket) or 'probability' (P2Rank).
+    :param min_mean_plddt: Minimum mean pLDDT of the pocket residues.
+    :return: Dict with pocket (label or None), score, mean_plddt, frac_plddt_lt50,
+        plddt_filter ('not_model', 'passed', 'none_passed') and plddt_cutoff.
+    """
+    scored = []
+    for label, props in pockets.items():
+        if not isinstance(props, dict):
+            continue
+        score = props.get(score_key)
+        if isinstance(score, (int, float)) and score > 0:
+            scored.append((label, score, props))
+
+    result = {'pocket': None, 'score': 0, **dict.fromkeys(POCKET_PLDDT_KEYS),
+              'plddt_filter': None, 'plddt_cutoff': min_mean_plddt}
+    if not scored:
+        return result
+
+    is_model = any(props.get('mean_plddt') is not None for _, _, props in scored)
+    if is_model:
+        passing = [item for item in scored
+                   if item[2].get('mean_plddt') is not None and item[2]['mean_plddt'] >= min_mean_plddt]
+        pool = passing or scored
+        result['plddt_filter'] = 'passed' if passing else 'none_passed'
+    else:
+        pool = scored
+        result['plddt_filter'] = 'not_model'
+
+    # max() keeps the first of equal scores, as the former strict '>' loop did.
+    label, score, props = max(pool, key=lambda item: item[1])
+    result.update({'pocket': label, 'score': score,
+                   **{key: props.get(key) for key in POCKET_PLDDT_KEYS}})
+    return result
 
 
 ##  ------------------- FPocket functions ------------------- ##
