@@ -1302,6 +1302,32 @@ def uniprot_proteome_mapping (output_path, organism_name, specie_taxid, strain_t
     
     return map_results
 
+def strain_accession_mapping(output_path, organism_name, strain_taxid):
+    """
+    Map locus_tags to their strain-proteome UniProt accession (tier 2 alone).
+
+    The main mapping gives PDB-bearing species entries priority over the strain
+    entry and keeps only those. When none of their PDB structures passes the
+    reference cutoffs, the reference falls back to AlphaFold, and without this
+    mapping that model would come from another strain even when the strain's own
+    accession has one. create_summary_structure_table uses this mapping to prefer
+    the strain model in that case. Same BLAST file and thresholds as tier 2.
+
+    :param output_path: Directory of the organism output.
+    :param organism_name: Name of organism.
+    :param strain_taxid: Strain Taxonomy ID.
+    :return: Dictionary locus_tag -> strain UniProt accession (empty if unavailable).
+    """
+    uniprot_dir = os.path.join(output_path, organism_name, 'structures', 'uniprot_files')
+    blast_output_strain_path = os.path.join(uniprot_dir, f'uniprot_strain_taxid_{strain_taxid}_blast.tsv')
+    if not files.file_check(blast_output_strain_path):
+        return {}
+    return parse_best_result_blast(blast_output_strain_path,
+                                   identity_cutoff=95,
+                                   coverage_cutoff=90,
+                                   subject_cov_cutoff=90,
+                                   all_hits=False)
+
 def parse_resolution(res_str):
     """
     Converts resolution string to float (in Angstroms).
@@ -1620,7 +1646,15 @@ def collect_structures_for_uniprot(uniprot_id, uni_info, resolution_cutoff = 3.5
 
     return rows
 
-def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=40.0):
+def _alphafold_fallback(structs, alphafold_idx, preferred_uniprot=None):
+    """Return the AlphaFold index to use, preferring the given accession's model."""
+    if preferred_uniprot:
+        for i in alphafold_idx:
+            if structs[i].get("uniprot_id") == preferred_uniprot:
+                return i
+    return alphafold_idx[0]
+
+def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=40.0, preferred_uniprot=None):
     """
     Given a list of structure dicts (from collect_structures_for_uniprot),
     selects the best structure to use as reference according to new criteria:
@@ -1641,12 +1675,14 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
       3) X-ray or EM with res 2.5-3.5Å → prefer coverage > 70%, then pick best resolution
     
     If no PDB passes cutoffs:
-      4) Use AlphaFold if available
+      4) Use AlphaFold if available, the preferred_uniprot model first
       5) If no AlphaFold in dict, use UniProt ID as fallback
-    
+
     :param structs: List of structure dicts.
     :param resolution_cutoff: Maximum resolution (Å) to consider (default 3.5).
     :param coverage_cutoff: Minimum coverage (%) to consider (default 40).
+    :param preferred_uniprot: Accession whose AlphaFold model wins the AlphaFold
+        fallback (the strain's own entry); PDB selection is unaffected.
     :return: Index of selected structure, or None.
     """
     if not structs:
@@ -1697,7 +1733,7 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
     if not eligible_pdb:
         # No PDB passes cutoffs, use AlphaFold if available
         if alphafold_idx:
-            return alphafold_idx[0]
+            return _alphafold_fallback(structs, alphafold_idx, preferred_uniprot)
         # If no AlphaFold, return None (caller will handle UniProt ID fallback)
         return None
 
@@ -1763,7 +1799,7 @@ def select_reference_structure(structs, resolution_cutoff=3.5, coverage_cutoff=4
 
     # Fallback (shouldn't reach here if eligible_pdb is not empty)
     if alphafold_idx:
-        return alphafold_idx[0]
+        return _alphafold_fallback(structs, alphafold_idx, preferred_uniprot)
     
     return None
 
@@ -1798,21 +1834,24 @@ def create_subfolder_structures(output_path, organism_name):
     else:
         raise FileNotFoundError(f'{proteome_ids_file} not found.')
 
-def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, resolution_cutoff = 3.5, coverage_cutoff = 40.0):
+def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, resolution_cutoff = 3.5, coverage_cutoff = 40.0, strain_accession=None):
     """
     Create a summary table with structure information for a locus_tag.
     Only ONE structure will be marked as reference across all UniProt IDs.
-    
+
     Priority for reference selection:
-    1. Best structure from first UniProt ID with PDB structures
-    2. If no PDB in first UniProt, check AlphaFold
-    3. If first UniProt has no structures, check next UniProt IDs
-    
+    1. Best PDB structure passing the cutoffs, across all mapped UniProt IDs
+    2. Otherwise AlphaFold: the strain accession's model if available, else the
+       first mapped accession's model
+
     :param mapping_dict: Dictionary mapping locus_tags to UniProt IDs.
     :param batch_annotations: Dictionary with UniProt annotations for all UniProt IDs.
     :param locus_tag: Locus tag to create summary for.
     :param resolution_cutoff: Resolution (Å) above to consider a PDB valid reference.
     :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
+    :param strain_accession: Strain-proteome accession of the locus (see
+        strain_accession_mapping). Its structures are added only when no mapped
+        PDB qualifies, so loci with a PDB reference are unchanged.
 
     :return: DataFrame with structure summary.
     """
@@ -1835,11 +1874,25 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
                     summary_data.append(struct)
             else:
                 print(f'  Warning: No annotations found for UniProt ID {uniprot_id}')
-        
+
+        # The mapped accessions can come from another strain because they carry
+        # PDB entries. When none of those entries qualifies as reference, the
+        # strain's own AlphaFold model is preferred over another strain's model.
+        if strain_accession and strain_accession not in uniprot_ids:
+            ref_idx = select_reference_structure(summary_data, resolution_cutoff, coverage_cutoff)
+            falls_back = ref_idx is None or summary_data[ref_idx].get("structure_type") == "AlphaFold"
+            if falls_back:
+                if strain_accession in batch_annotations:
+                    summary_data.extend(collect_structures_for_uniprot(
+                        strain_accession, batch_annotations[strain_accession], resolution_cutoff, coverage_cutoff))
+                else:
+                    print(f'  Warning: No annotations found for strain UniProt ID {strain_accession}')
+
 
     if summary_data:
         # Select ONE reference structure across ALL UniProt IDs for this locus_tag
-        ref_idx = select_reference_structure(summary_data, resolution_cutoff, coverage_cutoff)
+        ref_idx = select_reference_structure(summary_data, resolution_cutoff, coverage_cutoff,
+                                             preferred_uniprot=strain_accession)
         if ref_idx is not None:
             summary_data[ref_idx]["is_reference"] = True
             print(f'  Selected reference: {summary_data[ref_idx]["structure_id"]} (UniProt: {summary_data[ref_idx]["uniprot_id"]})')
@@ -1867,7 +1920,7 @@ def create_summary_structure_table(batch_annotations, mapping_dict, locus_tag, r
 
     return summary_df
 
-def create_summary_structure_file(output_path, organism_name, resolution_cutoff= 3.5, coverage_cutoff=40.0):
+def create_summary_structure_file(output_path, organism_name, resolution_cutoff= 3.5, coverage_cutoff=40.0, strain_taxid=None):
 
     """
     Create a TSV summary file with structure information for each locus_tag.
@@ -1880,6 +1933,9 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
     :param organism_name: Name of organism.
     :param resolution_cutoff: Resolution (Å) above to consider a PDB valid reference.
     :param coverage_cutoff: Minimum coverage (%) to consider a structure valid.
+    :param strain_taxid: Strain Taxonomy ID. When given, loci whose mapped PDB
+        entries do not qualify as reference use the strain accession's AlphaFold
+        model (see create_summary_structure_table). Existing summaries are kept.
 
     """
     structure_dir = os.path.join(output_path, organism_name, 'structures')
@@ -1914,6 +1970,24 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
         batch_annotations = files.json_to_dict(os.path.join(uniprot_files_dir, f'uniprot_{organism_name}_annotations.json'))
         print(f'UniProt annotations file found for {len(batch_annotations)} UniProt IDs.')
 
+    # Strain accessions are candidates only for loci mapped to other entries, and
+    # only summaries still to be built need them, so fetch just those annotations.
+    strain_map = strain_accession_mapping(output_path, organism_name, strain_taxid) if strain_taxid else {}
+    missing_strain_ids = set()
+    for locus_tag, strain_id in strain_map.items():
+        mapped = map_results.get(locus_tag)
+        mapped = mapped if isinstance(mapped, list) else [mapped]
+        summary_table_path = os.path.join(structure_dir, locus_tag, f"{locus_tag}_structure_summary.tsv")
+        if (strain_id and strain_id not in mapped and strain_id not in batch_annotations
+                and not files.file_check(summary_table_path)):
+            missing_strain_ids.add(strain_id)
+    if missing_strain_ids:
+        print(f'Fetching UniProt annotations for {len(missing_strain_ids)} strain UniProt IDs...')
+        fetched = uniprot_protein_annotations_batch(sorted(missing_strain_ids))
+        if fetched:
+            batch_annotations.update(fetched)
+            files.dict_to_json(uniprot_files_dir, f'uniprot_{organism_name}_annotations.json', batch_annotations)
+
     # Accessions recovered through UniParc may be withdrawn from UniProtKB, which
     # serves them as an empty document. Supply their records from the fallback
     # results so the structure summary can still be built.
@@ -1929,10 +2003,15 @@ def create_summary_structure_file(output_path, organism_name, resolution_cutoff=
 
         if not files.file_check(summary_table_path):
             
-            summary_df = create_summary_structure_table(batch_annotations, map_results, locus_tag, resolution_cutoff, coverage_cutoff)
+            summary_df = create_summary_structure_table(batch_annotations, map_results, locus_tag, resolution_cutoff, coverage_cutoff,
+                                                        strain_accession=strain_map.get(locus_tag))
             if not summary_df.empty:
                 # Ensure structure_id is stored as string to prevent scientific notation issues
                 summary_df['structure_id'] = summary_df['structure_id'].astype(str)
+                # A strain accession added here has no folder from create_subfolder_structures
+                for added_id in summary_df['uniprot_id'].dropna().unique():
+                    if isinstance(added_id, str) and added_id:
+                        os.makedirs(os.path.join(structure_dir, locus_tag, added_id), exist_ok=True)
                 summary_df.to_csv(summary_table_path, sep='\t', index=False, quoting=csv.QUOTE_NONNUMERIC)
             else:
                 print(f'No structure data found for {locus_tag}')
@@ -4679,7 +4758,7 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
             create_subfolder_structures(output_path, organism_name)
             
             print(f'\n[2.2] Generating structure summary tables...')
-            create_summary_structure_file(output_path, organism_name, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff)
+            create_summary_structure_file(output_path, organism_name, resolution_cutoff=resolution_cutoff, coverage_cutoff=coverage_cutoff, strain_taxid=strain_taxid)
             
             print(f'\n[2.3] Downloading PDB and AlphaFold structures...')
             download_structures(output_path, organism_name)
@@ -4689,6 +4768,11 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
                 get_chain_reference_structure(output_path, organism_name)
             else:
                 get_chain_all_pdbs(output_path, organism_name)
+
+            print(f'\n[2.4b] Checking reference coverage against the resolved residues...')
+            changed = validate_reference_structures(output_path, organism_name, resolution_cutoff=resolution_cutoff,
+                                                    coverage_cutoff=coverage_cutoff, strain_taxid=strain_taxid)
+            print(f'    ✓ Reference re-selected for {len(changed)} genes')
             
         except Exception as e:
             logging.exception(f'\n    ✗ ERROR in Stage 2: {e}')

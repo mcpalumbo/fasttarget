@@ -167,3 +167,86 @@ def test_a_uniprot_entry_with_no_structures_still_offers_the_model():
 
     assert [row['structure_type'] for row in rows] == ['AlphaFold']
     assert rows[0]['structure_id'] == 'P1'
+
+
+# ------------------------------------------------- strain AlphaFold preference
+
+from ftscripts.structures import create_summary_structure_table, _reference_pocket_folder
+
+
+def annotation(accession, pdb_entries=()):
+    return {'AlphaFoldDB': accession, 'Sequence': 'M' * 100,
+            'PDB_id': [dict(entry) for entry in pdb_entries]}
+
+
+def reference_of(summary):
+    rows = summary[summary['is_reference'] == True]
+    assert len(rows) == 1
+    return rows.iloc[0]['structure_type'], rows.iloc[0]['uniprot_id']
+
+
+def test_the_preferred_accession_wins_the_alphafold_fallback_only():
+    structures = [
+        {'structure_type': 'AlphaFold', 'method': 'AlphaFold', 'coverage': 100, 'uniprot_id': 'OTHER'},
+        {'structure_type': 'AlphaFold', 'method': 'AlphaFold', 'coverage': 100, 'uniprot_id': 'STRAIN'},
+    ]
+    assert select_reference_structure(structures) == 0
+    assert select_reference_structure(structures, preferred_uniprot='STRAIN') == 1
+    with_pdb = [pdb('X-ray diffraction', 2.0, 100)] + structures
+    assert select_reference_structure(with_pdb, preferred_uniprot='STRAIN') == 0
+
+
+def test_strain_alphafold_replaces_another_strains_model_when_its_pdb_is_unusable():
+    """The case of pilU: mapped to the PAO1 entry for a 4.5 Å structure."""
+    annotations = {
+        'PAO1': annotation('PAO1', [{'ID': '9N32', 'method': 'X-ray', 'resolution': '4.54 A', 'chains': 'A=1-100'}]),
+        'STRAIN': annotation('STRAIN'),
+    }
+    summary = create_summary_structure_table(annotations, {'g1': ['PAO1']}, 'g1', strain_accession='STRAIN')
+
+    assert reference_of(summary) == ('AlphaFold', 'STRAIN')
+    assert set(summary['uniprot_id']) == {'PAO1', 'STRAIN'}
+
+
+def test_a_usable_pdb_keeps_the_reference_and_adds_no_strain_rows():
+    annotations = {
+        'PAO1': annotation('PAO1', [{'ID': '1ABC', 'method': 'X-ray', 'resolution': '2.0 A', 'chains': 'A=1-100'}]),
+        'STRAIN': annotation('STRAIN'),
+    }
+    summary = create_summary_structure_table(annotations, {'g1': ['PAO1']}, 'g1', strain_accession='STRAIN')
+
+    assert reference_of(summary) == ('PDB', 'PAO1')
+    assert set(summary['uniprot_id']) == {'PAO1'}
+
+
+def test_without_a_strain_accession_the_mapped_model_is_kept():
+    annotations = {'PAO1': annotation('PAO1')}
+    summary = create_summary_structure_table(annotations, {'g1': 'PAO1'}, 'g1')
+
+    assert reference_of(summary) == ('AlphaFold', 'PAO1')
+
+
+# ------------------------------------------- pocket folder of the reference
+
+def _locus_with_summary(tmp_path, reference_uniprot):
+    locus = tmp_path / 'g1'
+    (locus / reference_uniprot).mkdir(parents=True)
+    (locus / reference_uniprot / f'AF_{reference_uniprot}.pdb').write_text('ATOM\n')
+    (locus / 'g1_structure_summary.tsv').write_text(
+        'uniprot_id\tstructure_type\tstructure_id\tmethod\tresolution\tchain\tresidue_range\tcoverage\tsequence_length\tis_reference\n'
+        f'{reference_uniprot}\tAlphaFold\t{reference_uniprot}\tAlphaFold\t\tA\t1-100\t100.0\t100\tTrue\n')
+    return locus
+
+
+def test_the_reference_folder_is_chosen_over_a_stale_one(tmp_path):
+    locus = _locus_with_summary(tmp_path, 'NEW')
+    folders = ['AF_OLD_fpocket', 'AF_NEW_fpocket']
+
+    assert _reference_pocket_folder(str(locus), folders, '_fpocket') == 'AF_NEW_fpocket'
+
+
+def test_no_folder_is_chosen_when_none_matches_the_reference(tmp_path):
+    locus = _locus_with_summary(tmp_path, 'NEW')
+
+    assert _reference_pocket_folder(str(locus), ['AF_OLD_fpocket', 'AF_OLDER_fpocket'], '_fpocket') is None
+    assert _reference_pocket_folder(str(locus), ['AF_OLD_fpocket'], '_fpocket') == 'AF_OLD_fpocket'
