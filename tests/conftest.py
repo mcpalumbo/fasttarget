@@ -228,3 +228,12 @@ def write_corecruncher_inputs(output_path, organism_name, core_genes, genomes=10
             handle.write(
                 f'{organism_name}.faa&{gene}\tgenome_01.faa&genome_01_{gene}\n'
             )
+
+
+@pytest.fixture(autouse=True)
+def _reset_alphafill_host_guard():
+    """The AlphaFill per-host guard is module state: isolate it between tests."""
+    from ftscripts import alphafill
+    alphafill._HOSTS.reset()
+    yield
+    alphafill._HOSTS.reset()
