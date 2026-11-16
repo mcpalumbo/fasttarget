@@ -188,12 +188,42 @@ def test_a_gene_takes_the_highest_value_of_its_reactions():
     assert mapped[GENES[1]] == 0.5
 
 
-def test_a_gene_whose_reactions_are_absent_gets_zero_not_a_missing_key():
-    locus_reactions = {GENES[0]: ['RXN-UNKNOWN'], GENES[1]: []}
+def test_a_gene_whose_reactions_are_absent_gets_no_value_rather_than_zero():
+    """A gene with no reaction in the graph is unmeasured, not a gene with centrality 0."""
+    locus_reactions = {GENES[0]: ['RXN-UNKNOWN'], GENES[1]: [], GENES[2]: ['RXN-A']}
 
     mapped = pathways.mapping_metabolism(locus_reactions, {'RXN-A': 0.5})
 
-    assert mapped == {GENES[0]: 0, GENES[1]: 0}
+    assert mapped == {GENES[2]: 0.5}
+
+
+# ------------------------------------------------------------ model membership
+
+SBML_GENES = """<?xml version="1.0" encoding="UTF-8"?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core"
+      xmlns:fbc="http://www.sbml.org/sbml/level3/version1/fbc/version2" level="3" version="1">
+  <model id="m">
+    <fbc:listOfGeneProducts>
+      <fbc:geneProduct fbc:id="G_{0}" fbc:label="G_{0}" fbc:name="G_{0}"/>
+      <fbc:geneProduct fbc:id="{1}" fbc:label="{1}"/>
+      <fbc:geneProduct fbc:id="G_OTHER_9999" fbc:label="G_OTHER_9999"/>
+    </fbc:listOfGeneProducts>
+  </model>
+</sbml>
+"""
+
+
+def test_sbml_model_genes_match_locus_tags_with_and_without_the_cobra_prefix(tmp_path):
+    sbml = tmp_path / 'model.xml'
+    sbml.write_text(SBML_GENES.format(GENES[0], GENES[1]))
+
+    genes = pathways.sbml_model_genes(str(sbml), GENES)
+
+    assert genes == {GENES[0], GENES[1]}, 'genes absent from the genome must be ignored'
+
+
+def test_sbml_model_genes_of_a_missing_file_is_empty(tmp_path):
+    assert pathways.sbml_model_genes(str(tmp_path / 'absent.xml'), GENES) == set()
 
 
 def test_chokepoint_mapping_assigns_each_gene_to_one_category():

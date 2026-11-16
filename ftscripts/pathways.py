@@ -313,6 +313,7 @@ def mapping_metabolism(locus_reaction_dict, reaction_property_dict):
     :param reaction_property_dict: Dictionary with the reactions as keys and the betweenness centrality values as values.
 
     :return: Dictionary with the genes as keys and the betweenness centrality values as values.
+             Genes with no reaction in reaction_property_dict are omitted.
     """
     
     locustag_to_values = {}
@@ -321,13 +322,13 @@ def mapping_metabolism(locus_reaction_dict, reaction_property_dict):
         values = [reaction_property_dict[rxn] for rxn in rxns if rxn in reaction_property_dict]
         locustag_to_values[gene] = values
         
+    # Genes whose reactions are all outside the analyzed graph get no value (NaN in
+    # the tables), as for the MetaGraphTools metrics, instead of a misleading 0.
     locustag_max = {}
     for gene, values in locustag_to_values.items():
         if len(values)>0:
             locustag_max[gene] = max(values)
-        else:
-            locustag_max[gene] = 0   
-    
+
     return locustag_max
 
 def mapping_chokepoints(locus_reaction_dict, producing_ck, consuming_ck, both_ck):
@@ -411,14 +412,22 @@ def run_metabolism_ptools (output_path, organism_name, sbml_file, chokepoint_fil
         producing_chokepoint, consuming_chokepoint, both_chokepoint = mapping_chokepoints(locus_reaction_dict, producing_set, consuming_set, both_set)
 
     print(f'---------- 7. Generating results files ----------')
-    bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, bc_dict, "PTOOLS_betweenness_centrality", metabolism_dir, 0)
-    edges_df = metadata.metadata_table_with_values(output_path, organism_name, edge_dict, "PTOOLS_edges", metabolism_dir, 0)
-    producing_df = metadata.metadata_table_with_values(output_path, organism_name, producing_chokepoint, "PTOOLS_producing_chokepoints", metabolism_dir, 'None')
-    consuming_df = metadata.metadata_table_with_values(output_path, organism_name, consuming_chokepoint, "PTOOLS_consuming_chokepoints", metabolism_dir, 'None')
-    both_df = metadata.metadata_table_with_values(output_path, organism_name, both_chokepoint, "PTOOLS_both_chokepoints", metabolism_dir, 'None')
+    # Genes outside the model (no reaction in the smarttable) are left empty (NaN);
+    # model genes that are not chokepoints keep 'None'. PTOOLS_in_model marks model genes.
+    model_genes = set(locus_reaction_dict)
+    def in_model_default(values):
+        filled = {gene: 'None' for gene in model_genes}
+        filled.update(values)
+        return filled
+    bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, bc_dict, "PTOOLS_betweenness_centrality", metabolism_dir, None)
+    edges_df = metadata.metadata_table_with_values(output_path, organism_name, edge_dict, "PTOOLS_edges", metabolism_dir, None)
+    producing_df = metadata.metadata_table_with_values(output_path, organism_name, in_model_default(producing_chokepoint), "PTOOLS_producing_chokepoints", metabolism_dir, None)
+    consuming_df = metadata.metadata_table_with_values(output_path, organism_name, in_model_default(consuming_chokepoint), "PTOOLS_consuming_chokepoints", metabolism_dir, None)
+    both_df = metadata.metadata_table_with_values(output_path, organism_name, in_model_default(both_chokepoint), "PTOOLS_both_chokepoints", metabolism_dir, None)
     print(f'---------- 7. Finished ----------')
 
     bcentrality_df = add_network_gene_metrics(bcentrality_df, subgraph, locus_reaction_dict, metabolism_dir, 'PTOOLS', network_settings)
+    bcentrality_df['PTOOLS_in_model'] = bcentrality_df['gene'].isin(model_genes)
     bcentrality_df.to_csv(os.path.join(metabolism_dir, 'PTOOLS_betweenness_centrality.tsv'), sep='\t', index=False)
     return bcentrality_df, edges_df, producing_df, consuming_df, both_df
 
@@ -627,6 +636,38 @@ def pick_mgt_results_dir(metabolism_dir):
 
     return valid_dirs[-1]  # Return the most recent valid directory
 
+def sbml_model_genes(sbml_file, locus_tags):
+    """
+    Return the locus_tags of the genome that are gene products of an SBML model.
+
+    Reads the fbc:geneProduct elements (SBML Level 3 FBC). Each one is matched to a
+    locus_tag through its fbc:label, fbc:id or fbc:name, also without the 'G_' prefix
+    that COBRApy adds to identifiers.
+
+    :param sbml_file: Path to the SBML file.
+    :param locus_tags: Iterable with the locus_tags of the reference genome.
+
+    :return: Set of locus_tags that belong to the model.
+    """
+    import xml.etree.ElementTree as ET
+
+    locus_set = set(locus_tags)
+    genes = set()
+    if not sbml_file or not os.path.isfile(sbml_file):
+        logging.warning(f'SBML file not found; model genes taken from MetaGraphTools results only: {sbml_file}')
+        return genes
+    for _, element in ET.iterparse(sbml_file, events=('end',)):
+        if element.tag.rsplit('}', 1)[-1] != 'geneProduct':
+            continue
+        for key, value in element.attrib.items():
+            if key.rsplit('}', 1)[-1] not in ('label', 'id', 'name'):
+                continue
+            for candidate in (value, value[2:] if value.startswith('G_') else None):
+                if candidate and candidate in locus_set:
+                    genes.add(candidate)
+        element.clear()
+    return genes
+
 def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, container_engine='docker', network_settings=None):
 
     """
@@ -666,10 +707,23 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, con
     if mgt_results_dir:
         consumption_chokepoint_dict, production_chokepoint_dict, betweenness_centrality_dict, degree_dict = parse_mgt_results(mgt_results_dir)
 
-        bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, 0)
-        degree_df = metadata.metadata_table_with_values(output_path, organism_name, degree_dict, "MGT_edges", metabolism_dir, 0)
-        consumption_df = metadata.metadata_table_with_values(output_path, organism_name, consumption_chokepoint_dict, "MGT_consuming_chokepoints", metabolism_dir, 'False')
-        production_df = metadata.metadata_table_with_values(output_path, organism_name, production_chokepoint_dict, "MGT_producing_chokepoints", metabolism_dir, 'False')
+        # Genes outside the metabolic model are left empty (NaN) instead of 0/False,
+        # so they are not confused with model genes that score 0 or are not chokepoints.
+        # MGT_in_model states explicitly which genes belong to the model.
+        locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
+        model_genes = (sbml_model_genes(sbml_file, locus_tags)
+                       | set(consumption_chokepoint_dict) | set(production_chokepoint_dict)
+                       | set(betweenness_centrality_dict)) & set(locus_tags)
+        consumption_values = {gene: 'False' for gene in model_genes}
+        consumption_values.update(consumption_chokepoint_dict)
+        production_values = {gene: 'False' for gene in model_genes}
+        production_values.update(production_chokepoint_dict)
+
+        bcentrality_df = metadata.metadata_table_with_values(output_path, organism_name, betweenness_centrality_dict, "MGT_betweenness_centrality", metabolism_dir, None)
+        degree_df = metadata.metadata_table_with_values(output_path, organism_name, degree_dict, "MGT_edges", metabolism_dir, None)
+        consumption_df = metadata.metadata_table_with_values(output_path, organism_name, consumption_values, "MGT_consuming_chokepoints", metabolism_dir, None)
+        production_df = metadata.metadata_table_with_values(output_path, organism_name, production_values, "MGT_producing_chokepoints", metabolism_dir, None)
+        print(f'Genes in the metabolic model: {len(model_genes)} of {len(locus_tags)}')
 
         print(f'---------- Finished processing external SBML file ----------')
 
@@ -685,6 +739,7 @@ def run_metabolism_sbml (output_path, organism_name, sbml_file, filter_file, con
                                    sep='\t', dtype=str, keep_default_na=False)
         mapping = associations.groupby('Gene')['Reaction'].agg(list).to_dict()
         bcentrality_df = add_network_gene_metrics(bcentrality_df, graph, mapping, metabolism_dir, 'MGT', network_settings)
+        bcentrality_df['MGT_in_model'] = bcentrality_df['gene'].isin(model_genes)
         bcentrality_df.to_csv(os.path.join(metabolism_dir, 'MGT_betweenness_centrality.tsv'), sep='\t', index=False)
         return bcentrality_df, degree_df, consumption_df, production_df
     else:

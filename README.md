@@ -572,6 +572,9 @@ The output columns vary depending on your configuration:
 - `betweenness_centrality`: Measure of the protein's centrality within the metabolic network
 - `edges`: Number of edges connected to the protein in the network
 - `chokepoints`: Whether the protein catalyzes a unique reaction (chokepoint)
+- `MGT_in_model` / `PTOOLS_in_model`: Whether the gene belongs to the metabolic model (SBML gene products / Pathway Tools smarttable)
+
+Columns are prefixed `MGT_` (SBML + MetaGraphTools) or `PTOOLS_` (Pathway Tools). Genes outside the model are left empty in every metabolism column, so they are not confused with model genes that are not chokepoints or have centrality 0. Model genes whose reactions are not in the filtered network (e.g. transport reactions removed with ubiquitous compounds) are also empty in the network metrics (centrality, edges, PageRank, degree).
 
 **Structure columns** (if `structures.enabled: True`):
 
