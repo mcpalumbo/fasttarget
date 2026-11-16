@@ -560,6 +560,26 @@ Once you have downloaded the required databases and set up the configuration fil
 
 The results are stored in a file called `your_organism_name_results_table.tsv` in the folder of your organism.
 
+### Optional KEGG and GO functional annotation
+
+Set `metabolism-annotation.enabled: True` to add organism-specific KEGG metabolic
+pathways, their BRITE categories, and UniProt GO annotations to the final results
+table. This step does not require the network analysis or a container. It uses
+`organism.strain_taxid` to select the exact KEGG and UniProt strain; if KEGG has
+no unambiguous match, set `metabolism-annotation.kegg_organism` explicitly.
+An optional `metabolism-annotation.sbml_file` supplies gene-product identifiers
+and gene-reaction associations. If omitted, an enabled SBML or Pathway Tools
+metabolism section supplies its model. GO terms are matched to genome locus tags
+using UniProt ordered locus names or SBML UniProt cross-references.
+
+The output `organism/<name>/metabolism/functional_annotations.tsv` has one row per
+reference CDS. The `kegg_pathway_evidence` column distinguishes organism gene
+links from pathways inferred through a model reaction. Generic KEGG overview maps
+are excluded from the pathway column so broad categories remain informative.
+GO slim terms and IDs are included by default; set `go_slim: False` to skip the GO ontology
+download. Empty annotations mean no match was found, not that the function is absent.
+This step needs network access to KEGG, UniProt and, for GO slim, the GO ontology.
+
 ### Understanding Output Columns
 
 The output columns vary depending on your configuration:
