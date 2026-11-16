@@ -3,7 +3,7 @@ import configuration
 import pandas as pd
 import argparse
 import multiprocessing
-from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill
+from ftscripts import files, structures, pathways, offtargets, genome, essentiality, metadata, alphafill, functional_annotations
 from datetime import datetime
 import logging
 import sys
@@ -188,6 +188,24 @@ def metabolic_module(config, output_path):
     else:
         logging.info('Metabolic analysis with SBML file not enabled')
     
+    if getattr(config, 'metabolism_annotation', False):
+        try:
+            annotation = config.metabolism_annotation
+            sbml_file = annotation.get('sbml_file')
+            if not sbml_file:
+                for section in (config.metabolism_sbml, config.metabolism_pathwaytools):
+                    if section:
+                        sbml_file = section.get('sbml_file')
+                        break
+            table = functional_annotations.annotate(
+                output_path, organism_name, config.organism['strain_taxid'],
+                sbml_file=sbml_file, organism_code=annotation.get('kegg_organism'),
+                include_slim=annotation.get('go_slim', True),
+            )
+            module_tables.append(table)
+        except Exception as error:
+            record_failure('metabolic functional annotation (KEGG/GO)', error)
+
     return module_tables
     
 def structure_module(config, databases_path, output_path, cpus):
@@ -306,7 +324,25 @@ def alphafill_module(config, output_path, cpus):
     if summary['gene'].duplicated().any():
         raise ValueError('AlphaFill summary must have exactly one row per locus_tag')
     logging.info('AlphaFill finished for %s loci; details in ligands/alphafill', len(summary))
-    return [summary]
+    tables = [summary]
+    settings = alphafill.validate_options(options)
+    structures_dir = os.path.join(output_path, config.organism['name'], 'structures')
+    if settings['pocket_overlap'] and os.path.isdir(structures_dir):
+        # Optional add-on: a failure here must not discard the AlphaFill summary.
+        try:
+            from ftscripts import pocket_overlap
+            tables.append(pocket_overlap.run_pocket_overlap(
+                output_path, config.organism['name'],
+                contact_cutoff=settings['pocket_contact_cutoff'],
+                min_overlap=settings['pocket_min_overlap'],
+                min_mapping_identity=settings['pocket_min_mapping_identity'],
+                exclude_ions=settings['pocket_exclude_ions'],
+                min_contact_residues=settings['pocket_min_contact_residues'],
+                exclude_artifacts=settings['pocket_exclude_artifacts'],
+                exclude_prosthetic=settings['pocket_exclude_prosthetic']))
+        except Exception as error:
+            record_failure('AlphaFill pocket overlap', error)
+    return tables
 
 
 def ligands_module(config, output_path, cpus, databases_path=None):
@@ -320,7 +356,7 @@ def ligands_module(config, output_path, cpus, databases_path=None):
     print_stylized('LIGANDS')
     try:
         tables = alphafill_module(config, output_path, cpus)
-    except Exception:
+    except Exception as error:
         if getattr(config, 'alphafill', False) and config.alphafill.get('strict_errors', False):
             raise
         record_failure('AlphaFill ligand analysis', error)
