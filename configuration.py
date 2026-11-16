@@ -78,6 +78,7 @@ class Config:
         self.colabfold = self._section(config, 'colabfold', self.SECTION_DEFAULTS['colabfold'])
         self.metabolism_pathwaytools = self._section(config, 'metabolism-PathwayTools')
         self.metabolism_sbml = self._section(config, 'metabolism-SBML')
+        self.metabolism_annotation = self._section(config, 'metabolism-annotation')
         self.core = self._section(config, 'core', self.SECTION_DEFAULTS['core'])
         self.metadata = self._section(config, 'metadata')
         self.offtarget = self._section(config, 'offtarget')

@@ -30,6 +30,13 @@ cpus: null
 container_engine: docker
 
 # ---- Metabolism ----
+# Optional pathway and GO annotations. Runs without a metabolic network model.
+metabolism-annotation:
+  enabled: False
+  go_slim: True
+  # kegg_organism: pau  # Optional; otherwise resolve exact organism.strain_taxid.
+  # sbml_file: /path/to/model.xml  # Optional; uses the enabled metabolic model if present.
+
 metabolism-PathwayTools:
   enabled: False
   network_metrics:
