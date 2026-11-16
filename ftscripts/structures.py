@@ -4356,7 +4356,7 @@ def pockets_data_to_dict(directory):
                         with open(file_path, 'r') as f:
                             content = f.read()
                             if content:
-                                pockets_dict[protein_ID] = pockets_parse_output(content)
+                                pockets_dict[protein_ID] = annotate_fpocket_plddt(root, pockets_parse_output(content))
                             else:
                                 pockets_dict[protein_ID] = 'No_pockets'
 
@@ -4364,8 +4364,15 @@ def pockets_data_to_dict(directory):
             print(f'All pockets data saved to {pockets_file}.')
         else:
             pockets_dict = files.json_to_dict(pockets_file)
-            print(f'All pockets data in {pockets_file}.')
-        
+            if _pockets_missing_plddt(pockets_dict) and os.path.basename(os.path.normpath(directory)).endswith('_fpocket'):
+                # Parsed before pocket pLDDT existed: annotate the cached pockets.
+                for pockets in pockets_dict.values():
+                    annotate_fpocket_plddt(directory, pockets)
+                files.dict_to_json(directory, 'all_pockets.json', pockets_dict)
+                print(f'Pocket pLDDT added to {pockets_file}.')
+            else:
+                print(f'All pockets data in {pockets_file}.')
+
         return pockets_dict
     else:
         print(f'{directory} not found.')
@@ -4374,6 +4381,8 @@ def pockets_data_to_dict(directory):
 def pockets_filter(pockets_dict):
     """
     Filter the pockets data to keep only the one with the highest Druggability Score.
+    For predicted models only pockets with mean pLDDT >= POCKET_MIN_MEAN_PLDDT are
+    considered, unless none passes (see select_pocket_by_score).
     Returns a dictionary with the filtered data.
 
     :param pockets_dict: Dictionary with the pockets data.
@@ -4386,18 +4395,8 @@ def pockets_filter(pockets_dict):
         if pockets_dict[prots] == 'No_pockets':
             DS_dict[prots] = 'No_pockets'
         else:
-            n = 0
-            max_pocket = None
-            for pocket, props in pockets.items():
-                for prop, value in props.items():
-                    if prop == 'Druggability Score':
-                        if value > n:
-                            n = value
-                            max_pocket = pocket
-
-            DS_dict[prots] = {}
-            DS_dict[prots]['maxDS'] = n
-            DS_dict[prots]['pocket'] = max_pocket
+            best = select_pocket_by_score(pockets, 'Druggability Score')
+            DS_dict[prots] = {'maxDS': best.pop('score'), **best}
 
     return DS_dict
 
@@ -4427,7 +4426,15 @@ def p2rank_for_structure(pdb, output_path, p2rank_dir, cpus, alphafold=False, co
     if os.path.exists(p2rank_output_dir_tmp):
         shutil.rmtree(p2rank_output_dir_tmp)
 
-    if not os.path.exists(p2rank_output_dir_final) or not os.listdir(p2rank_output_dir_final):       
+    # A failed run leaves its run.log behind, so a non-empty folder is not a
+    # result: without the predictions file it is removed and P2Rank runs again.
+    predictions_file = os.path.join(p2rank_output_dir_final, f'{os.path.basename(pdb)}_predictions.csv')
+    if os.path.isdir(p2rank_output_dir_final) and os.listdir(p2rank_output_dir_final) \
+            and not files.file_check(predictions_file):
+        print(f'P2Rank results for {pdb} are incomplete (no predictions file); running again.')
+        shutil.rmtree(p2rank_output_dir_final)
+
+    if not os.path.exists(p2rank_output_dir_final) or not os.listdir(p2rank_output_dir_final):
 
         try:
     
@@ -4546,7 +4553,7 @@ def p2rank_finder_for_all_loci(output_path, organism_name, cpus, container_engin
             print(f"Locus directory '{locus_dir}' does not exist, skipping.")
 
 
-def p2rank_parse_predictions(csv_file):
+def p2rank_parse_predictions(csv_file, plddt_map=None):
     """
     Parse P2Rank predictions CSV file to extract pocket information.
     
@@ -4554,6 +4561,9 @@ def p2rank_parse_predictions(csv_file):
     (probability of being a ligand-binding site).
     
     :param csv_file: Path to the *_predictions.csv file from P2Rank.
+    :param plddt_map: Per-residue pLDDT of the model (residue_plddt_map), or None
+        for an experimental structure. Every pocket gets mean_plddt and
+        frac_plddt_lt50 from its residue_ids (None for experimental structures).
     :return: Dictionary with pocket information, or 'No_pockets' if no data found.
     """
     if not os.path.exists(csv_file):
@@ -4582,6 +4592,11 @@ def p2rank_parse_predictions(csv_file):
             pockets_dict[pocket_name] = {
                 'probability': float(row['probability'])
             }
+            if plddt_map is None:
+                pockets_dict[pocket_name].update(dict.fromkeys(POCKET_PLDDT_KEYS))
+            else:
+                residues = p2rank_pocket_residues(row.get('residue_ids', ''))
+                pockets_dict[pocket_name].update(pocket_plddt_stats(residues, plddt_map))
         
         return pockets_dict
         
@@ -4635,7 +4650,7 @@ def p2rank_data_to_dict(directory):
                     break
             
             if predictions_file:
-                p2rank_dict[protein_ID] = p2rank_parse_predictions(predictions_file)
+                p2rank_dict[protein_ID] = p2rank_parse_predictions(predictions_file, _model_plddt_map(directory, '_p2rank'))
             else:
                 print(f"Warning: No predictions CSV file found in {directory}")
                 p2rank_dict[protein_ID] = 'No_pockets'
@@ -4643,6 +4658,10 @@ def p2rank_data_to_dict(directory):
             files.dict_to_json(directory, 'p2rank_pockets.json', p2rank_dict)
         else:
             p2rank_dict = files.json_to_dict(p2rank_file)
+            if _pockets_missing_plddt(p2rank_dict):
+                # Parsed before pocket pLDDT existed: parse the predictions again.
+                os.remove(p2rank_file)
+                return p2rank_data_to_dict(directory)
         
         return p2rank_dict
     
@@ -4679,7 +4698,7 @@ def p2rank_data_to_dict(directory):
                         break
                 
                 if predictions_file:
-                    p2rank_dict[protein_ID] = p2rank_parse_predictions(predictions_file)
+                    p2rank_dict[protein_ID] = p2rank_parse_predictions(predictions_file, _model_plddt_map(item_path, '_p2rank'))
                 else:
                     print(f"Warning: No predictions CSV file found in {item_path}")
                     p2rank_dict[protein_ID] = 'No_pockets'
@@ -4688,6 +4707,10 @@ def p2rank_data_to_dict(directory):
         print(f'All P2Rank pocket data saved to {p2rank_file}.')
     else:
         p2rank_dict = files.json_to_dict(p2rank_file)
+        if _pockets_missing_plddt(p2rank_dict):
+            # Parsed before pocket pLDDT existed: parse the predictions again.
+            os.remove(p2rank_file)
+            return p2rank_data_to_dict(directory)
         print(f'All P2Rank pocket data loaded from {p2rank_file}.')
     
     return p2rank_dict
@@ -4696,6 +4719,8 @@ def p2rank_data_to_dict(directory):
 def p2rank_filter(p2rank_dict):
     """
     Filter P2Rank pockets to keep only the one with the highest probability.
+    For predicted models only pockets with mean pLDDT >= POCKET_MIN_MEAN_PLDDT are
+    considered, unless none passes (see select_pocket_by_score).
     
     This function returns a dictionary
     with the best pocket (highest probability) for each structure.
@@ -4709,19 +4734,8 @@ def p2rank_filter(p2rank_dict):
         if pockets == 'No_pockets':
             best_pockets_dict[protein_id] = 'No_pockets'
         else:
-            max_prob = 0
-            max_pocket = None
-            
-            for pocket_name, props in pockets.items():
-                probability = props.get('probability', 0)
-                if probability > max_prob:
-                    max_prob = probability
-                    max_pocket = pocket_name
-            
-            best_pockets_dict[protein_id] = {
-                'max_probability': max_prob,
-                'pocket': max_pocket
-            }
+            best = select_pocket_by_score(pockets, 'probability')
+            best_pockets_dict[protein_id] = {'max_probability': best.pop('score'), **best}
     
     return best_pockets_dict
 
@@ -4730,12 +4744,21 @@ def select_best_pocket_dict(pocket_dict, mode='fpocket'):
     Select the best pocket from a given pocket dictionary based on maximum score.
     From a list of dicts like this {"7PTF": {"max_probability": 0.574, "pocket": "Pocket pocket1 "}, ...} 
     it selects the one with the highest 'max_probability' or 'maxDS' score.
+    Pockets of a model where no pocket passed the pLDDT cutoff (plddt_filter
+    'none_passed') are used only when no other structure has a pocket.
     :param pocket_dict: Dictionary containing pocket data with scores.
     :return: Dictionary with the best pocket information.
     """
     max_score = -float('inf')
     best_pocket = None
     no_pockets_fallback = None
+
+    trusted = [pocket for pocket in pocket_dict
+               if any(isinstance(props, dict) and props.get('plddt_filter') != 'none_passed'
+                      for props in pocket.values())]
+    if trusted:
+        pocket_dict = trusted + [pocket for pocket in pocket_dict
+                                 if not any(isinstance(props, dict) for props in pocket.values())]
 
     for pocket in pocket_dict:
         for struct_name, props in pocket.items():
@@ -4761,6 +4784,52 @@ def select_best_pocket_dict(pocket_dict, mode='fpocket'):
 
     return best_pocket 
 
+def _reference_pocket_folder(locus_dir, folders, suffix):
+    """
+    Return the default-track pocket folder of the locus reference structure.
+
+    A single folder is used as before. With several (a former reference left
+    folders behind after the mapping or PDB availability changed), the folder
+    named after the reference in the locus summary is chosen; if it is absent
+    the locus gets no score rather than a score from a stale structure.
+
+    :param locus_dir: Path to the locus_tag directory.
+    :param folders: Default-track pocket folder names ending in suffix.
+    :param suffix: '_fpocket' or '_p2rank'.
+    :return: Folder name, or None.
+    """
+    if len(folders) == 1:
+        return folders[0]
+    if not folders:
+        return None
+    reference = find_reference_structure_from_summary(locus_dir)
+    if reference:
+        expected = os.path.splitext(os.path.basename(reference[0]))[0] + suffix
+        if expected in folders:
+            return expected
+    locus_tag = os.path.basename(os.path.normpath(locus_dir))
+    logging.warning(f'{locus_tag}: none of {sorted(folders)} matches the reference structure; no {suffix[1:]} score assigned.')
+    return None
+
+def _best_pocket_file_current(path):
+    """
+    Whether a best_DS_fpocket_* / best_prob_p2rank_* file can be reused.
+
+    Files written before pocket pLDDT existed lack mean_plddt and are rebuilt.
+    """
+    return files.file_check(path) and not _best_pockets_missing_plddt(files.json_to_dict(path))
+
+
+def _merged_structure_data_current(merged_file):
+    """Whether the merged structure JSON exists and already carries pocket pLDDT."""
+    if not files.file_check(merged_file):
+        return False
+    merged = files.json_to_dict(merged_file)
+    return not any(_best_pockets_missing_plddt(best)
+                   for locus in merged.values() if isinstance(locus, dict)
+                   for best in locus.values())
+
+
 def merge_structure_data (output_path, organism_name, full_mode=False, colabfold=False, colabfold_all_models=False):
     """
     Merge all the structure data in a single dictionary.
@@ -4781,7 +4850,7 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
 
     all_locus_tags = metadata.ref_gbk_locus(output_path, organism_name)
 
-    if not files.file_check(merged_file):
+    if not _merged_structure_data_current(merged_file):
 
         print('Merging all structure data.')
 
@@ -4814,10 +4883,13 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
                 if default_fpocket_folders:
                     best_pockets_file = os.path.join(pockets_dir, f'best_DS_fpocket_{locus_tag}.json')
                     
-                    if not files.file_check(best_pockets_file):
-                        if not full_mode and len(default_fpocket_folders) == 1:
-                            # Single default structure
-                            fpocket_folder_path = os.path.join(pockets_dir, default_fpocket_folders[0])
+                    if not _best_pocket_file_current(best_pockets_file):
+                        reference_folder = None
+                        if not full_mode:
+                            reference_folder = _reference_pocket_folder(locus_dir, default_fpocket_folders, '_fpocket')
+                        if reference_folder:
+                            # Reference structure (stale folders of former references are ignored)
+                            fpocket_folder_path = os.path.join(pockets_dir, reference_folder)
                             pockets_dict = pockets_data_to_dict(fpocket_folder_path)
                             best_pockets_dict = pockets_filter(pockets_dict)
                             files.dict_to_json(pockets_dir, f'best_DS_fpocket_{locus_tag}.json', best_pockets_dict)
@@ -4845,7 +4917,7 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
                 if colabfold and colabfold_fpocket_folders:
                     colabfold_pockets_file = os.path.join(pockets_dir, f'best_DS_fpocket_colabfold_{locus_tag}.json')
                     
-                    if not files.file_check(colabfold_pockets_file):
+                    if not _best_pocket_file_current(colabfold_pockets_file):
                         # Process first ColabFold result
                         cf_folder_path = os.path.join(pockets_dir, colabfold_fpocket_folders[0])
                         cf_pockets_dict = pockets_data_to_dict(cf_folder_path)
@@ -4871,10 +4943,13 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
                 if default_p2rank_folders:
                     best_p2rank_file = os.path.join(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json')
                     
-                    if not files.file_check(best_p2rank_file):
-                        if not full_mode and len(default_p2rank_folders) == 1:
-                            # Single default structure - pass specific folder path
-                            p2rank_folder_path = os.path.join(p2rank_dir, default_p2rank_folders[0])
+                    if not _best_pocket_file_current(best_p2rank_file):
+                        reference_folder = None
+                        if not full_mode:
+                            reference_folder = _reference_pocket_folder(locus_dir, default_p2rank_folders, '_p2rank')
+                        if reference_folder:
+                            # Reference structure (stale folders of former references are ignored)
+                            p2rank_folder_path = os.path.join(p2rank_dir, reference_folder)
                             p2rank_dict = p2rank_data_to_dict(p2rank_folder_path)
                             best_p2rank_dict = p2rank_filter(p2rank_dict)
                             files.dict_to_json(p2rank_dir, f'best_prob_p2rank_{locus_tag}.json', best_p2rank_dict)
@@ -4903,7 +4978,7 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
                 if colabfold and colabfold_p2rank_folders:
                     colabfold_p2rank_file = os.path.join(p2rank_dir, f'best_prob_p2rank_colabfold_{locus_tag}.json')
                     
-                    if not files.file_check(colabfold_p2rank_file):
+                    if not _best_pocket_file_current(colabfold_p2rank_file):
                         # Process ColabFold p2rank result - pass specific folder path
                         if colabfold_p2rank_folders:
                             colabfold_p2rank_folder_path = os.path.join(p2rank_dir, colabfold_p2rank_folders[0])
@@ -4923,6 +4998,25 @@ def merge_structure_data (output_path, organism_name, full_mode=False, colabfold
         print(f'Merged structure data in {merged_file}.')
         return merged_dict
 
+POCKET_PLDDT_COLUMNS = ('fpocket_mean_plddt', 'fpocket_frac_plddt_lt50', 'p2rank_mean_plddt', 'p2rank_frac_plddt_lt50')
+
+
+def final_structure_table_current(final_table_file):
+    """
+    Whether the final structure summary exists and was built with the pocket pLDDT filter.
+
+    The table must have the pocket pLDDT columns, and the merged structure data next
+    to it must come from best pockets chosen with the current pLDDT cutoff.
+    """
+    if not files.file_check(final_table_file):
+        return False
+    header = pd.read_csv(final_table_file, sep='\t', nrows=0).columns
+    if not all(column in header for column in POCKET_PLDDT_COLUMNS + POCKET_AGREEMENT_COLUMNS):
+        return False
+    merged_file = final_table_file.replace('_final_structure_summary.tsv', '_structure_data.json')
+    return merged_file == final_table_file or _merged_structure_data_current(merged_file)
+
+
 def final_structure_table(output_path, organism_name, full_mode=False, colabfold=False, colabfold_all_models=False):
     """
     Create a final summary table with structure and pocket information for each locus_tag.
@@ -4932,6 +5026,11 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
     best_p2rank_structure, p2rank_probability, p2rank_pocket
     -If colabfold_all_models (added to either mode): colabfold_plddt, colabfold_druggability_score, 
     colabfold_fpocket_pocket, colabfold_p2rank_probability, colabfold_p2rank_pocket
+    -After each fpocket / P2Rank score: <method>_mean_plddt and <method>_frac_plddt_lt50 of
+    that best pocket (mean pLDDT of its residues, fraction with pLDDT < 50). Empty for
+    experimental structures. A table without these columns is rebuilt.
+    -Not full_mode: fpocket_p2rank_shared_residues, fpocket_p2rank_overlap (% of the
+    smaller pocket) and fpocket_p2rank_same_site (overlap >= 50 %) between both best pockets.
 
 
     :param output_path: Directory of the oraganism output.
@@ -4965,6 +5064,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         # ========== FPocket Data ==========
         druggability_score = None
         fpocket_pocket = None
+        fpocket_plddt = dict.fromkeys(POCKET_PLDDT_KEYS)
         
         if fpocket_data and structure_id:
             # For AlphaFold structures, use UniProt ID as key
@@ -4981,12 +5081,14 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                 if pocket_info != 'No_pockets':
                     druggability_score = pocket_info.get('maxDS')
                     fpocket_pocket = pocket_info.get('pocket')
+                    fpocket_plddt = {key: pocket_info.get(key) for key in POCKET_PLDDT_KEYS}
                 else:
                     fpocket_pocket = 'No_pockets'
         
         # ========== P2Rank Data ==========
         p2rank_probability = None
         p2rank_pocket = None
+        p2rank_plddt = dict.fromkeys(POCKET_PLDDT_KEYS)
         
         if p2rank_data and structure_id:
             # For AlphaFold structures, use UniProt ID as key
@@ -5003,15 +5105,28 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                 if pocket_info != 'No_pockets':
                     p2rank_probability = pocket_info.get('max_probability')
                     p2rank_pocket = pocket_info.get('pocket')
+                    p2rank_plddt = {key: pocket_info.get(key) for key in POCKET_PLDDT_KEYS}
                 else:
                     p2rank_pocket = 'No_pockets'
                     
-        return druggability_score, fpocket_pocket, p2rank_probability, p2rank_pocket
+        return {
+            'druggability_score': druggability_score,
+            'fpocket_pocket': fpocket_pocket,
+            'fpocket_mean_plddt': fpocket_plddt['mean_plddt'],
+            'fpocket_frac_plddt_lt50': fpocket_plddt['frac_plddt_lt50'],
+            'p2rank_probability': p2rank_probability,
+            'p2rank_pocket': p2rank_pocket,
+            'p2rank_mean_plddt': p2rank_plddt['mean_plddt'],
+            'p2rank_frac_plddt_lt50': p2rank_plddt['frac_plddt_lt50'],
+        }
+
+    FPOCKET_FIELDS = ('druggability_score', 'fpocket_pocket', 'fpocket_mean_plddt', 'fpocket_frac_plddt_lt50')
+    P2RANK_FIELDS = ('p2rank_probability', 'p2rank_pocket', 'p2rank_mean_plddt', 'p2rank_frac_plddt_lt50')
     
-    if not files.file_check(final_table_file):
+    if not final_structure_table_current(final_table_file):
         
-        if not files.file_check(merged_file):
-            merged_dict = merge_structure_data(output_path, organism_name)
+        if not _merged_structure_data_current(merged_file):
+            merged_dict = merge_structure_data(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
         else:
             merged_dict = files.json_to_dict(merged_file)
 
@@ -5040,18 +5155,12 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
             structure_id = None
             structure_ids = None
             structure_type = None
-            druggability_score = None
-            fpocket_pocket = None
-            p2rank_probability = None
-            p2rank_pocket = None
-            colabfold_best_pocket = None
+            pocket = dict.fromkeys(FPOCKET_FIELDS + P2RANK_FIELDS)
+            agreement = dict.fromkeys(POCKET_AGREEMENT_COLUMNS)
+            cb_pocket = dict.fromkeys(FPOCKET_FIELDS + P2RANK_FIELDS)
             colabfold_plddt = None
             fp_uniprot_id = None
             pr_uniprot_id = None
-            CB_druggability_score = None
-            CB_fpocket_pocket = None
-            CB_p2rank_probability = None
-            CB_p2rank_pocket = None
             best_fpocket_id = None
             best_p2rank_id = None
             
@@ -5076,7 +5185,9 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
 
                         use_colabfold_track = (structure_type == 'ColabFold' and colabfold)
 
-                        druggability_score, fpocket_pocket, p2rank_probability, p2rank_pocket = get_pocket_data(locus_tag, uniprot_id, structure_id, structure_type, data, colabfold_track=use_colabfold_track)
+                        pocket = get_pocket_data(locus_tag, uniprot_id, structure_id, structure_type, data, colabfold_track=use_colabfold_track)
+                        agreement = pocket_method_agreement(os.path.join(structure_dir, locus_tag),
+                                                            pocket['fpocket_pocket'], pocket['p2rank_pocket'])
                 else:
 
                     # Select best structure for FPocket and P2Rank independently
@@ -5102,9 +5213,10 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                             fp_structure_type = fp_row['structure_type']
                             fp_use_colabfold = (fp_structure_type == 'ColabFold' and colabfold)
 
-                            druggability_score, fpocket_pocket, _, _ = get_pocket_data(
+                            fp_data = get_pocket_data(
                                 locus_tag, fp_uniprot_id, fp_structure_id, fp_structure_type, data, colabfold_track=fp_use_colabfold
                             )
+                            pocket.update({field: fp_data[field] for field in FPOCKET_FIELDS})
 
                     # Resolve P2Rank best structure row
                     if best_p2rank_id:
@@ -5116,9 +5228,10 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                             pr_structure_type = pr_row['structure_type']
                             pr_use_colabfold = (pr_structure_type == 'ColabFold' and colabfold)
 
-                            _, _, p2rank_probability, p2rank_pocket = get_pocket_data(
+                            pr_data = get_pocket_data(
                                 locus_tag, pr_uniprot_id, pr_structure_id, pr_structure_type, data, colabfold_track=pr_use_colabfold
                             )
+                            pocket.update({field: pr_data[field] for field in P2RANK_FIELDS})
                                         
                     candidates = [uniprot_id, fp_uniprot_id, pr_uniprot_id]
                     candidates = [x for x in candidates if x is not None and not pd.isna(x)]
@@ -5137,7 +5250,7 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                             print(f'  Warning: Different UniProt ID in ColabFold structure ({cf_uniprot_id}) and mapping ({uniprot_id}) for {locus_tag}.')
                             
                         # Extract ColabFold data from PARALLEL TRACK (colabfold_track=True)
-                        CB_druggability_score, CB_fpocket_pocket, CB_p2rank_probability, CB_p2rank_pocket = get_pocket_data(
+                        cb_pocket = get_pocket_data(
                             cf_locus_tag, cf_uniprot_id, cf_structure_id, 'ColabFold', data, colabfold_track=True
                         )
 
@@ -5146,32 +5259,30 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
                 'uniprot': uniprot_id,
             }
 
+            # pocket pLDDT columns: mean pLDDT of the best pocket's residues and the
+            # fraction below 50; empty for experimental structures.
             if full_mode:
                 row.update({
                     'structure': structure_ids,
                     'best_fpocket_structure': best_fpocket_id,
-                    'druggability_score': druggability_score,
-                    'fpocket_pocket': fpocket_pocket,
+                    **{field: pocket[field] for field in FPOCKET_FIELDS},
                     'best_p2rank_structure': best_p2rank_id,
-                    'p2rank_probability': p2rank_probability,
-                    'p2rank_pocket': p2rank_pocket,
+                    **{field: pocket[field] for field in P2RANK_FIELDS},
+                    # Best pockets may come from different structures: not compared.
+                    **agreement,
                 })
             else:
                 row.update({
                     'structure': structure_id,
-                    'druggability_score': druggability_score,
-                    'fpocket_pocket': fpocket_pocket,
-                    'p2rank_probability': p2rank_probability,
-                    'p2rank_pocket': p2rank_pocket,
+                    **{field: pocket[field] for field in FPOCKET_FIELDS + P2RANK_FIELDS},
+                    # Do the best fpocket and P2Rank pockets point to the same site?
+                    **agreement,
                 })
 
             if colabfold_all_models:
                 row.update({
                     'colabfold_plddt': colabfold_plddt,
-                    'colabfold_druggability_score': CB_druggability_score,
-                    'colabfold_fpocket_pocket': CB_fpocket_pocket,
-                    'colabfold_p2rank_probability': CB_p2rank_probability,
-                    'colabfold_p2rank_pocket': CB_p2rank_pocket,
+                    **{f'colabfold_{field}': cb_pocket[field] for field in FPOCKET_FIELDS + P2RANK_FIELDS},
                 })
 
             rows.append(row)
@@ -5183,9 +5294,14 @@ def final_structure_table(output_path, organism_name, full_mode=False, colabfold
         final_df.to_csv(final_table_file, sep='\t', index=False)
         print(f'\nFinal structure summary table saved to {final_table_file}')
         print(f'  Total genes: {len(final_df)}')
-        print(f'  Genes with structures: {final_df["structure"].notna().sum()}')
-        print(f'  Genes with FPocket pockets: {final_df["fpocket_pocket"].notna().sum()}')
-        print(f'  Genes with P2Rank pockets: {final_df["p2rank_pocket"].notna().sum()}')
+        # astype(str) above turns missing structures into 'None'/'nan', and genes
+        # without pockets carry 'No_pockets', so notna() alone counts every gene.
+        def _present(column):
+            values = final_df[column].astype(str).str.strip()
+            return int((final_df[column].notna() & ~values.isin(['', 'None', 'nan', 'NaN', 'No_pockets'])).sum())
+        print(f'  Genes with structures: {_present("structure")}')
+        print(f'  Genes with FPocket pockets: {_present("fpocket_pocket")}')
+        print(f'  Genes with P2Rank pockets: {_present("p2rank_pocket")}')
         return final_df
     
     else:
@@ -5322,6 +5438,9 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         'gpu_option': bool(gpu_option),
         'resolution_cutoff': resolution_cutoff,
         'coverage_cutoff': coverage_cutoff,
+        # PDB references are checked against the residues resolved in the file,
+        # not the residue range UniProt lists (validate_reference_structures).
+        'reference_coverage': 'observed_residues',
     }
     _check_structure_pipeline_parameters(output_path, organism_name, structure_dir, final_table_path, pipeline_parameters)
 
@@ -5453,6 +5572,18 @@ def pipeline_structures(output_path, organism_name, specie_taxid, strain_taxid, 
         print(f'\nResults saved to: {final_table_path}')
         print(f'Structure data: {os.path.join(structure_dir, f"{organism_name}_structure_data.json")}')
     
+    elif not final_structure_table_current(final_table_path):
+        # Built before pocket pLDDT existed: the pocket runs are reused, only the
+        # parsed pockets, the merged data and the table are rebuilt.
+        print(f'{final_table_path} predates the pocket pLDDT filter; rebuilding it from the existing pocket results.')
+        merge_structure_data(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
+        final_df = final_structure_table(output_path, organism_name, full_mode=full_mode, colabfold=colabfold, colabfold_all_models=colabfold_all_models)
+        files.write_manifest(final_table_path, pipeline_parameters, extra={'genes': len(final_df)})
+        try:
+            generate_structure_report(output_path, organism_name)
+        except Exception as e:
+            logging.exception(f'Error generating report: {e}')
+
     else:
         print(f'Final structure summary table already exists at {final_table_path}, loading existing data.')
         # Keep "NA" as string (valid chain name) instead of treating it as NaN
