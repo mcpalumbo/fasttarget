@@ -385,6 +385,38 @@ def _ligands(activities):
     return pd.DataFrame(rows, columns=LIGAND_COLUMNS)
 
 
+def _cache_key(source, proteins_fasta, **options):
+    """Digest of what the outputs depend on: options, database file, proteins and this code.
+
+    The 5 GB database is identified by size and mtime_ns (it is only ever replaced
+    by a new download), the protein FASTA and the module by content.
+    """
+    from ftscripts import files
+    st = source.stat()
+    payload = {"options": options, "database": [str(source), st.st_size, st.st_mtime_ns],
+               "proteins": files.sha256_file(proteins_fasta) if proteins_fasta else None,
+               "code": files.sha256_file(__file__)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _cached_run(root, cache_key):
+    """Previous completed run with the same cache key, as run_chembl returns it, or None."""
+    try:
+        metadata = json.loads((root/"run_metadata.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(metadata, dict) or metadata.get("status") != "completed" or metadata.get("cache_key") != cache_key:
+        return None
+    try:
+        summary = pd.read_csv(root/"chembl_summary.tsv", sep="\t", keep_default_na=False,
+            dtype={"gene":str, "chembl_status":str, "chembl_compounds":str})
+    except (OSError, ValueError):
+        return None
+    if list(summary.columns) != list(SUMMARY_COLUMNS):
+        return None
+    return {"summary":summary, "metadata":metadata, "output_dir":root}
+
+
 def run_chembl(database_path, taxid, output_dir, *, proteins_fasta=None, taxonomy_dir=None, taxids=None,
                include_human=False, min_identity=90, min_coverage=70, threads=4, direct_only=False,
                min_confidence_score=None, require_pchembl=False, exclude_problematic=True, include_species_context=True):
@@ -395,6 +427,14 @@ def run_chembl(database_path, taxid, output_dir, *, proteins_fasta=None, taxonom
         raise ValueError("min_confidence_score must be between 0 and 9")
     expanded,taxonomy = expand_taxids(taxid, taxonomy_dir, taxids)
     root = Path(output_dir).expanduser().resolve(); root.mkdir(parents=True, exist_ok=True)
+    cache_key = _cache_key(source, proteins_fasta, taxid=int(taxid), taxids=expanded,
+        include_human=include_human, min_identity=min_identity, min_coverage=min_coverage,
+        direct_only=direct_only, min_confidence_score=min_confidence_score, require_pchembl=require_pchembl,
+        exclude_problematic=exclude_problematic, include_species_context=include_species_context)
+    cached = _cached_run(root, cache_key)
+    if cached is not None:
+        LOG.info("ChEMBL results reused from %s: database, proteins and options unchanged", root)
+        return cached
     metadata = {"status":"running", "taxid":int(taxid), "taxids":expanded, "taxonomy":taxonomy,
                 "database":source.name, "started_at":datetime.now(timezone.utc).isoformat(),
                 "filters":{"direct_only":direct_only, "min_confidence_score":min_confidence_score,
@@ -410,6 +450,7 @@ def run_chembl(database_path, taxid, output_dir, *, proteins_fasta=None, taxonom
                 "compound_identity":"parent_molregno with original fallback if parent dictionary missing",
                 "chembl_homology_identity":"not_provided_by_source", "summary_scope":"union of retained evidence; levels in separate detail table"}
     metadata["database_file"] = {"bytes":source.stat().st_size, "mtime_ns":source.stat().st_mtime_ns}
+    metadata["cache_key"] = cache_key
     for directory in list(source.parents)[:4]:
         manifest = directory/"metadata.json"
         if manifest.is_file():

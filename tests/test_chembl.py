@@ -398,3 +398,38 @@ def test_rows_without_a_compound_are_not_ligands():
     ])
 
     assert chembl._ligands(activities).empty
+
+
+def _completed_run(root, key):
+    import json
+    import pandas as pd
+    from ftscripts.chembl import SUMMARY_COLUMNS
+    pd.DataFrame([{"gene": "G1", "chembl_status": "no_target_mapping", "chembl_target_count": 0,
+                   "chembl_compounds": "", "chembl_compound_count": 0}],
+                 columns=SUMMARY_COLUMNS).to_csv(root / "chembl_summary.tsv", sep="\t", index=False)
+    (root / "run_metadata.json").write_text(json.dumps({"status": "completed", "cache_key": key}))
+
+
+def test_a_completed_run_with_the_same_key_is_reused(tmp_path):
+    from ftscripts.chembl import _cache_key, _cached_run
+    db = tmp_path / "chembl.db"; db.write_bytes(b"x")
+    key = _cache_key(db, None, taxid=1)
+    _completed_run(tmp_path, key)
+    cached = _cached_run(tmp_path, key)
+    assert cached["summary"]["chembl_compounds"].tolist() == [""]
+    assert cached["summary"]["chembl_target_count"].tolist() == [0]
+
+
+def test_options_database_and_status_invalidate_the_reuse(tmp_path):
+    import json
+    import os
+    from ftscripts.chembl import _cache_key, _cached_run
+    db = tmp_path / "chembl.db"; db.write_bytes(b"x")
+    key = _cache_key(db, None, taxid=1)
+    assert _cache_key(db, None, taxid=2) != key
+    st = db.stat(); os.utime(db, ns=(st.st_atime_ns, st.st_mtime_ns + 1))
+    assert _cache_key(db, None, taxid=1) != key
+    _completed_run(tmp_path, key)
+    assert _cached_run(tmp_path, "other") is None
+    (tmp_path / "run_metadata.json").write_text(json.dumps({"status": "running", "cache_key": key}))
+    assert _cached_run(tmp_path, key) is None
